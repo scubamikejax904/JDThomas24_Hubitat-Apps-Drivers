@@ -1,8 +1,8 @@
 definition(
-    name: "BatteryMonitor 2.0",
+    name: "Battery Monitor 2.0",
     namespace: "custom",
     author: "Jdthomas24",
-    description: "Battery monitoring with alerts and reports.",
+    description: "Advanced battery monitoring with categorized alerts and reports.",
     category: "Convenience",
     iconUrl: "",
     iconX2Url: ""
@@ -13,75 +13,70 @@ preferences {
 }
 
 def configPage() {
-    dynamicPage(name: "configPage", title: "Battery Monitor", install: true, uninstall: true) {
+    dynamicPage(name: "configPage", title: "Battery Monitor 2.0", install: true, uninstall: true) {
 
         section("Battery Devices") {
-
             input "autoDiscover", "bool",
-                    title: "Automatically discover battery devices",
-                    defaultValue: true
+                title: "Automatically discover battery devices",
+                defaultValue: true
 
             input "devices", "capability.battery",
-                    title: "Manual device selection",
-                    multiple: true,
-                    required: false
+                title: "Manual device selection (optional)",
+                multiple: true,
+                required: false
         }
 
         section("Battery Thresholds") {
-
             input "lowLevel", "number",
-                    title: "Low Battery Threshold (%)",
-                    defaultValue: 25
+                title: "Low Battery Threshold (%)",
+                defaultValue: 25
 
             input "criticalLevel", "number",
-                    title: "Critical Battery Threshold (%)",
-                    defaultValue: 10
+                title: "Critical Battery Threshold (%)",
+                defaultValue: 10
         }
 
-        section("Monitoring Frequency") {
-
+        section("Scan Frequency") {
             input "checkInterval", "enum",
-                    title: "Battery Scan Frequency",
-                    options: [
-                        "15":"Every 15 minutes",
-                        "30":"Every 30 minutes",
-                        "60":"Every hour",
-                        "180":"Every 3 hours",
-                        "480":"Every 8 hours"
-                    ],
-                    defaultValue: "60"
+                title: "Battery Scan Frequency",
+                options: [
+                    "15":"Every 15 minutes",
+                    "30":"Every 30 minutes",
+                    "60":"Every hour",
+                    "180":"Every 3 hours",
+                    "480":"Every 8 hours"
+                ],
+                defaultValue: "60"
         }
 
         section("Notifications") {
-
             input "enablePush", "bool",
-                    title: "Enable Notifications",
-                    defaultValue: true
+                title: "Enable Notifications",
+                defaultValue: true
 
             input "notifyDevices", "capability.notification",
-                    title: "Notification Devices",
-                    multiple: true,
-                    required: false
+                title: "Notification Devices",
+                multiple: true,
+                required: false
         }
 
         section("Battery Reports") {
-
             input "dailySummary", "bool",
-                    title: "Enable Battery Reports",
-                    defaultValue: true
+                title: "Enable Battery Reports",
+                defaultValue: true
 
             input "summaryFrequency", "enum",
-                    title: "Report Frequency",
-                    options: [
-                        "1":"Every Day",
-                        "2":"Every Other Day",
-                        "3":"Every 3 Days",
-                        "7":"Weekly"
-                    ],
-                    defaultValue: "1"
+                title: "Report Frequency",
+                options: [
+                    "1":"Every Day",
+                    "2":"Every Other Day",
+                    "3":"Every 3 Days",
+                    "7":"Weekly"
+                ],
+                defaultValue: "1"
 
             input "summaryTime", "time",
-                    title: "Report Time"
+                title: "Report Time"
         }
 
         section("Options") {
@@ -101,13 +96,11 @@ def updated() {
 }
 
 def initialize() {
-
-    log.info "Battery Monitor Initialized"
+    log.info "Battery Monitor 3.1 Initialized"
 
     state.lastAlert = [:]
 
     def batteryDevices = getBatteryDevices()
-
     if(batteryDevices) {
         subscribe(batteryDevices, "battery", batteryEvent)
     }
@@ -120,25 +113,19 @@ def initialize() {
 }
 
 def scheduleBatteryScan() {
-
     switch(checkInterval) {
-
         case "15":
             runEvery15Minutes(scanBatteries)
             break
-
         case "30":
             runEvery30Minutes(scanBatteries)
             break
-
         case "60":
             runEvery1Hour(scanBatteries)
             break
-
         case "180":
             runEvery3Hours(scanBatteries)
             break
-
         case "480":
             schedule("0 0 */8 ? * *", scanBatteries)
             break
@@ -146,101 +133,73 @@ def scheduleBatteryScan() {
 }
 
 def getBatteryDevices() {
-
     def devs = []
-
     if(autoDiscover) {
         devs = location.allDevices.findAll { it.hasCapability("Battery") }
     }
-
     if(devices) {
         devs += devices
     }
-
-    devs = devs.unique { it.id }
-
-    return devs
+    return devs.unique { it.id }
 }
 
 def batteryEvent(evt) {
-
     def level = evt.value?.toInteger()
     if(level == null) return
-
     evaluateBattery(evt.device, level)
 }
 
 def scanBatteries() {
-
-    log.debug "Scanning batteries"
-
+    log.debug "Scanning battery devices"
     getBatteryDevices().each { device ->
-
         try {
-
             def level = device.currentValue("battery")
-
             if(level != null) {
                 evaluateBattery(device, level.toInteger())
             }
-
         } catch(e) {
-
             log.warn "Battery read error for ${device.displayName}"
         }
     }
 }
 
 def evaluateBattery(device, level) {
-
     if(state.lastAlert[device.id] == level) return
 
     if(level <= criticalLevel) {
-
         notify("CRITICAL: ${device.displayName} battery is ${level}%")
         state.lastAlert[device.id] = level
         return
     }
 
     if(level <= lowLevel) {
-
         notify("LOW: ${device.displayName} battery is ${level}%")
         state.lastAlert[device.id] = level
     }
 }
 
 def notify(msg) {
-
     log.info msg
-
     if(!enablePush) return
 
     if(notifyDevices) {
-
         notifyDevices.each {
             it.deviceNotification(msg)
         }
-
     } else {
-
         sendPushMessage(msg)
     }
 }
 
 def summaryScheduler() {
-
     def interval = summaryFrequency.toInteger()
-
     if(!state.lastSummary) {
         state.lastSummary = now()
         sendBatteryReport()
         return
     }
-
     def days = (now() - state.lastSummary) / (1000*60*60*24)
-
     if(days >= interval) {
-
         sendBatteryReport()
         state.lastSummary = now()
     }
@@ -249,31 +208,55 @@ def summaryScheduler() {
 def sendBatteryReport() {
 
     def devs = getBatteryDevices()
-
-    if(!devs) {
-
+    if(!devs || devs.size() == 0) {
         notify("Battery Report: No battery devices found")
         return
     }
 
-    def msg = []
-    msg << "Battery Report (${devs.size()} devices)"
+    def critical = []
+    def low = []
+    def good = []
 
     devs.each { d ->
-
         try {
-
             def level = d.currentValue("battery")
-
-            if(level != null) {
-                msg << "${level}% - ${d.displayName}"
-            }
-
+            if(level == null) return
+            level = level.toInteger()
+            if(level <= criticalLevel) critical << [name: d.displayName, level: level]
+            else if(level <= lowLevel) low << [name: d.displayName, level: level]
+            else good << [name: d.displayName, level: level]
         } catch(e) {
-
             log.warn "Battery report error for ${d.displayName}"
         }
     }
 
+    // Sort each category
+    critical = critical.sort { it.level }
+    low = low.sort { it.level }
+    good = good.sort { it.level }
+
+    def msg = []
+    msg << "Battery Report (${devs.size()} Devices)"
+
+    if(critical) {
+        msg << ""
+        msg << "CRITICAL BATTERIES"
+        critical.each { msg << "${it.level}% - ${it.name}" }
+    }
+
+    if(low) {
+        msg << ""
+        msg << "LOW BATTERIES"
+        low.each { msg << "${it.level}% - ${it.name}" }
+    }
+
+    if(good) {
+        msg << ""
+        msg << "GOOD BATTERIES"
+        good.each { msg << "${it.level}% - ${it.name}" }
+    }
+
     notify(msg.join("\n"))
 }
+
+
