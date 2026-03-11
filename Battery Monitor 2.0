@@ -1,3 +1,4 @@
+
 definition(
     name: "Battery Monitor 2.0",
     namespace: "custom",
@@ -96,6 +97,7 @@ def initialize() {
     log.info "Battery Monitor 2.0 Initialized"
 
     state.lastAlert = [:]
+    state.summaryRun = false
 
     def batteryDevices = getBatteryDevices()
     if(batteryDevices) {
@@ -166,6 +168,9 @@ def scanBatteries() {
 }
 
 def evaluateBattery(device, level) {
+    // Skip immediate alerts if summary report is running
+    if(state.summaryRun) return
+
     if(state.lastAlert[device.id] == level) return
 
     if(level <= criticalLevel) {
@@ -206,17 +211,11 @@ def notify(msg) {
 }
 
 def summaryScheduler() {
-    def interval = summaryFrequency.toInteger()
-    if(!state.lastSummary) {
-        state.lastSummary = now()
-        sendBatteryReport()
-        return
-    }
-    def days = (now() - state.lastSummary) / (1000*60*60*24)
-    if(days >= interval) {
-        sendBatteryReport()
-        state.lastSummary = now()
-    }
+    log.debug "Running scheduled battery summary"
+    state.summaryRun = true
+    sendBatteryReport()
+    state.lastSummary = now()
+    state.summaryRun = false
 }
 
 def sendBatteryReport() {
@@ -279,6 +278,4 @@ def sendBatteryReport() {
 
     notify(msg.join("\n"))
 }
-
-
 
