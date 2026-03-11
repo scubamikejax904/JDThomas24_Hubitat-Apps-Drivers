@@ -27,13 +27,9 @@ def configPage() {
         }
 
         section("Battery Thresholds") {
-            input "lowLevel", "number",
-                title: "Low Battery Threshold (%)",
-                defaultValue: 25
-
             input "criticalLevel", "number",
                 title: "Critical Battery Threshold (%)",
-                defaultValue: 10
+                defaultValue: 25
         }
 
         section("Scan Frequency") {
@@ -90,13 +86,14 @@ def installed() {
 }
 
 def updated() {
+    log.info "Battery Monitor 2.0 updated. Rescheduling tasks."
     unsubscribe()
     unschedule()
     initialize()
 }
 
 def initialize() {
-    log.info "Battery Monitor 3.1 Initialized"
+    log.info "Battery Monitor 2.0 Initialized"
 
     state.lastAlert = [:]
 
@@ -108,7 +105,12 @@ def initialize() {
     scheduleBatteryScan()
 
     if(dailySummary && summaryTime) {
-        schedule(summaryTime, summaryScheduler)
+        try {
+            schedule(summaryTime, summaryScheduler)
+            log.info "Battery summary scheduled at ${summaryTime}"
+        } catch(e) {
+            log.error "Failed to schedule summary: ${e}"
+        }
     }
 }
 
@@ -172,8 +174,20 @@ def evaluateBattery(device, level) {
         return
     }
 
-    if(level <= lowLevel) {
-        notify("LOW: ${device.displayName} battery is ${level}%")
+    if(level > criticalLevel && level <= 70) {
+        notify("GOOD: ${device.displayName} battery is ${level}%")
+        state.lastAlert[device.id] = level
+        return
+    }
+
+    if(level > 70 && level < 100) {
+        notify("HIGH CHARGE: ${device.displayName} battery is ${level}%")
+        state.lastAlert[device.id] = level
+        return
+    }
+
+    if(level == 100) {
+        notify("FULL CHARGE: ${device.displayName} battery is ${level}%")
         state.lastAlert[device.id] = level
     }
 }
@@ -206,7 +220,6 @@ def summaryScheduler() {
 }
 
 def sendBatteryReport() {
-
     def devs = getBatteryDevices()
     if(!devs || devs.size() == 0) {
         notify("Battery Report: No battery devices found")
@@ -214,8 +227,9 @@ def sendBatteryReport() {
     }
 
     def critical = []
-    def low = []
     def good = []
+    def high = []
+    def full = []
 
     devs.each { d ->
         try {
@@ -223,40 +237,48 @@ def sendBatteryReport() {
             if(level == null) return
             level = level.toInteger()
             if(level <= criticalLevel) critical << [name: d.displayName, level: level]
-            else if(level <= lowLevel) low << [name: d.displayName, level: level]
-            else good << [name: d.displayName, level: level]
+            else if(level <= 70) good << [name: d.displayName, level: level]
+            else if(level < 100) high << [name: d.displayName, level: level]
+            else full << [name: d.displayName, level: level]
         } catch(e) {
             log.warn "Battery report error for ${d.displayName}"
         }
     }
 
-    // Sort each category
     critical = critical.sort { it.level }
-    low = low.sort { it.level }
     good = good.sort { it.level }
+    high = high.sort { it.level }
+    full = full.sort { it.name }
 
     def msg = []
     msg << "Battery Report (${devs.size()} Devices)"
 
     if(critical) {
         msg << ""
-        msg << "CRITICAL BATTERIES"
+        msg << "CRITICAL BATTERIES (≤${criticalLevel}%)"
         critical.each { msg << "${it.level}% - ${it.name}" }
-    }
-
-    if(low) {
-        msg << ""
-        msg << "LOW BATTERIES"
-        low.each { msg << "${it.level}% - ${it.name}" }
     }
 
     if(good) {
         msg << ""
-        msg << "GOOD BATTERIES"
+        msg << "GOOD BATTERIES (26–70%)"
         good.each { msg << "${it.level}% - ${it.name}" }
+    }
+
+    if(high) {
+        msg << ""
+        msg << "HIGH CHARGE BATTERIES (71–99%)"
+        high.each { msg << "${it.level}% - ${it.name}" }
+    }
+
+    if(full) {
+        msg << ""
+        msg << "FULL CHARGE (100%)"
+        full.each { msg << "${it.level}% - ${it.name}" }
     }
 
     notify(msg.join("\n"))
 }
+
 
 
