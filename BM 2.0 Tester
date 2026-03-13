@@ -1,0 +1,277 @@
+definition(
+    name: "Battery Monitor 2.9.2",
+    namespace: "custom",
+    author: "Jdthomas24",
+    description: "Advanced Hubitat battery monitoring with diagnostics, analytics, and enhanced summaries (trends separated).",
+    category: "Convenience",
+    iconUrl: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience.png",
+    iconX2Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png",
+    iconX3Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png"
+)
+
+preferences {
+    page(name:"mainPage")
+    page(name:"summaryPage")
+    page(name:"trendsPage")
+    page(name:"historyPage")
+}
+
+def mainPage(){
+    dynamicPage(name:"mainPage",title:"Battery Monitor 2.9.2",install:true,uninstall:true){
+
+        section("Battery Devices"){
+            input "autoDiscover","bool",
+                title:"Auto discover battery devices",
+                defaultValue:true
+
+            input "devices","capability.battery",
+                title:"Manual device selection",
+                multiple:true,
+                required:false
+        }
+
+        section("Daily Summary"){
+            input "summaryTime","time",title:"Daily report time"
+        }
+
+        section("Diagnostics"){
+            input "rapidDrainThreshold","number",
+                title:"Rapid drain threshold (% per day)",
+                defaultValue:2
+
+            input "staleDays","number",
+                title:"Device stale threshold (days)",
+                defaultValue:7
+        }
+
+        section("Scan Interval"){
+            input "scanInterval","enum",
+                title:"Battery scan frequency",
+                options:["1":"Hourly","3":"Every 3 Hours","6":"Every 6 Hours"],
+                defaultValue:"3"
+        }
+
+        section("Notifications"){
+            input "enablePush","bool",
+                title:"Enable summary notifications",
+                defaultValue:true
+
+            input "notifyDevices","capability.notification",
+                title:"Notification devices",
+                multiple:true,
+                required:false
+        }
+
+        section("Tools"){
+            href "trendsPage", title:"Battery Trends"
+            href "historyPage", title:"Battery Replacement History"
+        }
+
+        section("Manual Actions"){
+            href "summaryPage", title:"Run Summary Now", description:"Click to generate summary immediately"
+        }
+    }
+}
+
+// --- initialize, schedule, and battery updates ---
+def installed(){ initialize() }
+def updated(){ unsubscribe(); unschedule(); initialize() }
+
+def initialize(){
+    log.info "Battery Monitor 2.9.2 initialized"
+    if(state.history == null) state.history = [:]
+    if(state.trend == null) state.trend = [:]
+    if(state.replacements == null) state.replacements = []
+
+    subscribe(getBatteryDevices(),"battery",batteryHandler)
+    scheduleScan()
+
+    if(summaryTime){
+        schedule(summaryTime,scheduledSummary)
+    }
+}
+
+def scheduleScan(){
+    switch(scanInterval){
+        case "1": runEvery1Hour(scanBatteries); break
+        case "3": runEvery3Hours(scanBatteries); break
+        case "6": schedule("0 0 */6 ? * *",scanBatteries); break
+    }
+}
+
+def getBatteryDevices(){
+    def devs = []
+    if(autoDiscover){
+        def auto = location.devices?.findAll{ it.hasCapability("Battery") } ?: []
+        devs.addAll(auto)
+    }
+    if(devices) devs.addAll(devices)
+    return devs.unique{ it.id }
+}
+
+def batteryHandler(evt){
+    def level = evt.value?.toInteger()
+    if(level == null) return
+    updateBattery(evt.device, level)
+}
+
+def scanBatteries(){
+    getBatteryDevices()?.each{ device ->
+        def level = device.currentValue("battery")?.toInteger()
+        if(level != null) updateBattery(device, level)
+    }
+}
+
+def updateBattery(device, level){
+    if(!state.history[device.id]){
+        state.history[device.id] = [lastLevel: level, lastDate: now(), drain: 0]
+        return
+    }
+
+    def data = state.history[device.id]
+    detectReplacement(device, level, data.lastLevel)
+
+    def days = (now() - data.lastDate) / (1000*60*60*24)
+    if(days > 0){
+        def drain = (data.lastLevel - level) / days
+        if(drain >= 0) data.drain = drain.round(2)
+        updateTrend(device, drain)
+    }
+
+    data.lastLevel = level
+    data.lastDate = now()
+}
+
+def detectReplacement(device, newLevel, oldLevel){
+    if(oldLevel == null) return
+    if(newLevel >= 95 && oldLevel <= 30){
+        state.replacements << [device: device.displayName, date: new Date().format("yyyy-MM-dd HH:mm",location.timeZone)]
+        log.info "Battery replaced in ${device.displayName}"
+    }
+}
+
+def updateTrend(device, drain){
+    if(drain == null) return
+    if(drain < 0.2) state.trend[device.id] = "🟢 Stable"
+    else if(drain < 0.5) state.trend[device.id] = "🟡 Draining"
+    else state.trend[device.id] = "🔴 Rapid Drain"
+}
+
+def getDrain(device){ return state.history?.get(device.id)?.drain ?: 0 }
+def getEstimatedDays(device){ 
+    def level = device.currentValue("battery")?.toInteger()
+    def drain = getDrain(device)
+    if(!level || drain <= 0) return "Unknown"
+    return (level / drain).round(0)
+}
+
+def getHealth(device){
+    def drain = getDrain(device)
+    if(drain < 0.2) return "🟢 Excellent"
+    if(drain < 0.5) return "🟡 Good"
+    if(drain < 1) return "🟠 Fair"
+    return "🔴 Poor"
+}
+
+def getBatteryLevelDisplay(level){
+    if(level == null) return "N/A"
+    if(level <= 25) return "🔴 ${level}%"
+    if(level <= 70) return "🟠 ${level}%"
+    if(level < 100) return "🟢 ${level}%"
+    return "💯 ${level}%"
+}
+
+def isDeviceStale(device){
+    def last = state.history?.get(device.id)?.lastDate
+    if(!last) return false
+    def days = (now() - last) / (1000*60*60*24)
+    return days >= staleDays
+}
+
+// --- Summary Page ---
+def summaryPage(){
+    dynamicPage(name:"summaryPage",title:"Battery Summary",install:false){
+        section("Summary"){ paragraph buildSummary(showTrend=false) }
+        section("Back"){ href "mainPage",title:"Return" }
+    }
+}
+
+// --- Battery Trends Page ---
+def trendsPage(){
+    dynamicPage(name:"trendsPage",title:"Battery Trends",install:false){
+        section("Device Trends"){
+            def devs = getBatteryDevices() ?: []
+            if(devs.size() == 0){ paragraph "No battery devices found." }
+            else {
+                def msg = "📊 Battery Trends for ${devs.size()} devices\n\n"
+                devs.each{ device ->
+                    def trend = state.trend?.get(device.id) ?: "Unknown"
+                    def drain = getDrain(device)
+                    def level = device.currentValue("battery")?.toInteger() ?: 0
+                    def colorLevel = getBatteryLevelDisplay(level)
+                    msg += "• ${device.displayName} - Battery: ${colorLevel}, Drain/day: ${drain}%, Trend: ${trend}\n"
+                }
+                paragraph msg.trim()
+            }
+        }
+        section("Back"){ href "mainPage",title:"Return" }
+    }
+}
+
+// --- History / Replacement ---
+def historyPage(){
+    dynamicPage(name:"historyPage",title:"Battery Replacement History",install:false){
+        section("Replacement Log"){
+            def replacements = state.replacements ?: []
+            if(replacements.size() == 0){ paragraph "No battery replacements detected." }
+            else {
+                def logText="🔋 Battery Replacement History\n\n"
+                replacements.each{ logText += "• ${it.device} - Replaced on ${it.date}\n" }
+                paragraph logText.trim()
+            }
+        }
+        section("Back"){ href "mainPage", title:"Return" }
+    }
+}
+
+// --- Build summary ---
+def buildSummary(showTrend=false){
+    def devs = getBatteryDevices() ?: []
+    devs = devs.findAll{ it.currentValue("battery") != null }.sort{ it.currentValue("battery")?.toInteger() }
+
+    def critical=[], good=[], high=[], full=[]
+    devs.each { device ->
+        def level = device.currentValue("battery")?.toInteger()
+        if(level==null) return
+        def label = "• ${device.displayName} - ${level}% | Drain/day: ${getDrain(device)}% | Health: ${getHealth(device)}"
+        if(showTrend) label += " | Trend: ${state.trend?.get(device.id) ?: 'Unknown'} | Stale: ${isDeviceStale(device)?'Yes':'No'}"
+        if(level <= 25) critical << label
+        else if(level <= 70) good << label
+        else if(level < 100) high << label
+        else full << label
+    }
+
+    def msg = "🔋 Battery Report for ${devs.size()} devices\n\n"
+    if(critical) msg += "⚠️ CRITICAL (≤25%)\n" + critical.join("\n") + "\n\n"
+    if(good) msg += "🟡 GOOD (26–70%)\n" + good.join("\n") + "\n\n"
+    if(high) msg += "🟢 HIGH (71–99%)\n" + high.join("\n") + "\n\n"
+    if(full) msg += "💯 FULL (100%)\n" + full.join("\n") + "\n\n"
+    return msg.trim()
+}
+
+// --- Scheduled Summary ---
+def scheduledSummary(){
+    def report = buildSummary(showTrend=false)
+    log.info report
+    if(!enablePush) return
+    notifyDevices?.each{ it.deviceNotification(report) }
+}
+
+// --- Manual trigger ---
+def runSummaryNow(){
+    def report = buildSummary(showTrend=false)
+    log.info report
+    if(enablePush && notifyDevices) notifyDevices.each{ it.deviceNotification(report) }
+    return report
+}
+
