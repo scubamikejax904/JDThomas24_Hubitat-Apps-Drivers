@@ -30,6 +30,7 @@
     "**⚠ Auto discovery only:** select which battery devices to monitor.",
     "Battery trends may be overestimated until the device reports at least 5 battery events.",
     "Daily report sorts devices by Critical, Good, and Full categories.",
-    "Manual battery replacement is supported via the Replacement page."
+    "Manual battery replacement is supported via the Replacement page.",
+    "📢 Release Note: Monitor all your Hubitat battery devices with ease. Auto-discover devices, track battery health, drain, and estimated days remaining, receive daily summary reports sorted by Critical, Good, and Full charge, view battery trends, and log replacements. Simple setup with push/device notifications."
   ]
 }
