@@ -1,0 +1,38 @@
+{
+  "packageName": "Battery Monitor 2.0",
+  "packageNamespace": "jdthomas24",
+  "packageVersion": "2.0",
+  "author": "Jdthomas24",
+  "description": "Advanced Hubitat battery monitoring with analytics, trends, and replacement tracking. Auto-discover devices, monitor battery health, track replacements, and receive daily reports.",
+  "category": "Convenience",
+  "iconUrl": "https://raw.githubusercontent.com/hubitat/HubitatPublic/master/examples/icons/battery.png",
+  "iconX2Url": "https://raw.githubusercontent.com/hubitat/HubitatPublic/master/examples/icons/battery@2x.png",
+  "iconX3Url": "https://raw.githubusercontent.com/hubitat/HubitatPublic/master/examples/icons/battery@2x.png",
+  "appFiles": [
+    {
+      "type": "app",
+      "name": "Battery Monitor 2.0",
+      "sourceUrl": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code",
+      "requiredCapabilities": ["Battery", "Notification"]
+    }
+  ],
+  "pages": [
+    "mainPage",
+    "summaryPage",
+    "trendsPage",
+    "historyPage",
+    "replacementPage",
+    "manualReplacementPage",
+    "manualReplacementConfirmPage"
+  ],
+  "requiredCapabilities": [
+    "Battery",
+    "Notification"
+  ],
+  "notes": [
+    "⚠ Auto discovery only: select which battery devices to monitor.",
+    "Battery trends may be overestimated until the device reports at least 5 battery events.",
+    "Daily report sorts devices by Critical, Good, and Full categories.",
+    "Manual battery replacement is supported via Replacement page."
+  ]
+}
