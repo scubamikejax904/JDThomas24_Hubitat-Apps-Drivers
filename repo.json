@@ -1,14 +1,17 @@
 {
-  "author": "Jason Thomas",
-  "gitHubUrl": "https://github.com/jdthomas24/Hubitat-Apps-Drivers",
-  "packages": [
+  "packageName": "Battery Monitor 2.0",
+  "author": "Jdthomas24",
+  "version": "2.0.0",
+  "category": "Utility",
+  "description": "Advanced Hubitat battery monitoring with analytics, trends, and replacement tracking. Auto-discover devices, monitor battery health, track replacements, and receive daily reports.",
+  "dateReleased": "2026/03/16",
+  "minimumHEVersion": "2.3.0",
+  "apps": [
     {
-      "id": "battery-monitor-2",
       "name": "Battery Monitor 2.0",
-      "category": "Convenience",
-      "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/main/Battery%20Monitor%202.0/packageManifest.json",
-      "description": "Battery Monitor 2.0 for Hubitat with auto discovery, battery trends, and daily reports."
+      "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
+      "required": true,
+      "primary": true
     }
   ]
 }
-
