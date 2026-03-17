@@ -7,7 +7,7 @@
       "name": "Battery Monitor 2.0",
       "category": "Convenience",
       "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/main/Battery%20Monitor%202.0/packageManifest.json",
-      "description": "Battery Monitor 2.0 for Hubitat with auto discovery, battery tracking, and daily battery reports."
+      "description": "Battery Monitor 2.0 for Hubitat with auto discovery, battery tracking, and daily reports."
     }
   ]
 }
