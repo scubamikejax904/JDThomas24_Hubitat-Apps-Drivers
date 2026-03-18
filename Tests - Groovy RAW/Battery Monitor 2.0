@@ -17,14 +17,11 @@ preferences {
     page(name:"replacementPage")
     page(name:"manualReplacementPage")
     page(name:"manualReplacementConfirmPage")
-
-    // ✅ ADDED
     page(name:"infoPage")
 }
 
 // =====================
-// MAIN PAGE (UPDATED)
-// Added custom app label
+// MAIN PAGE
 // =====================
 def mainPage(){
     dynamicPage(name:"mainPage",title:(settings?.customAppName ?: "Battery Monitor 2.2"),install:true,uninstall:true){
@@ -69,7 +66,6 @@ def mainPage(){
             href "replacementPage",title:"Manual Battery Replacement"
         }
 
-        // ✅ ADDED
         section("Help & Info"){
             href "infoPage",
                  title: "Battery Health Guide",
@@ -79,7 +75,7 @@ def mainPage(){
 }
 
 // =====================
-// CORE LOGIC (UNCHANGED)
+// CORE LOGIC
 // =====================
 def installed(){ initialize() }
 def updated(){
@@ -87,7 +83,6 @@ def updated(){
     unschedule()
     initialize()
 
-    // ✅ Fix: Update Hubitat app instance label if customAppName is set
     if(settings?.customAppName){
         app.updateLabel(settings.customAppName)
     }
@@ -201,7 +196,6 @@ def health(device){
     return "Poor"
 }
 
-// ✅ UPDATED COLOR LOGIC
 def getBatteryLevelDisplay(level){
     if(level<=25) return "🔴 ${level}%"
     if(level<=70) return "🟠 ${level}%"
@@ -221,18 +215,18 @@ def getLastReport(device){
     return "Just now"
 }
 
+// =====================
+// PAGES
+// =====================
 def summaryPage(){
     dynamicPage(name:"summaryPage",title:"Battery Summary",install:false){
         section("Battery Summary"){
-
             def devs = autoDevices.findAll{ it.currentValue("battery") != null }
             devs = devs.sort{ a,b -> a.currentValue("battery") <=> b.currentValue("battery") }
-
             if(!devs){ paragraph "No battery devices found."; return }
 
             def table="<table style='width:100%; border-collapse: collapse;'>"
             table+="<tr style='font-weight:bold;'><td>Device</td><td>Battery</td><td>Drain</td><td>Est Days</td><td>Health</td><td>Last Report</td></tr>"
-
             devs.each{ device ->
                 def level=device.currentValue("battery")?.toInteger()
                 def color=getBatteryLevelDisplay(level)
@@ -246,7 +240,6 @@ def summaryPage(){
                 table+="</tr>"
             }
             table+="</table>"
-
             paragraph table
         }
     }
@@ -255,16 +248,12 @@ def summaryPage(){
 def trendsPage(){
     dynamicPage(name:"trendsPage",title:"Battery Trends",install:false){
         section("Battery Trend Analysis"){
-
-            paragraph "⚠ Note: Trends may be overestimated until the device reports at least 5 battery events. " +
-                      "Trend accuracy improves as more data is collected over time."
-
+            paragraph "⚠ Note: Trends may be overestimated until the device reports at least 5 battery events. Trend accuracy improves as more data is collected over time."
             def devs = autoDevices.findAll{ it.currentValue("battery") != null }
             if(!devs){ paragraph "No battery devices."; return }
 
             def table="<table style='width:100%; border-collapse: collapse;'>"
             table+="<tr style='font-weight:bold;'><td>Device</td><td>Battery</td><td>Drain/day</td><td>Trend</td></tr>"
-
             devs.each{ device ->
                 def level=device.currentValue("battery")?.toInteger()
                 def color=getBatteryLevelDisplay(level)
@@ -275,7 +264,6 @@ def trendsPage(){
                 table+="<td>${state.trend?.get(device.id) ?: 'Stable'}</td>"
                 table+="</tr>"
             }
-
             table+="</table>"
             paragraph table
         }
@@ -296,8 +284,7 @@ def replacementPage(){
     dynamicPage(name:"replacementPage",title:"Battery Replacement",install:false){
         section("Manual Replacement"){
             paragraph "Note: Only batteries replaced at ≤40% are automatically registered in the app. Manual replacement outside this threshold will not appear in replacement analytics."
-            input "replaceDevice","enum",title:"Select Device",options:autoDevices.collectEntries{[(it.id):it.displayName]},required:false
-            input "replaceConfirm","bool",title:"Confirm Battery Replaced",required:false
+            href "manualReplacementPage", title:"Register Manual Battery Replacement"
         }
         section("Replacement History"){
             state.replacements.reverse().each{ paragraph "${it.date} — ${it.device}" }
@@ -305,13 +292,55 @@ def replacementPage(){
     }
 }
 
-// ✅ UPDATED DAILY REPORT COLORS
+// =====================
+// MANUAL REPLACEMENT PAGES
+// =====================
+def manualReplacementPage() {
+    dynamicPage(name:"manualReplacementPage", title:"Manual Battery Replacement", install:false){
+        section("Select Device"){
+            input "replaceDeviceManual","enum",
+                  title:"Select Device",
+                  options:autoDevices.collectEntries{[(it.id):it.displayName]},
+                  required:true
+        }
+        section("Confirm Replacement"){
+            input "replaceConfirmManual","bool",
+                  title:"Confirm Battery Replaced",
+                  required:true
+        }
+        section(){
+            href "manualReplacementConfirmPage", title:"Submit Replacement"
+        }
+    }
+}
+
+def manualReplacementConfirmPage() {
+    dynamicPage(name:"manualReplacementConfirmPage", title:"Confirm Replacement", install:false){
+        section("Replacement Registered"){
+            if(replaceDeviceManual && replaceConfirmManual){
+                def device = autoDevices.find{ it.id == replaceDeviceManual }
+                state.replacements << [
+                    device: device.displayName,
+                    date: new Date().format("yyyy-MM-dd HH:mm", location.timeZone)
+                ]
+                state.history[device.id].drain = 0.3
+                state.trend[device.id] = "Stable"
+                paragraph "Battery replacement for '${device.displayName}' has been recorded."
+            } else {
+                paragraph "Please select a device and confirm replacement."
+            }
+        }
+        section(){
+            href "replacementPage", title:"Back to Replacement Page"
+        }
+    }
+}
+
+// =====================
+// SCHEDULED SUMMARY
+// =====================
 def scheduledSummary(){
-
-    def devices = autoDevices.collect{ d ->
-        [device: d, level: d.currentValue("battery")?.toInteger()]
-    }.findAll{ it.level != null }
-
+    def devices = autoDevices.collect{ d -> [device: d, level: d.currentValue("battery")?.toInteger()] }.findAll{ it.level != null }
     devices = devices.sort{ it.level }
 
     def critical = []
@@ -354,10 +383,9 @@ def scheduledSummary(){
     }
 }
 
-//////////////////////////////////////////////////////////
-// ✅ NEW PAGE (ONLY ADDITION)
-//////////////////////////////////////////////////////////
-
+// =====================
+// INFO PAGE
+// =====================
 def infoPage(){
     dynamicPage(name:"infoPage", title:"Battery Health Guide", install:false){
 
