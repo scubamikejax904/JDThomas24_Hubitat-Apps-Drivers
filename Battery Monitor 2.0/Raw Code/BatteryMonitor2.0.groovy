@@ -1,5 +1,5 @@
 definition(
-    name: "Battery Monitor 2.0",
+    name: "Battery Monitor 2.0", // DO NOT CHANGE (HPM SAFE)
     namespace: "jdthomas24",
     author: "Jdthomas24",
     description: "Advanced Hubitat battery monitoring with analytics, trends and replacement tracking.",
@@ -20,11 +20,18 @@ preferences {
 }
 
 // =====================
-// MAIN PAGE (PATCHED)
-// Bolded top note; removed bottom note
+// MAIN PAGE (UPDATED)
+// Added custom app label
 // =====================
 def mainPage(){
-    dynamicPage(name:"mainPage",title:"Battery Monitor 2.0",install:true,uninstall:true){
+    dynamicPage(name:"mainPage",title:(settings?.customAppName ?: "Battery Monitor 2.0"),install:true,uninstall:true){
+
+        section("App Display Name"){
+            input "customAppName","text",
+                  title:"Custom App Name (optional)",
+                  description:"Change how the app name appears in Hubitat UI",
+                  required:false
+        }
 
         section("Auto Battery Discovery"){
             paragraph "**⚠ Important: The app will automatically detect all devices reporting battery levels. " +
@@ -62,11 +69,19 @@ def mainPage(){
 }
 
 // =====================
-// Existing initialization, scan, event handlers, and utility functions
-// No changes here
+// CORE LOGIC (UNCHANGED)
 // =====================
 def installed(){ initialize() }
-def updated(){ unsubscribe(); unschedule(); initialize() }
+def updated(){
+    unsubscribe()
+    unschedule()
+    initialize()
+
+    // ✅ Fix: Update Hubitat app instance label if customAppName is set
+    if(settings?.customAppName){
+        app.updateLabel(settings.customAppName)
+    }
+}
 
 def initialize(){
     if(!state.history) state.history=[:]
@@ -175,12 +190,14 @@ def health(device){
     if(drain<1.2) return "Fair"
     return "Poor"
 }
+
+// ✅ UPDATED COLOR LOGIC
 def getBatteryLevelDisplay(level){
     if(level<=25) return "🔴 ${level}%"
     if(level<=70) return "🟠 ${level}%"
-    if(level<100) return "🟢 ${level}%"
-    return "💯 ${level}%"
+    return "🟢 ${level}%"
 }
+
 def getLastReport(device){
     def last = state.history?.get(device.id)?.lastDate
     if(!last) return "Never"
@@ -229,7 +246,6 @@ def trendsPage(){
     dynamicPage(name:"trendsPage",title:"Battery Trends",install:false){
         section("Battery Trend Analysis"){
 
-            // Clarified trend note
             paragraph "⚠ Note: Trends may be overestimated until the device reports at least 5 battery events. " +
                       "Trend accuracy improves as more data is collected over time."
 
@@ -269,6 +285,7 @@ def historyPage(){
 def replacementPage(){
     dynamicPage(name:"replacementPage",title:"Battery Replacement",install:false){
         section("Manual Replacement"){
+            paragraph "Note: Only batteries replaced at ≤40% are automatically registered in the app. Manual replacement outside this threshold will not appear in replacement analytics."
             input "replaceDevice","enum",title:"Select Device",options:autoDevices.collectEntries{[(it.id):it.displayName]},required:false
             input "replaceConfirm","bool",title:"Confirm Battery Replaced",required:false
         }
@@ -278,10 +295,7 @@ def replacementPage(){
     }
 }
 
-// =====================
-// Patched daily report
-// Only change in scheduledSummary() section
-// =====================
+// ✅ UPDATED DAILY REPORT COLORS
 def scheduledSummary(){
 
     def devices = autoDevices.collect{ d ->
@@ -312,7 +326,7 @@ def scheduledSummary(){
     }
 
     if(good){
-        report += "🟡 Good Devices\n"
+        report += "🟢 Good Devices\n"
         good.each{ report += "${it.device.displayName} : ${it.level}%\n" }
         report += "\n"
     }
