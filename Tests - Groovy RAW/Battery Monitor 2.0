@@ -308,17 +308,23 @@ def manualReplacementPage() {
         section("Select Devices"){
             input "replaceDevicesManual","enum",
                   title:"Select Devices (can choose multiple)",
-                  options:autoDevices.collectEntries{[(it.id):it.displayName]},
+                  options:autoDevices.sort{ it.displayName?.toLowerCase() }.collectEntries{[(it.id):it.displayName]},
                   multiple:true,
-                  required:true
+                  required:false
         }
         section("Confirm Replacement"){
             input "replaceConfirmManual","bool",
                   title:"Confirm Battery Replaced",
-                  required:true
+                  required:false,
+                  submitOnChange:true
         }
         section(){
-            href "manualReplacementConfirmPage", title:"Submit Replacement"
+            if(replaceConfirmManual){
+                href "manualReplacementConfirmPage", title:"Submit Replacement"
+            } else {
+                paragraph "<span style='color:gray;'>Submit disabled until confirmation is checked</span>"
+            }
+            href "replacementPage", title:"⬅ Cancel / Back"
         }
     }
 }
