@@ -204,6 +204,7 @@ def detectReplacement(device, newLevel, oldLevel) {
         state.history[device.id].lastLevel = newLevel
         state.history[device.id].lastDate = now()
         state.history[device.id].justReplaced = true
+        state.history[device.id].replacedTime = now()
     }
 }
 
@@ -237,8 +238,22 @@ def getBatteryLevelDisplay(level, device=null){
     else if(level<=70) label = "🟠 ${level}%"
     else label = "🟢 ${level}%"
 
-    if(device && state.history?.get(device.id)?.justReplaced){
-        label += " (Recently Replaced)"
+    def data = state.history?.get(device.id)
+    def showTag = data?.justReplaced
+    def replacedTime = data?.replacedTime
+
+    if(showTag && replacedTime){
+    def hours = (now() - replacedTime) / (1000*60*60)
+    if(hours >= 24){
+        state.history[device.id].justReplaced = false
+        showTag = false
+    }
+}
+
+if(device && showTag){
+    label += " (Recently Replaced)"
+}
+
     }
 
     return label
@@ -433,6 +448,7 @@ def manualReplacementConfirmPage() {
                         state.history[dev.id]?.lastLevel = dev.currentValue("battery")?.toInteger() ?: 100
                         state.history[dev.id]?.lastDate = now()
                         state.history[dev.id]?.justReplaced = true
+                        state.history[dev.id].replacedTime = now()
                     }
                 }
 
