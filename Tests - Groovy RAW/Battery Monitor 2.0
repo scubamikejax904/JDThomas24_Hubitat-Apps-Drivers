@@ -340,27 +340,32 @@ def trendsPage(){
     }
 }
 
-def historyPage(){
-    dynamicPage(name:"historyPage",title:"Battery Replacement History",install:false){
-        section("Replacement Log"){
-            def replacements = state.replacements ?: []
-            if(replacements.size() == 0){
-                paragraph "No battery replacements detected."
-                return
-            }
+def replacementPage(){
+    dynamicPage(name:"replacementPage",title:"Battery Replacement",install:false){
+        section("Manual Replacement"){
+            paragraph "Note: Only batteries replaced at ≤40% are automatically registered in the app. Manual replacement outside this threshold will not appear in replacement analytics."
+            href "manualReplacementPage", title:"Register Manual Battery Replacement"
+        }
 
-            // Keep only latest replacement per device
-            def latestReps = replacements.groupBy{ it.device }.collect{ k,v ->
+        section("Replacement History"){
+            def reps = state.replacements ?: []
+            if(reps.size() == 0){ 
+                paragraph "No battery replacements detected." 
+                return
+            } 
+
+            // Deduplicate: keep only the latest replacement per device
+            def latestReps = reps.groupBy{ it.device }.collect{ k,v ->
                 v.max{ new Date().parse("yyyy-MM-dd HH:mm", it.date) }  // pick latest
             }
 
-            // Sort alphabetically by device name
+            // Sort alphabetically by device
             latestReps = latestReps.sort{ a,b -> a.device <=> b.device }
 
             // Create HTML table
             def table = "<table style='width:100%; border-collapse: collapse;'>"
-            
-            // Add bold note row at top
+
+            // Add bold note row at top with colored A/M
             table += "<tr><td colspan='4' style='font-weight:bold; padding-bottom:5px;'>" +
                      "<span style='color:green;'>A</span> = Auto replacement &nbsp;&nbsp; " +
                      "<span style='color:blue;'>M</span> = Manual replacement</td></tr>"
@@ -375,7 +380,7 @@ def historyPage(){
                 def typeCode = r.manual ? "<span style='color:blue;font-weight:bold;'>M</span>" 
                                         : "<span style='color:green;font-weight:bold;'>A</span>"
 
-                // Format date only
+                // Format date only (no time)
                 def dateOnly = r.date.split(" ")[0]
 
                 table += "<tr>"
@@ -391,6 +396,7 @@ def historyPage(){
             paragraph table
         }
     }
+}
 }
 def replacementPage(){
     dynamicPage(name:"replacementPage",title:"Battery Replacement",install:false){
