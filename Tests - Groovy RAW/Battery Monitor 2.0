@@ -386,23 +386,35 @@ def replacementPage(){
 }
 
 // --- Manual Replacement Page ---
-def manualReplacementPage(){
-    dynamicPage(name:"manualReplacementPage", title:"Manual Battery Replacement", install:false){
+def replacementPage(){
+    dynamicPage(name:"replacementPage", title:"Battery Replacement", install:false){
+        
+        // Bold note for users
         section("Manual Replacement"){
-            paragraph "<b>Note:</b> Only batteries replaced at ≤40% are automatically registered in the app. Manual replacement outside this threshold will not appear in replacement analytics."
-
+            paragraph "**Note: Only batteries replaced at ≤40% are automatically registered in the app. Manual replacement outside this threshold will not appear in replacement analytics.**"
+            
+            // Device selection for manual replacement
             input "replaceDevicesManual", "enum",
-                  title: "Select devices to manually replace",
-                  multiple: true,
-                  required: false,
-                  options: autoDevices?.collect{ it.displayName }?.sort(),
-                  submitOnChange: true
+                title: "Select devices to mark as replaced",
+                multiple: true,
+                required: false,
+                options: autoDevices.collect { it.id.toString() },
+                submitOnChange: true
         }
-
-        // Done button just returns to main page
-        href "mainPage", title:"Done", description:"Return to main app",
-             params: [clearSelection: true]
+        
+        // Done button returns to main page and clears selections
+        section("") {
+            href "mainPage",
+                title: "Done",
+                description: "Return to main app",
+                state: null
+        }
     }
+}
+
+// Clear previously selected manual replacement devices at page load
+if(app?.getSetting("replaceDevicesManual")){
+    app?.updateSetting("replaceDevicesManual",[value:[],type:"enum"])
 }
 
 // Clear selection helper when redirecting back
