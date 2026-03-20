@@ -386,89 +386,22 @@ def replacementPage(){
 }
 
 // --- Manual Replacement Page ---
-def replacementPage(){
-    dynamicPage(name:"replacementPage", title:"Battery Replacement", install:false){
-        
-        // Bold note for users
-        section("Manual Replacement"){
-            paragraph "**Note: Only batteries replaced at ≤40% are automatically registered in the app. Manual replacement outside this threshold will not appear in replacement analytics.**"
-            
-            // Device selection for manual replacement
-            input "replaceDevicesManual", "enum",
-                title: "Select devices to mark as replaced",
-                multiple: true,
-                required: false,
-                options: autoDevices.collect { it.id.toString() },
-                submitOnChange: true
-        }
-        
-        // Done button returns to main page and clears selections
-        section("") {
-            href "mainPage",
-                title: "Done",
-                description: "Return to main app",
-                state: null
-        }
-    }
-}
+def manualReplacementPage(){
+    dynamicPage(name:"manualReplacementPage", title:"Manual Battery Replacement", install:false){
+        section("Register Manual Battery Replacement"){
+            paragraph "<b>Note: Only batteries replaced at ≤40% are automatically registered in the app. Manual replacement outside this threshold will not appear in replacement analytics.</b>"
 
-// Clear previously selected manual replacement devices at page load
-if(app?.getSetting("replaceDevicesManual")){
-    app?.updateSetting("replaceDevicesManual",[value:[],type:"enum"])
-}
-
-// Clear selection helper when redirecting back
-def mainPage(Map params = [:]){
-    // Clear manual replacement selections if requested
-    if(params.clearSelection){
-        app?.updateSetting("replaceDevicesManual",[value:[],type:"enum"])
-    }
-
-    dynamicPage(name:"mainPage",title:(settings?.customAppName ?: "Battery Monitor 2.3"),install:true,uninstall:true){
-        section("App Display Name"){
-            input "customAppName","text",
-                  title:"Custom App Name (optional)",
-                  description:"Change how the app name appears in Hubitat UI",
-                  required:false
-        }
-
-        section("Auto Battery Discovery"){
-            paragraph "**⚠ Important: The app will automatically detect all devices reporting battery levels. " +
-                      "Please select the devices you want to actively monitor from the list below. " +
-                      "Only selected devices will be tracked for trends, battery health, and notifications.**"
-            input "autoDevices","capability.battery",
-                  title:"Select battery devices to monitor",
+            input "replaceDevicesManual","enum",
+                  title:"Select devices manually replaced",
                   multiple:true,
-                  required:true
+                  required:false,
+                  options: autoDevices.collect{ it.displayName },
+                  submitOnChange:true   // <-- moved correctly inside the input
         }
 
-        section("Battery Scan Interval"){
-            input "scanInterval","enum",
-            title:"Scan Frequency",
-            options:["1":"Hourly","3":"Every 3 Hours","6":"Every 6 Hours"],
-            defaultValue:"3"
-        }
-
-        section("Daily Report"){
-            input "summaryTime","time",title:"Daily report time"
-        }
-
-        section("Notifications"){
-            input "enablePush","bool",title:"Enable notifications",defaultValue:true
-            input "notifyDevices","capability.notification",title:"Notification devices",multiple:true,required:false
-        }
-
-        section("Reports"){
-            href "summaryPage",title:"Battery Summary"
-            href "trendsPage",title:"Battery Trends"
-            href "historyPage",title:"Battery Replacement History"
-            href "replacementPage",title:"Manual Battery Replacement"
-        }
-
-        section("Help & Info"){
-            href "infoPage",
-                 title: "Battery Health Guide",
-                 description: "Learn what battery drain, health, and trends mean"
+        // Always allow returning to main page even if no devices selected
+        section(){
+            href "mainPage", title:"Done", description:"Return to Main Page"
         }
     }
 }
