@@ -157,7 +157,7 @@ def updateBattery(device,level){
     detectReplacement(device,level,data.lastLevel)
 
     def days=(now()-data.lastDate)/(1000*60*60*24)
-    if(days>0){
+    if(days>0 && !data.justReplaced){
         def drain=(data.lastLevel-level)/days
         if(drain>0){
             data.samples << drain
@@ -171,6 +171,7 @@ def updateBattery(device,level){
 
     data.lastLevel=level
     data.lastDate=now()
+    data.justReplaced = false
 }
 
 // =====================
@@ -203,6 +204,7 @@ def detectReplacement(device, newLevel, oldLevel) {
         state.trend[device.id] = "Stable"
         state.history[device.id].lastLevel = newLevel
         state.history[device.id].lastDate = now()
+        state.history[device.id].justReplaced = true
     }
 }
 
@@ -228,11 +230,19 @@ def health(device){
     return "Poor"
 }
 
-def getBatteryLevelDisplay(level){
-    level = level ?: 100
-    if(level<=25) return "🔴 ${level}%"
-    if(level<=70) return "🟠 ${level}%"
-    return "🟢 ${level}%"
+def getBatteryLevelDisplay(level, device=null){
+    level = (level instanceof Number ? level : null) ?: 100
+
+    def label = ""
+    if(level<=25) label = "🔴 ${level}%"
+    else if(level<=70) label = "🟠 ${level}%"
+    else label = "🟢 ${level}%"
+
+    if(device && state.history?.get(device.id)?.justReplaced){
+        label += " (Recently Replaced)"
+    }
+
+    return label
 }
 
 def getLastReport(device){
@@ -278,7 +288,7 @@ def summaryPage(){
                 def est = estDays(device)
                 def h = health(device)
                 def last = getLastReport(device)
-                def color = getBatteryLevelDisplay(level)
+                def color = getBatteryLevelDisplay(level, device)
 
                 table+="<tr>"
                 table+="<td>${level<=25?'⚠️ ':''}${device.displayName}</td>"
@@ -309,7 +319,7 @@ def trendsPage(){
             table+="<tr style='font-weight:bold;'><td>Device</td><td>Battery</td><td>Drain/day</td><td>Trend</td></tr>"
             devs.each{ device ->
                 def level=device.currentValue("battery")?.toInteger() ?: 100
-                def color=getBatteryLevelDisplay(level)
+                def color=getBatteryLevelDisplay(level, device)
                 table+="<tr>"
                 table+="<td>${device.displayName}</td>"
                 table+="<td>${color}</td>"
@@ -413,6 +423,7 @@ def manualReplacementConfirmPage() {
                         state.trend[device.id] = "Stable"
                         state.history[device.id].lastLevel = level
                         state.history[device.id].lastDate = now()
+                        state.history[device.id].justReplaced = true
                     }
                 }
                 paragraph "Battery replacement for ${replaceDevicesManual.size()} device(s) has been recorded."
