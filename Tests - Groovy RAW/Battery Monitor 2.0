@@ -394,44 +394,57 @@ def historyPage(){
 }
 def replacementPage(){
     dynamicPage(name:"replacementPage",title:"Battery Replacement",install:false){
+        // Manual Replacement Section
         section("Manual Replacement"){
-            paragraph "Note: Only batteries replaced at ≤40% are automatically registered in the app. Manual replacement outside this threshold will not appear in replacement analytics."
+            paragraph "Note: Only batteries replaced at ≤40% are automatically registered in the app. " +
+                      "Manual replacement outside this threshold will not appear in replacement analytics."
             href "manualReplacementPage", title:"Register Manual Battery Replacement"
         }
+
+        // Replacement History Section
         section("Replacement History"){
             def reps = state.replacements ?: []
             if(reps.size() == 0){ 
                 paragraph "No battery replacements detected." 
                 return
+            } 
+
+            // Deduplicate: keep only the latest replacement per device
+            def latestReps = reps.groupBy{ it.device }.collect{ k,v ->
+                v.max{ new Date().parse("yyyy-MM-dd HH:mm", it.date) }  // pick latest
             }
 
-            // Sort alphabetically by device name
-            reps = reps.sort{ a, b -> a.device <=> b.device }
+            // Sort alphabetically by device
+            latestReps = latestReps.sort{ a,b -> a.device <=> b.device }
 
-            // Build table
+            // Create HTML table
             def table = "<table style='width:100%; border-collapse: collapse;'>"
+
+            // Add bold note row at top with colored A/M
+            table += "<tr><td colspan='4' style='font-weight:bold; padding-bottom:5px;'>" +
+                     "<span style='color:green;'>A</span> = Auto replacement &nbsp;&nbsp; " +
+                     "<span style='color:blue;'>M</span> = Manual replacement</td></tr>"
+
             table += "<tr style='font-weight:bold; border-bottom:1px solid #000;'><td>Date</td><td>Device</td><td>Level</td><td>Type</td></tr>"
 
-            reps.each{ r ->
+            latestReps.each{ r ->
                 def deviceObj = autoDevices.find{ it.displayName == r.device }
                 def level = r.level ?: deviceObj?.currentValue("battery") ?: "N/A"
 
-                // Colored type code: A = Auto, M = Manual
-                def typeCode = r.manual ? "<span style='color:blue;font-weight:bold'>M</span>" 
-                                         : "<span style='color:green;font-weight:bold'>A</span>"
+                // Determine type code with color
+                def typeCode = r.manual ? "<span style='color:blue;font-weight:bold;'>M</span>" 
+                                        : "<span style='color:green;font-weight:bold;'>A</span>"
+
+                // Format date only (no time)
+                def dateOnly = r.date.split(" ")[0]
 
                 table += "<tr>"
-                table += "<td>${r.date.split(' ')[0]}</td>"  // show only date
+                table += "<td>${dateOnly}</td>"
                 table += "<td>${r.device}</td>"
                 table += "<td>${level}%</td>"
                 table += "<td>${typeCode}</td>"
                 table += "</tr>"
             }
-
-            // Add notes row
-            table += "<tr><td colspan='4' style='padding-top:8px; font-size:small;'>"
-            table += "<b>Notes:</b> A = Auto-detected replacement (≤40% → ≥95%), M = Manual replacement"
-            table += "</td></tr>"
 
             table += "</table>"
 
@@ -444,6 +457,12 @@ def manualReplacementPage() {
     if(state.replacements == null) state.replacements = []
 
     dynamicPage(name:"manualReplacementPage", title:"Manual Battery Replacement", install:false){
+        // Top note
+        section(){
+            paragraph "<b>⚠ Note:</b> Battery replacement history is visible on the <b>Battery Replacement</b> tab."
+        }
+
+        // Select Devices
         section("Select Devices"){
             input "replaceDevicesManual","enum",
                   title:"Select Devices (can choose multiple)",
@@ -451,11 +470,15 @@ def manualReplacementPage() {
                   multiple:true,
                   required:false
         }
+
+        // Confirm Replacement
         section("Confirm Replacement"){
             input "replaceConfirmManual","bool",
                   title:"Confirm Battery Replaced",
                   required:false
         }
+
+        // Submit and Back
         section(){
             href "manualReplacementConfirmPage", title:"Submit Replacement"
         }
@@ -464,56 +487,6 @@ def manualReplacementPage() {
         }
     }
 }
-
-def manualReplacementConfirmPage() {
-    if(state.replacements == null) state.replacements = []
-
-    dynamicPage(name:"manualReplacementConfirmPage", title:"Confirm Replacement", install:false){
-        section("Replacement Registered"){
-            if(replaceDevicesManual && replaceConfirmManual){
-                replaceDevicesManual.each { deviceId ->
-                    def device = autoDevices.find{ it.id == deviceId }
-                    if(device){
-                        def level = device.currentValue("battery")?.toInteger() ?: 100
-                        level = level ?: 100   // ensure no nulls
-
-                        // Ensure device history exists
-                        if(!state.history[device.id]){
-                            state.history[device.id] = [
-                                lastLevel: level,
-                                lastDate: now(),
-                                drain: 0.3,
-                                samples: []
-                            ]
-                            state.trend[device.id] = "Stable"
-                        }
-
-                    state.replacements << [
-                       device: device.displayName,
-                       level: level,
-                       date: new Date().format("yyyy-MM-dd HH:mm", location.timeZone),
-                       manual: true
-                          ]
-
-                        // Update history after manual replacement
-                        state.history[device.id].drain = 0.3
-                        state.trend[device.id] = "Stable"
-                        state.history[device.id].lastLevel = level
-                        state.history[device.id].lastDate = now()
-                        state.history[device.id].justReplaced = true
-                    }
-                }
-                paragraph "Battery replacement for ${replaceDevicesManual.size()} device(s) has been recorded."
-            } else {
-                paragraph "Please select device(s) and confirm replacement or use the Back button to cancel."
-            }
-        }
-        section(){
-            href "replacementPage", title:"Back to Replacement Page"
-        }
-    }
-}
-
 def scheduledSummary(){
     def devices = autoDevices.collect{ d -> [device: d, level: d.currentValue("battery")?.toInteger()] }.findAll{ it.level != null }
     devices = devices.sort{ it.level }
