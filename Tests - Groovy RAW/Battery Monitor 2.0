@@ -230,16 +230,13 @@ def summaryPage(){
             def table="<table style='width:100%; border-collapse: collapse;'>"
             table+="<tr style='font-weight:bold;'><td>Device</td><td>Battery</td><td>Drain</td><td>Est Days</td><td>Health</td><td>Last Report</td></tr>"
             devs.each{ device ->
-                def level=device.currentValue("battery")?.toInteger()
-                def color=getBatteryLevelDisplay(level)
-                table+="<tr>"
-                table+="<td>${level<=25?'⚠️ ':''}${device.displayName}</td>"
-                table+="<td>${color}</td>"
-                table+="<td>${String.format('%.2f',getDrain(device))}</td>"
-                table+="<td>${estDays(device)}</td>"
-                table+="<td>${health(device)}</td>"
-                table+="<td>${getLastReport(device)}</td>"
-                table+="</tr>"
+            def level=device.currentValue("battery")?.toInteger()
+            def safeLevel = (level != null ? level : 0)
+            def color = (level != null ? getBatteryLevelDisplay(level) : "N/A")
+
+            table+="<tr>"
+            table+="<td>${safeLevel<=25 && level!=null ? '⚠️ ' : ''}${device.displayName}</td>"
+            table+="<td>${color}</td>"
             }
             table+="</table>"
             paragraph table
