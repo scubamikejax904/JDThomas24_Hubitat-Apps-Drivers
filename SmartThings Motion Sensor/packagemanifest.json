@@ -1,18 +1,17 @@
 {
-    "packageName": "SmartThings Motion Sensor Driver",
-    "author": "Jdthomas24",
-    "version": "1.0.0",
-    "category": "Drivers",
-    "description": "Custom Hubitat driver for SmartThings Zigbee motion sensors with local processing and battery reporting.",
-    "dateReleased": "3/19/26",
-    "minimumHEVersion": "",
-    "drivers": [
-        {
-            "name": "SmartThings Motion Sensor Advanced",
-            "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/SmartThings%20Motion%20Sensor/Raw%20Code/SmartThings%20Motion.groovy",
-            "required": true,
-            "primary": true
-        }
-    ]
+  "packageName": "SmartThings Motion Sensor Driver",
+  "author": "Jdthomas24",
+  "version": "1.0.0",
+  "category": "Drivers",
+  "description": "Custom Hubitat driver for SmartThings Zigbee motion sensors with local processing and battery reporting.",
+  "dateReleased": "3/19/26",
+  "minimumHEVersion": "2.3.0",
+  "drivers": [
+    {
+      "name": "SmartThings Motion Sensor Advanced",
+      "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/SmartThings%20Motion%20Sensor/Raw%20Code/SmartThings%20Motion.groovy",
+      "required": true,
+      "primary": true
+    }
+  ]
 }
-
