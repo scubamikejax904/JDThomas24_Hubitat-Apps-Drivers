@@ -142,7 +142,6 @@ def batteryHandler(evt){
 def updateBattery(device, level){
     def data = state.history[device.id]
     if(!data){
-        // Initialize history if missing
         state.history[device.id] = [
             lastLevel: level ?: 100,
             lastDate: now(),
@@ -156,7 +155,6 @@ def updateBattery(device, level){
 
     detectReplacement(device, level, data.lastLevel)
 
-    // Only calculate drain if device wasn't just replaced
     def days = (now() - data.lastDate) / (1000*60*60*24)
     if(days > 0 && !data.justReplaced){
         def drain = (data.lastLevel - level)/days
@@ -170,11 +168,9 @@ def updateBattery(device, level){
         }
     }
 
-    // Update lastLevel and lastDate
     data.lastLevel = level
     data.lastDate = now()
 
-    // Clear justReplaced after first real report
     if(data.justReplaced){
         data.justReplaced = false
     }
@@ -197,7 +193,6 @@ def detectReplacement(device, newLevel, oldLevel) {
         state.trend[device.id] = "Stable"
     }
 
-    // Detect battery replacement jump
     if(newLevel >= 95 && oldLevel <= 40){
         state.replacements << [
             device: device.displayName,
