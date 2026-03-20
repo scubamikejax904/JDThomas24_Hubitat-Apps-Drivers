@@ -457,12 +457,12 @@ def manualReplacementPage() {
     if(state.replacements == null) state.replacements = []
 
     dynamicPage(name:"manualReplacementPage", title:"Manual Battery Replacement", install:false){
-        // Top note
+        // Top note pointing to Battery Replacement tab
         section(){
-            paragraph "<b>⚠ Note:</b> Battery replacement history is visible on the <b>Battery Replacement</b> tab."
+            paragraph "<b>⚠ Note:</b> Battery replacement history is available on the <b>Battery Replacement</b> tab."
         }
 
-        // Select Devices
+        // Device selection
         section("Select Devices"){
             input "replaceDevicesManual","enum",
                   title:"Select Devices (can choose multiple)",
@@ -471,19 +471,19 @@ def manualReplacementPage() {
                   required:false
         }
 
-        // Confirm Replacement
+        // Confirm replacement
         section("Confirm Replacement"){
             input "replaceConfirmManual","bool",
                   title:"Confirm Battery Replaced",
                   required:false
         }
 
-        // Submit and Back
+        // Submit and navigation
         section(){
             href "manualReplacementConfirmPage", title:"Submit Replacement"
         }
         section(){
-            href "replacementPage", title:"Back"
+            href "replacementPage", title:"Back to Replacement Page"
         }
     }
 }
