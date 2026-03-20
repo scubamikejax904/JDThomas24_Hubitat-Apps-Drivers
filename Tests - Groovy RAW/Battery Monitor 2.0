@@ -407,10 +407,10 @@ def manualReplacementPage(){
             href "manualReplacementConfirmPage", title:"Confirm", description:"Confirm selected devices for replacement"
         }
 
-        // Removed bottom Done button
-        // section(){
-        //     href "mainPage", title:"Done", description:"Return to Main Page"
-        // }
+        // Done button → return to main page without processing
+        section(){
+            href "mainPage", title:"Done", description:"Return to Main Page"
+        }
     }
 }
 
