@@ -386,24 +386,27 @@ def replacementPage(){
 }
 
 // --- Manual Replacement Page ---
-def manualReplacementPage() {
-    dynamicPage(name: "manualReplacementPage", title: "Manual Battery Replacement", install: false) {
-        section("Register Manual Battery Replacement") {
+def manualReplacementPage(){
+    dynamicPage(name:"manualReplacementPage", title:"Manual Battery Replacement", install:false){
+        section("Register Manual Battery Replacement"){
             paragraph "<b>Note: Only batteries replaced at ≤40% are automatically registered in the app. Manual replacement outside this threshold will not appear in replacement analytics.</b>"
 
-            input "replaceDevicesManual", "enum",
-                title: "Select devices manually replaced",
-                multiple: true,
-                required: false,
-                options: autoDevices.collect { it.displayName },
-                submitOnChange: true
+            input "replaceDevicesManual","enum",
+                  title:"Select devices manually replaced",
+                  multiple:true,
+                  required:false,
+                  options: autoDevices.collect{ it.displayName },
+                  submitOnChange:true
         }
 
-        // Intercept Done: confirm selection and go to main page
-        if(replaceDevicesManual) {
-            section("Confirm Manual Replacement") {
-                href "manualReplacementConfirmPage", title: "Confirm Replacement", description: "Register selected batteries"
-            }
+        // Confirm selected devices (existing workflow)
+        section(){
+            href "manualReplacementConfirmPage", title:"Confirm Replacement", description:"Confirm the selected devices have been replaced"
+        }
+
+        // Return to main page button
+        section(){
+            href "mainPage", title:"Return to Main Menu", description:"Go back to the main app page"
         }
     }
 }
