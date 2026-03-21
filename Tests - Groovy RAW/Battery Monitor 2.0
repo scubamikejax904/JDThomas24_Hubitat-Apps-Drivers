@@ -110,9 +110,9 @@ def initialize(){
 
     scheduleScan()
 
-    if(summaryTime){
-        schedule(summaryTime,scheduledSummary)
-    }
+   if(reportFrequency != "critical" && summaryTime){
+    schedule(summaryTime,scheduledSummary)
+}
 
     autoDevices.each{ device ->
         if(!state.history[device.id]){
