@@ -310,6 +310,8 @@ def getBatteryLevelDisplay(level, device=null){
     def replacedTime = data?.replacedTime
 
     if(showTag && replacedTime){
+        // Ensure replacedTime is numeric
+        replacedTime = (replacedTime instanceof Number ? replacedTime : now())
         def hours = (now() - replacedTime) / (1000*60*60)
         if(hours >= 24){
             state.history[device.id].justReplaced = false
@@ -495,22 +497,34 @@ def manualReplacementConfirmPage() {
                 settings.replaceDevicesManual.each { name ->
                     def dev = autoDevices.find { it.displayName == name }
                     if(dev) {
+                        // Ensure history entry exists
+                        if(!state.history[dev.id]) {
+                            state.history[dev.id] = [
+                                lastLevel: dev.currentValue("battery")?.toInteger() ?: 100,
+                                lastDate: now(),
+                                drain: 0.3,
+                                samples: [],
+                                justReplaced: false
+                            ]
+                        }
+
                         state.replacements << [
                             device: dev.displayName,
                             level: dev.currentValue("battery")?.toInteger() ?: 100,
                             date: new Date().format("yyyy-MM-dd HH:mm", location.timeZone),
                             manual: true
                         ]
-                        state.history[dev.id]?.drain = 0.3
+
+                        state.history[dev.id].drain = 0.3
                         state.trend[dev.id] = "Stable"
-                        state.history[dev.id]?.lastLevel = dev.currentValue("battery")?.toInteger() ?: 100
-                        state.history[dev.id]?.lastDate = now()
-                        state.history[dev.id]?.justReplaced = true
-                        state.history[dev.id].replacedTime = now()
+                        state.history[dev.id].lastLevel = dev.currentValue("battery")?.toInteger() ?: 100
+                        state.history[dev.id].lastDate = now()
+                        state.history[dev.id].justReplaced = true
+                        state.history[dev.id].replacedTime = now() // Use milliseconds consistently
                     }
                 }
 
-                // Clear selection **after processing**
+                // Clear selection after processing
                 app.updateSetting("replaceDevicesManual", [value:[], type:"enum"])
 
                 section(){ paragraph "Done! Manual replacement registered." }
@@ -520,7 +534,6 @@ def manualReplacementConfirmPage() {
         }
     }
 }
-
 // =====================
 // DAILY SUMMARY REPORT
 // =====================
