@@ -362,7 +362,7 @@ def updateTrend(device, drain){
 def getDrain(device){ return state.history?.get(device.id)?.drain ?:0.3 }
 def displayDrain(device){ return String.format("%.2f",getDrain(device)) }
 def estDays(device){
-    def level=device.currentValue("battery")?.toInteger() ?:100
+    def level = getSafeBatteryLevel(device)
     def drain=getDrain(device)
     if(drain<=0) drain=0.3
     return Math.round(level/drain)
@@ -441,7 +441,7 @@ def summaryPage(){
                     state.trend[device.id] = "Stable"
                 }
 
-                def level = device.currentValue("battery")?.toInteger() ?: 100
+                def level = getSafeBatteryLevel(device)
                 def drain = getDrain(device)
                 def est = estDays(device)
                 def h = health(device)
@@ -475,7 +475,7 @@ def trendsPage(){
             def table="<table style='width:100%; border-collapse: collapse;'>"
             table+="<tr style='font-weight:bold;'><td>Device</td><td>Battery</td><td>Drain/day</td><td>Trend</td></tr>"
             devs.each{ device ->
-                def level=device.currentValue("battery")?.toInteger() ?: 100
+                def level = getSafeBatteryLevel(device)
                 def color=getBatteryLevelDisplay(level, device)
                 table+="<tr>"
                 table+="<td>${device.displayName}</td>"
@@ -511,7 +511,7 @@ def historyPage(){
 
             latestReps.each{ r ->
                 def deviceObj = autoDevices.find{ it.displayName == r.device }
-                def level = r.level ?: deviceObj?.currentValue("battery") ?: "N/A"
+                def level = r.level ?: getSafeBatteryLevel(deviceObj)
                 def typeCode = r.manual ? "<span style='color:blue;font-weight:bold;'>M</span>" : "<span style='color:green;font-weight:bold;'>A</span>"
                 def dateOnly = r.date.split(" ")[0]
 
@@ -569,7 +569,7 @@ def manualReplacementConfirmPage() {
                     if(dev) {
                         state.replacements << [
                             device: dev.displayName,
-                            level: dev.currentValue("battery")?.toInteger() ?: 100,
+                            level: getSafeBatteryLevel(dev),
                             date: new Date().format("yyyy-MM-dd HH:mm", location.timeZone),
                             manual: true
                         ]
@@ -596,7 +596,7 @@ def manualReplacementConfirmPage() {
 // DAILY SUMMARY REPORT
 // =====================
 def scheduledSummary(){
-    def devices = autoDevices.collect{ d -> [device: d, level: d.currentValue("battery")?.toInteger()] }.findAll{ it.level != null }
+    def devices = autoDevices.collect{ d -> [device: d, level: getSafeBatteryLevel(d)] }
     devices = devices.sort{ it.level }
 
     def critical = []
