@@ -464,6 +464,11 @@ def replacementPage(){
 
 // --- Manual Replacement Page ---
 def manualReplacementPage(){
+    // Clear previous manual selection whenever page is loaded
+    if(app?.currentPageName != "manualReplacementConfirmPage"){
+        app.updateSetting("replaceDevicesManual", [value:[], type:"enum"])
+    }
+
     dynamicPage(name:"manualReplacementPage", title:"Manual Battery Replacement", install:false){
         section("Register Manual Battery Replacement"){
             paragraph "<b>Note: Only batteries replaced at ≤40% are automatically registered in the app. Manual replacement outside this threshold will not appear in replacement analytics.</b>"
@@ -484,6 +489,9 @@ def manualReplacementPage(){
 
 // --- Manual Replacement Confirm Page ---
 def manualReplacementConfirmPage() {
+    // Clear selection as soon as confirm page is loaded
+    app.updateSetting("replaceDevicesManual", [value:[], type:"enum"])
+
     dynamicPage(name: "manualReplacementConfirmPage", title: "Processing Manual Replacement", install: false) {
         section("Processing Manual Replacement") {
             if(settings?.replaceDevicesManual) {
@@ -505,8 +513,6 @@ def manualReplacementConfirmPage() {
                     }
                 }
 
-                app?.updateSetting("replaceDevicesManual",[value:[],type:"enum"])
-
                 section(){ paragraph "Done! Manual replacement registered." }
             } else {
                 paragraph "No devices selected or confirmation missing. Please go back and try again."
@@ -514,7 +520,6 @@ def manualReplacementConfirmPage() {
         }
     }
 }
-
 // =====================
 // DAILY SUMMARY REPORT
 // =====================
