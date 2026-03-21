@@ -106,19 +106,20 @@ def initialize(){
     if(!state.trend) state.trend=[:]
     if(!state.replacements) state.replacements=[]
 
+    // ✅ CLEAN UP BAD HISTORICAL DRAIN VALUES (RUN ONCE)
+    state.history.each{ id, data ->
+        if(data?.drain > 5){
+            data.drain = 0.3
+            data.samples = []
+        }
+    }
+
     subscribe(autoDevices,"battery",batteryHandler)
 
     scheduleScan()
     scheduleReportFrequency()
 
     autoDevices.each{ device ->
-// ✅ CLEAN UP BAD HISTORICAL DRAIN VALUES
-state.history.each{ id, data ->
-    if(data?.drain > 5){
-        data.drain = 0.3
-        data.samples = []
-    }
-}
         if(!state.history[device.id]){
             def level=device.currentValue("battery")?.toInteger() ?:100
             state.history[device.id]=[
@@ -216,8 +217,7 @@ def updateBattery(device, level){
     if(data.justReplaced && (now() - replacedAt) > 1000*60*60*24){
         data.justReplaced = false
     }
-
-    def days = (now() - data.lastDate) / (1000*60*60*24)
+def days = (now() - data.lastDate) / (1000*60*60*24)
 
     if(days > 0 && !data.justReplaced){
         def drain = (data.lastLevel - level) / days
@@ -239,28 +239,8 @@ def updateBattery(device, level){
 
     if(reportFrequency == "critical" && level <= 25){
         sendCriticalReport(device, level)
-    }
 }
 
-    def days = (now() - data.lastDate) / (1000*60*60*24)
-    if(days > 0 && !data.justReplaced){
-        def drain = (data.lastLevel - level)/days
-        if(drain>0){
-            data.samples << drain
-            if(data.samples.size() > 5) data.samples.remove(0)
-            data.drain = data.samples.sum()/data.samples.size()
-            updateTrend(device, data.drain)
-        }
-    }
-
-    data.lastLevel = level
-    data.lastDate = now()
-
-    // Trigger critical alert
-    if(reportFrequency == "critical" && level <= 25){
-        sendCriticalReport(device, level)
-    }
-}
 
 // =====================
 // BATTERY REPLACEMENT
