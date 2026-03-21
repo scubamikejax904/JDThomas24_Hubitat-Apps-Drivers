@@ -571,7 +571,7 @@ def scheduledSummary(){
 
 
 // =====================
-// CRITICAL ALERT FUNCTION (STEP 6)
+// CRITICAL ALERT FUNCTION
 // =====================
 def sendCriticalReport(device, level){
     def msg = "🔴 Critical Battery Alert\n\n${device.displayName} is at ${level}%"
@@ -582,6 +582,7 @@ def sendCriticalReport(device, level){
             it.deviceNotification(msg)
         }
     }
+}
 // =====================
 // INFO PAGE
 // =====================
