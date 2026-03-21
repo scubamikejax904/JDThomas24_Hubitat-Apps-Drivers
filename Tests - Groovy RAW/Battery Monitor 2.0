@@ -467,11 +467,6 @@ def replacementPage(){
 
 // --- Manual Replacement Page ---
 def manualReplacementPage(){
-    // Clear previous manual selection whenever page is loaded
-    if(app?.currentPageName != "manualReplacementConfirmPage"){
-        app.updateSetting("replaceDevicesManual", [value:[], type:"enum"])
-    }
-
     dynamicPage(name:"manualReplacementPage", title:"Manual Battery Replacement", install:false){
         section("Register Manual Battery Replacement"){
             paragraph "<b>Note: Only batteries replaced at ≤40% are automatically registered in the app. Manual replacement outside this threshold will not appear in replacement analytics.</b>"
@@ -509,6 +504,7 @@ def manualReplacementConfirmPage() {
                             ]
                         }
 
+                        // Add manual replacement to state
                         state.replacements << [
                             device: dev.displayName,
                             level: dev.currentValue("battery")?.toInteger() ?: 100,
@@ -516,15 +512,26 @@ def manualReplacementConfirmPage() {
                             manual: true
                         ]
 
+                        // Update device history & trend
                         state.history[dev.id].drain = 0.3
                         state.trend[dev.id] = "Stable"
                         state.history[dev.id].lastLevel = dev.currentValue("battery")?.toInteger() ?: 100
                         state.history[dev.id].lastDate = now()
                         state.history[dev.id].justReplaced = true
-                        state.history[dev.id].replacedTime = now() // Use milliseconds consistently
+                        state.history[dev.id].replacedTime = now()
                     }
                 }
 
+                // Clear selection only AFTER processing
+                app.updateSetting("replaceDevicesManual", [value:[], type:"enum"])
+
+                section(){ paragraph "Done! Manual replacement registered." }
+            } else {
+                paragraph "No devices selected or confirmation missing. Please go back and try again."
+            }
+        }
+    }
+}
                 // Clear selection after processing
                 app.updateSetting("replaceDevicesManual", [value:[], type:"enum"])
 
