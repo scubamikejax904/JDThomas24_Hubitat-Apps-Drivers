@@ -546,6 +546,7 @@ def trendsPage(){
                 return
             }
 
+            // Start table
             def table="<table style='width:100%; border-collapse: collapse;'>"
             table+="<tr style='font-weight:bold;'>"
             table+="<td>Device</td><td>Battery</td><td>Trend</td><td>Day Drain</td>"
@@ -553,9 +554,9 @@ def trendsPage(){
 
             devs.each{ device ->
                 def hist = safeHistory(device)
-                def drain = getDrain(device)
-                def trend = state.trend[device.id] ?: "Unknown"
                 def level = device.currentValue("battery")?.toInteger() ?: 100
+                def drain = hist?.drain ?: 0.3
+                def trend = state.trend[device.id] ?: "Unknown"
                 def color = getBatteryLevelDisplay(level, device)
 
                 table+="<tr>"
