@@ -392,7 +392,7 @@ def getBatteryLevelDisplay(level, device=null){
         replacedTime = (replacedTime instanceof Number) ? replacedTime : now()
         def hoursSinceReplacement = (now() - replacedTime) / (1000*60*60)
         if(hoursSinceReplacement >= 24){
-            if(data) data.justReplaced = false
+            if(data) data.justReplaced = false    // Clear flag after 24h
             showTag = false
         }
     }
