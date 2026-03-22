@@ -438,17 +438,13 @@ def summaryPage(){
                 def est = estDays(device)
                 def h = health(device)
 
-                // ===== Last Report in hours/minutes
+                // Calculate rounded minutes/hours since last report
                 def lastReport = state.history[device.id]?.lastDate
                 def lastReportStr = "N/A"
                 if(lastReport){
                     def diffMs = now() - lastReport
                     def totalMinutes = (diffMs / (1000*60)).toInteger()
-                    def diffHours = totalMinutes / 60
-                    def diffMinutes = totalMinutes % 60
-                    lastReportStr = ""
-                    if(diffHours > 0) lastReportStr += "${diffHours}h "
-                    lastReportStr += "${diffMinutes}m ago"
+                    lastReportStr = (totalMinutes < 60) ? "${totalMinutes}m ago" : "${(totalMinutes / 60).toInteger()}h ago"
                 }
 
                 def color = getBatteryLevelDisplay(level, device)
@@ -481,23 +477,20 @@ def trendsPage(){
             table+="<tr style='font-weight:bold;'><td>Device</td><td>Battery</td><td>Drain/day</td><td>Trend</td><td>Last Report</td></tr>"
 
             devs.each{ device ->
-                def level=device.currentValue("battery")?.toInteger() ?: 100
-                def color=getBatteryLevelDisplay(level, device)
-                def drain=getDrain(device)
-                def trend=state.trend?.get(device.id) ?: 'Stable'
+                def level = device.currentValue("battery")?.toInteger() ?: 100
+                def drain = getDrain(device)
+                def trend = state.trend?.get(device.id) ?: 'Stable'
 
-                // ===== Last Report in hours/minutes
+                // Last report rounded
                 def lastReport = state.history[device.id]?.lastDate
                 def lastReportStr = "N/A"
                 if(lastReport){
                     def diffMs = now() - lastReport
                     def totalMinutes = (diffMs / (1000*60)).toInteger()
-                    def diffHours = totalMinutes / 60
-                    def diffMinutes = totalMinutes % 60
-                    lastReportStr = ""
-                    if(diffHours > 0) lastReportStr += "${diffHours}h "
-                    lastReportStr += "${diffMinutes}m ago"
+                    lastReportStr = (totalMinutes < 60) ? "${totalMinutes}m ago" : "${(totalMinutes / 60).toInteger()}h ago"
                 }
+
+                def color = getBatteryLevelDisplay(level, device)
 
                 table+="<tr>"
                 table+="<td>${device.displayName}</td>"
