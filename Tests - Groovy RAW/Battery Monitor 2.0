@@ -371,7 +371,24 @@ def health(device){
     if(drain<1.2) return "Fair"
     return "Poor"
 }
-
+// =====================
+// SAFE HISTORY HELPER (DROP-IN FIX)
+// =====================
+def safeHistory(device){
+    if(!device) return [:]               // device is null, return empty map
+    if(!state.history) state.history=[:] // ensure history exists
+    if(!state.history[device.id]){
+        state.history[device.id]=[       // initialize a default map for this device
+            lastLevel: device.currentValue("battery")?.toInteger() ?: 100,
+            lastDate: now(),
+            drain: 0.3,
+            samples: [],
+            justReplaced: false
+        ]
+        state.trend[device.id] = "Stable"
+    }
+    return state.history[device.id]
+}
 // =====================
 // BATTERY DISPLAY HELPERS
 // =====================
