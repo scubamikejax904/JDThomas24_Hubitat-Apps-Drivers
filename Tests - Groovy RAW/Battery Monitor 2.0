@@ -605,59 +605,68 @@ def historyPage(){
 }
 
 // ============================================================
-// ===================== MANUAL REPLACEMENT PAGE =============
+// ===================== MANUAL REPLACEMENT PAGES ============
 // ============================================================
+
+// ===================== SELECTION PAGE =======================
 def manualReplacementPage(){
     dynamicPage(name:"manualReplacementPage", title:"Manual Battery Replacement", install:false){
         section("Manual Replacement"){
 
-            // Check if devices exist
+            // Safe list of devices with battery capability
             def deviceOptions = (autoDevices ?: []).findAll{ it != null }*.displayName
+
             if(!deviceOptions){
                 paragraph "⚠ No battery devices available. Please select devices on the main page first."
-                return
+            } else {
+                // Device selection
+                input "manualDevice","enum",
+                      title:"Select device manually replaced",
+                      options:deviceOptions,
+                      required:true,
+                      submitOnChange:true  // <-- immediately updates page after selection
+
+                if(manualDevice){
+                    // Battery level input
+                    input "manualLevel","number",
+                          title:"Battery level after replacement",
+                          defaultValue:100,
+                          range:0..100,
+                          required:true
+
+                    // Confirmation link
+                    href "manualReplacementConfirmPage", 
+                         title:"Confirm Replacement", 
+                         description:"Click to log manual replacement"
+                }
             }
-
-            input "manualDevice","enum",
-                  title:"Select device manually replaced",
-                  options:deviceOptions,
-                  required:true
-
-            input "manualLevel","number",
-                  title:"Battery level after replacement",
-                  defaultValue:100,
-                  range:0..100,
-                  required:true
-
-            href "manualReplacementConfirmPage", 
-                 title:"Confirm Replacement", 
-                 description:"Click to log manual replacement"
         }
+        return  // <-- required for Hubitat to render the page
     }
 }
 
-// ============================================================
-// ===================== MANUAL CONFIRMATION PAGE ============
-// ============================================================
+// ===================== CONFIRMATION PAGE ====================
 def manualReplacementConfirmPage(){
     dynamicPage(name:"manualReplacementConfirmPage", title:"Confirm Manual Replacement", install:false){
         section("Confirm"){
-            def device = autoDevices.find{ it.displayName == manualDevice }
+
+            def device = (autoDevices ?: []).find{ it.displayName == manualDevice }
+
             if(device){
                 logReplacement(device, manualLevel.toInteger(), true)
                 paragraph "✅ Manual replacement logged for ${device.displayName} at ${manualLevel}%."
-            }else{
-                paragraph "❌ Device not found."
+            } else {
+                paragraph "❌ Device not found. Please go back and select a valid device."
             }
 
-            // Add a button to go back safely
+            // Back link
             href "manualReplacementPage",
                  title: "← Back",
                  description: "Return to Manual Replacement page"
         }
+        return
     }
 }
-
 // ============================================================
 // ===================== INFO PAGE ===========================
 // ============================================================
