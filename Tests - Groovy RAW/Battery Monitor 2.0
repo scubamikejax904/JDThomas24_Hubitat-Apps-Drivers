@@ -619,13 +619,18 @@ def manualReplacementPage(){
                   defaultValue:100,
                   range:0..100,
                   required:true
-            href "manualReplacementConfirmPage", title:"Confirm Replacement", description:"Click to log manual replacement"
+            href "manualReplacementConfirmPage", 
+                 title:"Confirm Replacement", 
+                 description:"Click to log manual replacement"
         }
     }
 }
 
+// ============================================================
+// ===================== MANUAL CONFIRMATION PAGE ============
+// ============================================================
 def manualReplacementConfirmPage(){
-    dynamicPage(name:"manualReplacementConfirmPage",title:"Confirm Manual Replacement"){
+    dynamicPage(name:"manualReplacementConfirmPage", title:"Confirm Manual Replacement"){
         section("Confirm"){
             def device = autoDevices.find{ it.displayName == manualDevice }
             if(device){
