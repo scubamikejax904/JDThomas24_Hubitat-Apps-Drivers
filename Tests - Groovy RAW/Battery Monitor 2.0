@@ -500,27 +500,27 @@ def historyPage(){
                 return
             }
 
-            // Sort latest first
             def latestReps = replacements.sort{ a,b ->
                 Date.parse("yyyy-MM-dd HH:mm", b.date) <=> Date.parse("yyyy-MM-dd HH:mm", a.date)
             }
 
-            // Start table
             def table = "<table style='width:100%; border-collapse: collapse;'>"
-            
-            // Legend
+            // Legend row
             table += "<tr><td colspan='4' style='font-weight:bold; padding-bottom:5px;'>" +
                      "<span style='color:green;'>A</span> = Auto replacement &nbsp;&nbsp; " +
                      "<span style='color:blue;'>M</span> = Manual replacement</td></tr>"
-            
-            // Header row
-            table += "<tr style='font-weight:bold; border-bottom:1px solid #000;'><td>Date</td><td>Device</td><td>Level</td><td>Type</td></tr>"
 
+            // Header row
+            table += "<tr style='font-weight:bold; border-bottom:1px solid #000; text-align:left;'>"
+            table += "<td>Date</td><td>Device</td><td>Level</td><td style='text-align:center;'>Type</td>"
+            table += "</tr>"
+
+            // Data rows
             latestReps.each{ r ->
                 def deviceObj = autoDevices.find{ it.displayName == r.device }
                 def level = r.level ?: deviceObj?.currentValue("battery") ?: "N/A"
                 def typeCode = r.manual ? "<span style='color:blue;font-weight:bold;'>M</span>" : "<span style='color:green;font-weight:bold;'>A</span>"
-                
+
                 table += "<tr>"
                 table += "<td>${r.date}</td>"
                 table += "<td>${r.device}</td>"
@@ -530,6 +530,7 @@ def historyPage(){
             }
 
             table += "</table>"
+
             paragraph table
         }
     }
