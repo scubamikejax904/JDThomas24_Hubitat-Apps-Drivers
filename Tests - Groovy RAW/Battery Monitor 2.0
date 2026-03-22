@@ -267,34 +267,33 @@ def detectReplacement(device, newLevel, oldLevel){
     def confidence = "LOW"
 
     // =====================
-    // ✅ Tier 1: Strong signal
-    // =====================
-    if(newLevel >= 95 && oldLevel <= 40){
-        detected = true
-        confidence = "HIGH"
-    }
-    // =====================
-    // ✅ Tier 2: Relaxed threshold
-    // =====================
-    else if(newLevel >= 90 && oldLevel <= 50 && largeJump >= 25){
-        detected = true
-        confidence = "MEDIUM"
-    }
-    // =====================
-    // ✅ Tier 3: Smart recovery
-    // =====================
-    else if(newLevel >= 90 && hadDrainHistory && largeJump >= 15){
-        detected = true
-        confidence = "LOW"
-    }
-    // =====================
-    // ✅ Tier 4: Step reporting recovery
-    // =====================
-    else if(newLevel >= 95 && hadDrainHistory && oldLevel >= 60){
-        detected = true
-        confidence = "LOW"
-    }
-
+// ✅ Tier 1: Strong signal
+// =====================
+if(newLevel >= 95 && oldLevel <= 40){
+    detected = true
+    confidence = "HIGH"
+}
+// =====================
+// ✅ Tier 2: Relaxed threshold (adjusted to ≤40%)
+// =====================
+else if(newLevel >= 90 && oldLevel <= 40 && largeJump >= 25){
+    detected = true
+    confidence = "MEDIUM"
+}
+// =====================
+// ✅ Tier 3: Smart recovery
+// =====================
+else if(newLevel >= 90 && hadDrainHistory && largeJump >= 15 && oldLevel <= 40){
+    detected = true
+    confidence = "LOW"
+}
+// =====================
+// ✅ Tier 4: Step reporting recovery (adjusted to ≤40%)
+// =====================
+else if(newLevel >= 95 && hadDrainHistory && oldLevel <= 40){
+    detected = true
+    confidence = "LOW"
+}
     // =====================
     // 🚫 DUPLICATE PROTECTION + LOGGING
     // =====================
@@ -598,15 +597,16 @@ def manualReplacementConfirmPage() {
                         state.history[dev.id].justReplaced = true
                         state.history[dev.id].replacedTime = now()
                         state.history[dev.id].lastReplacementLogged = now()
-                        
                     }
                 }
 
-                // Clear selection after processing
-                app.updateSetting("replaceDevicesManual", [value:[], type:"enum"])
-
-                // Display success message
+                // Display success message first
                 paragraph "✅ Done! Manual replacement registered."
+
+                // ✅ Clear selection reliably after 1 second
+                runIn(1) {
+                    app.updateSetting("replaceDevicesManual", [value:[], type:"enum"])
+                }
             } else {
                 paragraph "No devices selected or confirmation missing. Please go back and try again."
             }
