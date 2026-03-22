@@ -610,10 +610,12 @@ def historyPage(){
 
 // ===================== SELECTION PAGE =======================
 def manualReplacementPage(){
+    if(state.replacements == null) state.replacements = []
+
     dynamicPage(name:"manualReplacementPage", title:"Manual Battery Replacement", install:false){
         section("Select a device to log a manual battery replacement"){
 
-            // Only include devices that are non-null
+            // Only include valid devices
             def deviceOptions = (autoDevices ?: []).findAll{ it != null }*.displayName
             if(!deviceOptions || deviceOptions.size() == 0){
                 paragraph "⚠ No battery devices available. Please select devices on the main page first."
@@ -627,16 +629,16 @@ def manualReplacementPage(){
                   required: true,
                   submitOnChange: true
 
-            // Battery level input shown only after device is selected
             if(settings.manualDevice){
+                // Battery level input (no page reload)
                 input "manualLevel", "number",
                       title: "Battery Level After Replacement",
                       defaultValue: 100,
                       range: 0..100,
                       required: true,
-                      submitOnChange: false  // Prevent reload loop
+                      submitOnChange: false
 
-                // Only show confirm href after both inputs are set
+                // Confirm page only visible when both selections made
                 if(settings.manualLevel != null){
                     href "manualReplacementConfirmPage",
                          title: "Confirm Replacement",
@@ -644,19 +646,22 @@ def manualReplacementPage(){
                 }
             }
         }
+        section(){
+            href "mainPage", title:"← Back to Main Page"
+        }
     }
 }
 
 // ===================== CONFIRM PAGE ==========================
 def manualReplacementConfirmPage(){
+    if(state.replacements == null) state.replacements = []
+
     dynamicPage(name:"manualReplacementConfirmPage", title:"Confirm Manual Replacement", install:false){
         section("Confirm Replacement"){
 
-            // Read settings
             def selectedDeviceName = settings.manualDevice
             def selectedLevel = settings.manualLevel?.toInteger()
 
-            // Basic validations
             if(!selectedDeviceName){
                 paragraph "❌ No device selected. Go back and select a device first."
                 return
@@ -667,38 +672,33 @@ def manualReplacementConfirmPage(){
                 return
             }
 
-            // Find the actual device object
             def device = (autoDevices ?: []).find{ it.displayName == selectedDeviceName }
-            if(!device){
-                paragraph "❌ Device not found. Please go back and select a valid device."
-                return
-            }
 
-            // Explicit confirmation checkbox
-            input "confirmManualReplacement", "bool",
-                  title: "Yes, log this replacement",
-                  required: true,
-                  submitOnChange: true
-
-            // Only log replacement after user confirms
-            if(settings.confirmManualReplacement){
+            if(device){
                 logReplacement(device, selectedLevel, true)
-
                 paragraph "✅ Manual replacement logged for ${device.displayName} at ${selectedLevel}%."
 
-                // Clear settings after logging
+                // Clear settings to prevent stale values
                 app.updateSetting("manualDevice",[value:null,type:"enum"])
                 app.updateSetting("manualLevel",[value:null,type:"number"])
-                app.updateSetting("confirmManualReplacement",[value:null,type:"bool"])
+            } else {
+                paragraph "❌ Device not found. Please go back and select a valid device."
             }
 
-            // Back link
-            href "manualReplacementPage",
-                 title:"← Back",
-                 description:"Return to Manual Replacement page"
+            section(){
+                href "manualReplacementPage",
+                     title:"← Back",
+                     description:"Return to Manual Replacement page"
+            }
+            section(){
+                href "mainPage",
+                     title:"← Back to Main Page",
+                     description:"Return to Main Page"
+            }
         }
     }
 }
+
 // ============================================================
 // ===================== INFO PAGE ===========================
 // ============================================================
