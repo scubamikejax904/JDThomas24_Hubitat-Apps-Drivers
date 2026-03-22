@@ -477,37 +477,15 @@ def formatTimeAgo(ts){
     return mins < 60 ? "${mins}m ago" : "${(mins/60).toInteger()}h ago"
 }
 
-// =====================
 // --- Battery Summary Page ---
-// =====================
 def summaryPage(){
-    dynamicPage(name:"summaryPage", title:"Battery Summary", install:false){
+    dynamicPage(name:"summaryPage",title:"Battery Summary",install:false){
         section("Battery Summary"){
-
-            // Safe autoDevices check
             def devs = (autoDevices ?: []).findAll{ it?.currentValue("battery") != null }
             devs = devs.sort{ a,b -> (a.currentValue("battery") ?: 100) <=> (b.currentValue("battery") ?: 100) }
-
             if(!devs){ 
                 paragraph "No battery devices found."
                 return 
-            }
-
-            // Helper to ensure history exists
-            def safeHistory = { device ->
-                if(!state.history) state.history = [:]
-                if(!state.history[device.id]){
-                    state.history[device.id] = [
-                        lastLevel: device.currentValue("battery")?.toInteger() ?: 100,
-                        lastDate: now(),
-                        drain: 0.3,
-                        samples: [],
-                        justReplaced: false
-                    ]
-                    if(!state.trend) state.trend = [:]
-                    state.trend[device.id] = "Stable"
-                }
-                return state.history[device.id]
             }
 
             def table="<table style='width:100%; border-collapse: collapse;'>"
@@ -517,6 +495,7 @@ def summaryPage(){
 
             devs.each{ device ->
                 def data = safeHistory(device)
+
                 def level = device.currentValue("battery")?.toInteger() ?: 100
                 def drain = getDrain(device)
                 def est = estDays(device)
@@ -543,17 +522,14 @@ def summaryPage(){
     }
 }
 
-// =====================
 // --- Battery Trends Page ---
-// =====================
 def trendsPage(){
-    dynamicPage(name:"trendsPage", title:"Battery Trends", install:false){
+    dynamicPage(name:"trendsPage",title:"Battery Trends",install:false){
         section("Battery Trend Analysis"){
             paragraph "⚠ Note: Trends may be overestimated until the device reports at least 5 battery events. Trend accuracy improves as more data is collected over time. Devices with 'Recently Replaced' tag will clear when device starts reporting."
 
             def devs = (autoDevices ?: []).findAll{ it?.currentValue("battery") != null }
                                   .sort{ a,b -> a.displayName <=> b.displayName }
-
             if(!devs){ 
                 paragraph "No battery devices."
                 return 
@@ -564,27 +540,12 @@ def trendsPage(){
             table+="<td>Device</td><td>Battery</td><td>Drain/day</td><td>Trend</td><td>Last Battery</td><td>Last Activity</td>"
             table+="</tr>"
 
-            def safeHistory = { device ->
-                if(!state.history) state.history = [:]
-                if(!state.history[device.id]){
-                    state.history[device.id] = [
-                        lastLevel: device.currentValue("battery")?.toInteger() ?: 100,
-                        lastDate: now(),
-                        drain: 0.3,
-                        samples: [],
-                        justReplaced: false
-                    ]
-                    if(!state.trend) state.trend = [:]
-                    state.trend[device.id] = "Stable"
-                }
-                return state.history[device.id]
-            }
-
             devs.each{ device ->
                 def data = safeHistory(device)
+
                 def level = device.currentValue("battery")?.toInteger() ?: 100
                 def drain = getDrain(device)
-                def trend = (state.trend ?: [:]).get(device.id) ?: 'Stable'
+                def trend = state.trend?.get(device.id) ?: 'Stable'
                 def lastBatteryStr = formatTimeAgo(getLastBatteryTime(device))
                 def lastActivityStr = formatTimeAgo(getLastActivityTime(device))
                 def stale = isStale(device)
@@ -606,27 +567,18 @@ def trendsPage(){
     }
 }
 
-// =====================
 // --- Battery Replacement History Page ---
-// =====================
 def historyPage(){
-    dynamicPage(name:"historyPage", title:"Battery Replacement History", install:false){
+    dynamicPage(name:"historyPage",title:"Battery Replacement History",install:false){
         section("Replacement Log"){
-
             def replacements = state.replacements ?: []
             if(replacements.size() == 0){
                 paragraph "No battery replacements detected."
                 return
             }
 
-            // Safe parse helper
-            def safeParseDate = { str ->
-                try { return Date.parse("yyyy-MM-dd HH:mm", str) } catch(e){ return new Date(0) }
-            }
-
-            // Keep latest per device
             def latestPerDevice = [:]
-            replacements.each{ r ->
+            replacements.each { r ->
                 def existing = latestPerDevice[r.device]
                 if(!existing){
                     latestPerDevice[r.device] = r
@@ -637,9 +589,7 @@ def historyPage(){
                 }
             }
 
-            def latestReps = latestPerDevice.values().sort{ a,b ->
-                safeParseDate(b.date) <=> safeParseDate(a.date)
-            }
+            def latestReps = latestPerDevice.values().sort{ a,b -> safeParseDate(b.date) <=> safeParseDate(a.date) }
 
             def table = "<table style='width:100%; border-collapse: collapse;'>"
             table += "<tr><td colspan='4' style='font-weight:bold; padding-bottom:5px;'>" +
