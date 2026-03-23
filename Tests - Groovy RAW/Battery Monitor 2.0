@@ -175,7 +175,32 @@ def shouldRunEveryXDays(daysInterval){
     if(diff >= daysInterval){ state.lastReportRun = now(); return true }
     return false
 }
+def scheduledSummary(){
+    def devs = (autoDevices ?: []).findAll{ it?.currentValue("battery") != null }
+    if(!devs) return
 
+    // Sort by battery (lowest first like summary page)
+    devs = devs.sort{ a,b -> (a.currentValue("battery") ?: 100) <=> (b.currentValue("battery") ?: 100) }
+
+    def msg = "Battery Report:\n"
+
+    devs.each{ device ->
+        def level = device.currentValue("battery")?.toInteger() ?: 100
+        def drain = getDrain(device)
+        def est = estDays(device)
+        def h = health(device)
+
+        msg += "${device.displayName}: ${level}% | Drain ${String.format('%.2f',drain)} | ${est}d | ${h}\n"
+    }
+
+    if(enablePush){
+        sendPush(msg)
+    }
+
+    if(notifyDevices){
+        notifyDevices.each{ it.deviceNotification(msg) }
+    }
+}
 def shouldRunWeekly(){
     def today = new Date()
     def lastRun = state.lastReportRun ? new Date(state.lastReportRun) : null
