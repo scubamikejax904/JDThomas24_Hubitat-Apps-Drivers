@@ -28,8 +28,16 @@ def updated() {
     initialize()
 }
 
-def initialize() {
+def initialize(){
     log.debug "Initialization complete"
+
+    // Schedule automatic reports
+    scheduleReportFrequency()
+
+    // Subscribe to battery events for all selected devices
+    if(autoDevices){
+        subscribe(autoDevices, "battery", batteryHandler)
+    }
 }
 
 preferences {
