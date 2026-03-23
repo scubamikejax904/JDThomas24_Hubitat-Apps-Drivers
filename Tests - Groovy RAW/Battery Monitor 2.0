@@ -596,18 +596,19 @@ def historyPage(){
             table+="</tr>"
 
             state.replacements.sort{ a,b -> b.date <=> a.date }.each{ r ->
-            def typeTag = r.type == "manual" ? "<span style='color:blue;'>M</span>" :
-                  r.type == "auto"   ? "<span style='color:green;'>A</span>" : "?"
-            table+="<tr>"
-            table+="<td>${r.device}</td>"
-            table+="<td>${r.level}%</td>"
-            table+="<td>${r.date}</td>"
-            table+="<td>${typeTag}</td>"
-           table+="</tr>"
-        }
+                def typeTag = r.type == "manual" ? "<span style='color:blue;'>M</span>" :
+                              r.type == "auto"   ? "<span style='color:green;'>A</span>" : "?"
+                table+="<tr>"
+                table+="<td>${r.device}</td>"
+                table+="<td>${r.level}%</td>"
+                table+="<td>${r.date}</td>"
+                table+="<td>${typeTag}</td>"
+                table+="</tr>"
+            }
 
             table+="</table>"
             paragraph table
+            paragraph "<b>Legend:</b> <span style='color:green;'>A</span> = Automatic, <span style='color:blue;'>M</span> = Manual"
         }
     }
 }
