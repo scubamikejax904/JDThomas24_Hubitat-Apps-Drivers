@@ -17,6 +17,28 @@ definition(
     iconX3Url: "https://raw.githubusercontent.com/hubitat/HubitatPublic/master/examples/icons/battery@2x.png",
     version: "2.3.3"
 )
+def installed() {
+    log.debug "Installed - initializing app"
+    initialize()
+}
+
+def updated() {
+    log.debug "Updated - re-initializing app"
+    unschedule()
+    initialize()
+}
+
+def initialize(){
+    log.debug "Initialization complete"
+
+    // Schedule automatic reports
+    scheduleReportFrequency()
+
+    // Subscribe to battery events for all selected devices
+    if(autoDevices){
+        subscribe(autoDevices, "battery", batteryHandler)
+    }
+}
 
 preferences {
     page(name:"mainPage")
@@ -27,6 +49,7 @@ preferences {
     page(name:"manualReplacementConfirmPage")
     page(name:"infoPage")
 }
+
 
 // ============================================================
 // ===================== MAIN PAGE ===========================
@@ -161,18 +184,43 @@ def shouldRunEveryXDays(daysInterval){
     if(diff >= daysInterval){ state.lastReportRun = now(); return true }
     return false
 }
+def scheduledSummary() {
+    def devs = (autoDevices ?: []).findAll { it?.currentValue("battery") != null }
+    if (!devs) return
 
-def shouldRunWeekly(){
-    def today = new Date()
-    def lastRun = state.lastReportRun ? new Date(state.lastReportRun) : null
-    if(!lastRun){ state.lastReportRun = now(); return true }
-    if(today.format("u") == "1"){ // Monday
-        def diff = (today.time - lastRun.time) / (1000*60*60*24)
-        if(diff >= 7){ state.lastReportRun = now(); return true }
+    // Sort devices by worst battery first
+    devs = devs.sort { a, b ->
+        def order = ["Poor": 1, "Fair": 2, "Good": 3, "Excellent": 4]
+        return (order[health(a)] ?: 5) <=> (order[health(b)] ?: 5)
     }
-    return false
-}
 
+    // Categorize devices
+    def categories = [
+        "🔴 Poor": [],
+        "🟠 Fair": [],
+        "🟢 Good": [],
+        "🟢 Excellent": []
+    ]
+
+    devs.each { device ->
+        def lvl = device.currentValue("battery")?.toInteger() ?: 100
+        def cat = lvl <= 25 ? "🔴 Poor" : lvl <= 70 ? "🟠 Fair" : lvl <= 100 ? "🟢 Good" : "🟢 Excellent"
+        categories[cat] << "${device.displayName} (${lvl}%)"
+    }
+
+    // Build message
+    def msg = "🔋 Battery Summary\n"
+    categories.each { cat, list ->
+        if (list) {
+            msg += "\n${cat} (${list.size()} devices):\n"
+            list.each { dev -> msg += "- ${dev}\n" }
+        }
+    }
+
+    // Send notifications
+    if (enablePush) sendPush(msg)
+    if (notifyDevices) notifyDevices.each { it.deviceNotification(msg) }
+}
 // ============================================================
 // ===================== BATTERY HANDLER =====================
 // ============================================================
@@ -519,9 +567,19 @@ def trendsPage(){
     dynamicPage(name:"trendsPage", title:"Battery Trends", install:false){
         section("Battery Trends"){
             def devs = (autoDevices ?: []).findAll{ it?.currentValue("battery") != null }
+
             if(!devs){
                 paragraph "No battery devices found for trends."
                 return
+            }
+
+            // Sort by worst battery first using same color thresholds
+            devs = devs.sort { a, b ->
+                def levelA = a.currentValue("battery")?.toInteger() ?: 100
+                def levelB = b.currentValue("battery")?.toInteger() ?: 100
+
+                // Lower battery first
+                levelA <=> levelB
             }
 
             // Start table
@@ -535,6 +593,8 @@ def trendsPage(){
                 def level = device.currentValue("battery")?.toInteger() ?: 100
                 def drain = hist?.drain ?: 0.3
                 def trend = state.trend[device.id] ?: "Unknown"
+
+                // Use the same color codes as summary notifications
                 def color = getBatteryLevelDisplay(level, device)
 
                 table+="<tr>"
@@ -550,7 +610,6 @@ def trendsPage(){
         }
     }
 }
-
 // ============================================================
 // ===================== HISTORY PAGE ========================
 // ============================================================
@@ -704,6 +763,12 @@ def manualReplacementConfirmPage() {
 // ============================================================
 def infoPage(Map params = [:]){
     dynamicPage(name:"infoPage", title:"Battery Health Guide", install:false){
+        
+        // ⚠ Note about color differences
+        section("<b>Note on Colors</b>") {
+            paragraph "⚠ Colors in battery reports reflect battery percentage (🔴 low, 🟠 medium, 🟢 good), while colors in this guide reflect drain-based health (🟢 Excellent, 🟡 Good, 🟠 Fair, 🔴 Poor)."
+        }
+
         section("<b>Battery Health Breakdown</b>"){
             def table = """<table style='width:100%; border-collapse: collapse;'>
 <tr style='font-weight:bold;'><td>Health</td><td>Drain Rate (per day)</td><td>What It Means</td></tr>
@@ -715,25 +780,28 @@ def infoPage(Map params = [:]){
             paragraph table
         }
 
-        section("<b>🔍 What is Battery Drain?</b>"){ paragraph "Battery drain shows how fast a device uses battery (% per day). Lower values mean longer battery life. Higher values may indicate excessive usage, weak signal, or device issues." }
-        section("<b>📅 How Estimated Days Works</b>"){ paragraph "Estimated days remaining is calculated using the current battery level divided by the average daily drain rate. This becomes more accurate after multiple battery reports." }
-        section("<b>📊 Understanding Trends</b>"){ paragraph "Trends are calculated using recent battery activity. Devices need multiple battery reports before trends become accurate.\n• Stable = very low drain\n• Moderate = normal usage\n• Heavy Drain = higher-than-normal usage" }
+        section("<b>🔍 What is Battery Drain?</b>"){ 
+            paragraph "Battery drain shows how fast a device uses battery (% per day). Lower values mean longer battery life. Higher values may indicate excessive usage, weak signal, or device issues." 
+        }
+        
+        section("<b>📅 How Estimated Days Works</b>"){ 
+            paragraph "Estimated days remaining is calculated using the current battery level divided by the average daily drain rate. This becomes more accurate after multiple battery reports." 
+        }
+        
+        section("<b>📊 Understanding Trends</b>"){ 
+            paragraph "Trends are calculated using recent battery activity. Devices need multiple battery reports before trends become accurate.\n• Stable = very low drain\n• Moderate = normal usage\n• Heavy Drain = higher-than-normal usage" 
+        }
+        
         section("<b>🔋 Battery Replacement Detection</b>"){ 
-    paragraph "The app automatically detects battery replacement when a device jumps from ≤40% to ≥95%. Manual replacement can be used if a battery is changed outside this range.\n\nAfter a battery is replaced, the device will be marked as 'Recently Replaced'. This tag will automatically clear after about 24 hours or once the device reports again." 
-}
-        section("<b>⚠ Troubleshooting High Drain</b>"){ paragraph "If a device shows high drain:\n• Check signal strength (Z-Wave/Zigbee routing)\n• Verify device isn't reporting too frequently\n• Confirm correct battery type is used\n• Look for environmental factors (cold, humidity)\n• Consider device firmware or driver issues" }
-        section("<b>💡 Tips</b>"){ paragraph "• Devices with consistent low drain are healthy\n• Sudden spikes usually indicate a problem\n• Compare similar devices to identify outliers\n" }
-   }
-}
-// ============================================================
-// ===================== CRITICAL ALERTS =====================
-// ============================================================
-def sendCriticalReport(device,level){
-    def msg="Battery Low Alert: ${device.displayName} at ${level}%."
-    if(enablePush){
-        sendPush(msg)
-    }
-    if(notifyDevices){
-        notifyDevices.each{ it.deviceNotification(msg) }
+            paragraph "The app automatically detects battery replacement when a device jumps from ≤40% to ≥95%. Manual replacement can be used if a battery is changed outside this range.\n\nAfter a battery is replaced, the device will be marked as 'Recently Replaced'. This tag will automatically clear after about 24 hours or once the device reports again." 
+        }
+        
+        section("<b>⚠ Troubleshooting High Drain</b>"){ 
+            paragraph "If a device shows high drain:\n• Check signal strength (Z-Wave/Zigbee routing)\n• Verify device isn't reporting too frequently\n• Confirm correct battery type is used\n• Look for environmental factors (cold, humidity)\n• Consider device firmware or driver issues" 
+        }
+        
+        section("<b>💡 Tips</b>"){ 
+            paragraph "• Devices with consistent low drain are healthy\n• Sudden spikes usually indicate a problem\n• Compare similar devices to identify outliers\n" 
+        }
     }
 }
