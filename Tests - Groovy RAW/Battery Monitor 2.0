@@ -1,12 +1,13 @@
 // ============================================================
-// Battery Monitor 2.3.7 
+// Battery Monitor 2.0
+// Version 2.3.3
 // Author: Jdthomas24
 // Namespace: jdthomas24
 // Description: Advanced Hubitat battery monitoring with analytics, trends and replacement tracking (v2.3.2). Auto-adjusts drain for low-activity devices.
 // ============================================================
 
 definition(
-    name: "Battery Monitor 2.3.7", // DO NOT CHANGE (HPM SAFE)
+    name: "Battery Monitor 2.0", // DO NOT CHANGE (HPM SAFE)
     namespace: "jdthomas24",
     author: "Jdthomas24",
     description: "Advanced Hubitat battery monitoring with analytics, trends and replacement tracking (v2.3.2). Auto-adjusts drain for low-activity devices.",
@@ -14,36 +15,7 @@ definition(
     iconUrl: "https://raw.githubusercontent.com/hubitat/HubitatPublic/master/examples/icons/battery.png",
     iconX2Url: "https://raw.githubusercontent.com/hubitat/HubitatPublic/master/examples/icons/battery@2x.png",
     iconX3Url: "https://raw.githubusercontent.com/hubitat/HubitatPublic/master/examples/icons/battery@2x.png",
-    version: "2.3.2"
-)
-
-preferences {
-    page(name:"mainPage")
-    page(name:"summaryPage")
-    page(name:"trendsPage")
-    page(name:"historyPage")
-    page(name:"manualReplacementPage")
-    page(name:"manualReplacementConfirmPage")
-    page(name:"infoPage")
-}
-
-// ============================================================
-// Battery Monitor 2.3.7 - Full Drop-In Version
-// Author: Jdthomas24
-// Namespace: jdthomas24
-// Description: Advanced Hubitat battery monitoring with analytics, trends and replacement tracking (v2.3.2). Auto-adjusts drain for low-activity devices.
-// ============================================================
-
-definition(
-    name: "Battery Monitor 2.3.7", // DO NOT CHANGE (HPM SAFE)
-    namespace: "jdthomas24",
-    author: "Jdthomas24",
-    description: "Advanced Hubitat battery monitoring with analytics, trends and replacement tracking (v2.3.2). Auto-adjusts drain for low-activity devices.",
-    category: "Convenience",
-    iconUrl: "https://raw.githubusercontent.com/hubitat/HubitatPublic/master/examples/icons/battery.png",
-    iconX2Url: "https://raw.githubusercontent.com/hubitat/HubitatPublic/master/examples/icons/battery@2x.png",
-    iconX3Url: "https://raw.githubusercontent.com/hubitat/HubitatPublic/master/examples/icons/battery@2x.png",
-    version: "2.3.2"
+    version: "2.3.3"
 )
 
 preferences {
@@ -60,9 +32,15 @@ preferences {
 // ===================== MAIN PAGE ===========================
 // ============================================================
 def mainPage() {
+    // Update app label if custom name provided
+    if(settings?.customAppName) {
+        if(app.label != settings.customAppName) {
+            app.updateLabel(settings.customAppName)
+        }
+    }
 
     dynamicPage(name: "mainPage",
-                title: (settings?.customAppName ?: "Battery Monitor 2.3.7"),
+                title: (settings?.customAppName ?: "Battery Monitor 2.0"),
                 install: true, uninstall: true) {
 
         // ================= App Display Name =================
@@ -74,40 +52,39 @@ def mainPage() {
         }
 
         // ================= Auto Battery Discovery =============
-        section("Auto Battery Discovery") {
-            paragraph "**⚠ Important:** The app automatically detects all devices reporting battery levels. Select the devices you want to monitor from the list below. Only selected devices will be tracked for trends, battery health, and notifications."
+section("Auto Battery Discovery") {
+    paragraph "<b>⚠ Important: The app automatically detects all devices reporting battery levels. " +
+          "Select the devices you want to monitor from the list below. Only selected devices will be tracked for trends, battery health, and notifications.</b>"
 
-            // Mobile users note
-            paragraph "<b>💡 Mobile Users:</b> Long device names may extend past the screen on smaller devices. This is a UI limitation. You can still select devices as usual."
+    // ⚠ Mobile note for long device names
+    paragraph "<span style='color:red; font-weight:bold;'>Note for mobile users:</span> If your device names are long, they may extend past the screen in the selection list. This is a UI limitation on smaller screens. You can still select devices as usual."
 
-            // Red Important Note for first-time setup
-            paragraph "<span style='color:red; font-weight:bold;'>IMPORTANT: After selecting devices, you MUST click 'Done' to exit the app BEFORE viewing the battery report. Skipping this step may cause an error.</span>"
+    paragraph "<span style='color:red; font-weight:bold;'>IMPORTANT: After selecting devices, you MUST click 'Done' to exit the app BEFORE viewing the battery report. Skipping this step may cause an error.</span>"
 
-            // Device selection
-            input "autoDevices", "capability.battery",
-                  title: "Select battery devices to monitor",
-                  multiple: true,
-                  required: true
+    // Existing input logic stays exactly the same
+    input "autoDevices", "capability.battery",
+          title: "Select battery devices to monitor",
+          multiple: true,
+          required: true
 
-            // Initialize state.history and state.trend for selected devices
-            if(autoDevices) {
-                if(!state.history) state.history = [:]
-                if(!state.trend) state.trend = [:]
-                autoDevices.each { device ->
-                    if(!state.history[device.id]) {
-                        state.history[device.id] = [
-                            lastLevel: device.currentValue("battery")?.toInteger() ?: 100,
-                            lastDate: now(),
-                            drain: 0.3,
-                            samples: [],
-                            justReplaced: false
-                        ]
-                        state.trend[device.id] = "Stable"
-                    }
-                }
+    // Initialize state.history and state.trend for selected devices
+    if(autoDevices) {
+        if(!state.history) state.history = [:]
+        if(!state.trend) state.trend = [:]
+        autoDevices.each { device ->
+            if(!state.history[device.id]) {
+                state.history[device.id] = [
+                    lastLevel: device.currentValue("battery")?.toInteger() ?: 100,
+                    lastDate: now(),
+                    drain: 0.3,
+                    samples: [],
+                    justReplaced: false
+                ]
+                state.trend[device.id] = "Stable"
             }
         }
-
+    }
+}
         // ================= Battery Scan Interval =================
         section("Battery Scan Interval") {
             input "scanInterval", "enum",
@@ -154,20 +131,9 @@ def mainPage() {
                  title: "Battery Health Guide",
                  description: "Learn what battery drain, health, and trends mean"
         }
-
-        // ================= App Label Update (AFTER page sections) =================
-        if(settings?.customAppName && app.label != settings.customAppName) {
-            try {
-                app.updateLabel(settings.customAppName)
-            } catch(e) {
-                log.warn "Could not update app label: ${e}"
-            }
-        }
-
-        // Optional: Force settings refresh to ensure post-install configure works
-        app.updateSetting("autoDevices",[value: settings.autoDevices, type:"capability.battery"])
     }
 }
+
 // ============================================================
 // ===================== REPORT SCHEDULING ==================
 // ============================================================
