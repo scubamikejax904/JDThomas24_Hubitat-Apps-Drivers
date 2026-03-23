@@ -28,6 +28,35 @@ preferences {
 }
 
 // ============================================================
+// Battery Monitor 2.3.7 - Full Drop-In Version
+// Author: Jdthomas24
+// Namespace: jdthomas24
+// Description: Advanced Hubitat battery monitoring with analytics, trends and replacement tracking (v2.3.2). Auto-adjusts drain for low-activity devices.
+// ============================================================
+
+definition(
+    name: "Battery Monitor 2.3.7", // DO NOT CHANGE (HPM SAFE)
+    namespace: "jdthomas24",
+    author: "Jdthomas24",
+    description: "Advanced Hubitat battery monitoring with analytics, trends and replacement tracking (v2.3.2). Auto-adjusts drain for low-activity devices.",
+    category: "Convenience",
+    iconUrl: "https://raw.githubusercontent.com/hubitat/HubitatPublic/master/examples/icons/battery.png",
+    iconX2Url: "https://raw.githubusercontent.com/hubitat/HubitatPublic/master/examples/icons/battery@2x.png",
+    iconX3Url: "https://raw.githubusercontent.com/hubitat/HubitatPublic/master/examples/icons/battery@2x.png",
+    version: "2.3.2"
+)
+
+preferences {
+    page(name:"mainPage")
+    page(name:"summaryPage")
+    page(name:"trendsPage")
+    page(name:"historyPage")
+    page(name:"manualReplacementPage")
+    page(name:"manualReplacementConfirmPage")
+    page(name:"infoPage")
+}
+
+// ============================================================
 // ===================== MAIN PAGE ===========================
 // ============================================================
 def mainPage() {
@@ -139,7 +168,6 @@ def mainPage() {
         app.updateSetting("autoDevices",[value: settings.autoDevices, type:"capability.battery"])
     }
 }
-
 // ============================================================
 // ===================== REPORT SCHEDULING ==================
 // ============================================================
