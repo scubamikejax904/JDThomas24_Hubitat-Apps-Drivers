@@ -266,11 +266,18 @@ def updateBattery(device, level){
     // Always check for possible replacement
     detectReplacement(device, level, data.lastLevel)
 
-    // Clear justReplaced flag after 24h
+    // Clear justReplaced flag after real usage OR 24h fallback
     def replacedAt = data.replacedTime ?: now()
-    if(data.justReplaced && (now() - safeTime(replacedAt)) > 1000*60*60*24){
-        data.justReplaced = false
-    }
+
+    // 🔹 Clear if battery has started draining (real usage detected)
+    if(data.justReplaced && level < 95){
+    data.justReplaced = false
+}
+
+    // 🔹 Fallback: clear after 24 hours
+    else if(data.justReplaced && (now() - safeTime(replacedAt)) > 1000*60*60*24){
+    data.justReplaced = false
+}
 
     // Update drain based on lastLevel and samples
     def days = (now() - safeTime(data.lastDate)) / (1000*60*60*24)
@@ -328,7 +335,7 @@ def detectReplacement(device, newLevel, oldLevel){
     else if(newLevel >= 95 && hadDrainHistory && oldLevel <= 40) detected = true
 
     if(detected){
-    logReplacement(device, newLevel, false, "auto") // tag as auto
+    logReplacement(device, newLevel, false)
    }
 }
 
@@ -621,7 +628,7 @@ def manualReplacementPage() {
     if(!autoDevices) autoDevices = []
 
     // Clear previous selections (Hubitat settings)
-    app.updateSetting("replaceDevicesManual",[value: null, type:"enum"])
+    app.removeSetting("replaceDevicesManual")
     app.updateSetting("replaceConfirmManual",[value: false, type:"bool"])
 
     dynamicPage(name: "manualReplacementPage", title: "Manual Battery Replacement", install: false) {
@@ -696,11 +703,16 @@ def manualReplacementConfirmPage() {
                         // Sort descending by date
                         state.replacements = state.replacements.sort { a, b -> b.date <=> a.date }
 
-                        // Reset device history and trend
+                        // Reset device history and mark as replaced
                         state.history[device.id].drain = 0.3
+                        state.history[device.id].samples = []
                         state.trend[device.id] = "Stable"
                         state.history[device.id].lastLevel = 100
                         state.history[device.id].lastDate = now()
+
+                        // THIS IS THE MISSING PIECE
+                        state.history[device.id].justReplaced = true
+                        state.history[device.id].replacedTime = now()
 
                         successCount++
                     }
