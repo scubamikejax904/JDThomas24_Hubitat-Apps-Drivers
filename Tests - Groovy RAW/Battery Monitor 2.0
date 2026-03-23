@@ -42,6 +42,19 @@ preferences {
     page(name:"infoPage")
 }
 
+def installed(){
+    initialize()
+}
+
+def updated(){
+    unschedule()
+    initialize()
+}
+
+def initialize(){
+    scheduleReportFrequency()
+}
+
 // ============================================================
 // ===================== MAIN PAGE ===========================
 // ============================================================
