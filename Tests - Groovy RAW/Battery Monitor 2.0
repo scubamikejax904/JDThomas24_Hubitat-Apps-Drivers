@@ -1,12 +1,12 @@
 // ============================================================
-// Battery Monitor 2.3.2 - Full Drop-In Version
+// Battery Monitor 2.3.7 
 // Author: Jdthomas24
 // Namespace: jdthomas24
 // Description: Advanced Hubitat battery monitoring with analytics, trends and replacement tracking (v2.3.2). Auto-adjusts drain for low-activity devices.
 // ============================================================
 
 definition(
-    name: "Battery Monitor 2.3.2", // DO NOT CHANGE (HPM SAFE)
+    name: "Battery Monitor 2.3.7", // DO NOT CHANGE (HPM SAFE)
     namespace: "jdthomas24",
     author: "Jdthomas24",
     description: "Advanced Hubitat battery monitoring with analytics, trends and replacement tracking (v2.3.2). Auto-adjusts drain for low-activity devices.",
@@ -30,149 +30,106 @@ preferences {
 // ============================================================
 // ===================== MAIN PAGE ===========================
 // ============================================================
-def mainPage(){
-    dynamicPage(name:"mainPage",title:(settings?.customAppName ?: "Battery Monitor 2.3.2"),install:true,uninstall:true){
-        section("App Display Name"){
-            input "customAppName","text",
-                  title:"Custom App Name (optional)",
-                  description:"Change how the app name appears in Hubitat UI",
-                  required:false
+def mainPage() {
+    // Update app label if custom name provided
+    if(settings?.customAppName) {
+        if(app.label != settings.customAppName) {
+            app.updateLabel(settings.customAppName)
+        }
+    }
+
+    dynamicPage(name: "mainPage",
+                title: (settings?.customAppName ?: "Battery Monitor 2.3.7"),
+                install: true, uninstall: true) {
+
+        // ================= App Display Name =================
+        section("App Display Name (optional)") {
+            input "customAppName", "text",
+                  title: "Custom App Name",
+                  description: "Change how the app name appears in Hubitat UI",
+                  required: false
         }
 
-        section("Auto Battery Discovery"){
-    paragraph "<b>Select the battery-powered devices you want to monitor.</b><br>" +
-              "Only selected devices will be included in reports, trends, and notifications."
+        // ================= Auto Battery Discovery =============
+section("Auto Battery Discovery") {
+    paragraph "**⚠ Important: The app will automatically detect all devices reporting battery levels. " +
+              "Please select the devices you want to actively monitor from the list below. Only selected devices will be tracked for trends, battery health, and notifications.**"
 
-    input "autoDevices","capability.battery",
-          title:"Select battery devices to monitor",
-          multiple:true,
-          required:true
+    // RED Important Note for first-time setup
+    paragraph "<span style='color:red; font-weight:bold;'>IMPORTANT: After selecting devices, you MUST click 'Done' to exit the app BEFORE viewing the battery report. Skipping this step may cause an error.</span>"
+
+    // Instruction wrapper for scrollable/wrapping device list
+    paragraph "<div style='max-height:200px; overflow-y:auto; white-space:normal;'>Select the devices to monitor. If the list is long, you can scroll.</div>"
+
+    input "autoDevices", "capability.battery",
+          title: "Select battery devices to monitor",
+          multiple: true,
+          required: true
+
+    // Initialize state.history and state.trend for selected devices
+    if(autoDevices) {
+        if(!state.history) state.history = [:]
+        if(!state.trend) state.trend = [:]
+        autoDevices.each { device ->
+            if(!state.history[device.id]) {
+                state.history[device.id] = [
+                    lastLevel: device.currentValue("battery")?.toInteger() ?: 100,
+                    lastDate: now(),
+                    drain: 0.3,
+                    samples: [],
+                    justReplaced: false
+                ]
+                state.trend[device.id] = "Stable"
+            }
+        }
+    }
 }
 
-section("⚠ Setup Step (Required Once)"){
-    paragraph "<span style='color:red;'><b>IMPORTANT:</b> After selecting devices for the first time, you must click Done before opening reports.</span><br>" +
-              "This completes setup and prevents errors."
-}
-        section("Report Settings"){
-            input "reportFrequency","enum",
-                  title:"Report Frequency",
-                  options:[
-                      "daily":"Daily",
-                      "every2":"Every 2 Days",
-                      "every3":"Every 3 Days",
-                      "weekly":"Weekly",
-                      "critical":"Only When Critical"
+        // ================= Battery Scan Interval =================
+        section("Battery Scan Interval") {
+            input "scanInterval", "enum",
+                  title: "Scan Frequency",
+                  options: ["1": "Hourly", "3": "Every 3 Hours", "6": "Every 6 Hours"],
+                  defaultValue: "3"
+        }
+
+        // ================= Report Settings =================
+        section("Report Settings") {
+            input "reportFrequency", "enum",
+                  title: "Report Frequency",
+                  options: [
+                      "daily": "Daily",
+                      "every2": "Every 2 Days",
+                      "every3": "Every 3 Days",
+                      "weekly": "Weekly",
+                      "critical": "Only When Critical"
                   ],
-                  defaultValue:"daily"
+                  defaultValue: "daily"
 
-            input "summaryTime","time",
-                  title:"Report Time (ignored when set to Critical Only — alerts are event-driven)",
-                  required:false
+            input "summaryTime", "time",
+                  title: "Report Time (ignored when set to Critical Only — alerts are event-driven)",
+                  required: false
         }
 
-        section("Notifications"){
-            input "enablePush","bool",title:"Enable notifications",defaultValue:true
-            input "notifyDevices","capability.notification",title:"Notification devices",multiple:true,required:false
+        // ================= Notifications =================
+        section("Notifications") {
+            input "enablePush", "bool", title: "Enable notifications", defaultValue: true
+            input "notifyDevices", "capability.notification", title: "Notification devices", multiple: true, required: false
         }
 
-       section("Reports"){
-           href "summaryPage",title:"Battery Summary"
-           href "trendsPage",title:"Battery Trends"
-           href "historyPage",title:"Battery Replacement History"
-           href "manualReplacementPage", title:"Manual Battery Replacement"  // updated
-}
+        // ================= Reports =================
+        section("Reports") {
+            href "summaryPage", title: "Battery Summary"
+            href "trendsPage", title: "Battery Trends"
+            href "historyPage", title: "Battery Replacement History"
+            href "manualReplacementPage", title: "Manual Battery Replacement"
+        }
 
-        section("Help & Info"){
+        // ================= Help & Info =================
+        section("Help & Info") {
             href "infoPage",
                  title: "Battery Health Guide",
                  description: "Learn what battery drain, health, and trends mean"
-        }
-    }
-}
-
-// ============================================================
-// ===================== INSTALL / UPDATE ====================
-// ============================================================
-def installed(){ initialize() }
-def updated(){
-    unsubscribe()
-    unschedule()
-    initialize()
-
-    if(settings?.customAppName){
-        app.updateLabel(settings.customAppName)
-    }
-}
-
-def initialize(){
-    if(!state.history) state.history=[:]
-
-    // CLEAN UP DUPLICATES IN REPLACEMENTS
-    if(state.replacements){
-        def deduped = [:]
-        state.replacements.each { r ->
-            def key = "${r.device}-${r.date}"
-            deduped[key] = r
-        }
-        state.replacements = deduped.values().sort{ a,b ->
-            Date.parse("yyyy-MM-dd HH:mm", b.date) <=> Date.parse("yyyy-MM-dd HH:mm", a.date)
-        }
-    }
-
-    if(!state.trend) state.trend=[:]
-    if(!state.replacements) state.replacements=[]
-
-    // CLEAN UP BAD HISTORICAL DRAIN VALUES
-    state.history.each{ id, data ->
-        if(data?.drain > 5){
-            data.drain = 0.3
-            data.samples = []
-        }
-    }
-
-    // Subscribe to battery events
-    subscribe(autoDevices,"battery",batteryHandler)
-
-    // Schedule scans and reports
-    scheduleScan()
-    scheduleReportFrequency()
-
-    // Initialize history for each device if missing
-    autoDevices.each{ device ->
-        if(!state.history[device.id]){
-            def level=device.currentValue("battery")?.toInteger() ?:100
-            state.history[device.id]=[
-                lastLevel:level,
-                lastDate:now(),
-                drain:0.3,
-                samples:[],
-                justReplaced:false
-            ]
-            state.trend[device.id]="Stable"
-        }
-    }
-}
-
-// ============================================================
-// ===================== SCAN SCHEDULER =====================
-// ============================================================
-def scheduleScan(){
-    unschedule("runBatteryScan")
-    def interval = (scanInterval ?: "3").toInteger()
-
-    switch(interval){
-        case 1: runEvery1Hour(runBatteryScan); break
-        case 3: runEvery3Hours(runBatteryScan); break
-        case 6: runEvery6Hours(runBatteryScan); break
-        default: runEvery3Hours(runBatteryScan); break
-    }
-}
-
-def runBatteryScan(){
-    autoDevices.each{ d ->
-        def level = d.currentValue("battery")?.toInteger()
-        if(level != null){
-            updateBattery(d, level)
         }
     }
 }
@@ -780,4 +737,3 @@ def sendCriticalReport(device,level){
         notifyDevices.each{ it.deviceNotification(msg) }
     }
 }
-
