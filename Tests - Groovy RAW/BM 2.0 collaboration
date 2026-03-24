@@ -527,23 +527,31 @@ def formatTimeAgo(ts){
 def getBatteryLevelDisplay(level, device=null){
     level = (level instanceof Number ? level : null) != null ? level : 100
 
-    // Get device health if available
-    def h = device ? health(device) : null
-
     def label = ""
-    switch(h){
-        case "Excellent": label = "🟢 ${level}%"; break
-        case "Good":      label = "🟡 ${level}%"; break
-        case "Fair":      label = "🟠 ${level}%"; break
-        case "Poor":      label = "🔴 ${level}%"; break
-        default:
-            // fallback if device not present
-            if(level <= 25) label = "🔴 ${level}%"
-            else if(level <= 70) label = "🟠 ${level}%"
-            else label = "🟢 ${level}%"
-            break
+    if(level > 70)      label = "🟢 ${level}%"
+    else if(level > 25) label = "🟠 ${level}%"
+    else                label = "🔴 ${level}%"
+
+    // Handle recently replaced tag
+    def data = (device && state.history?.containsKey(device.id)) ? safeHistory(device) : null
+    def showTag = data?.justReplaced == true
+    def replacedTime = data?.replacedTime
+
+    if(showTag){
+        replacedTime = safeTime(replacedTime)
+        def hoursSinceReplacement = (now() - replacedTime) / (1000*60*60)
+        if(hoursSinceReplacement >= 24){
+            if(data) data.justReplaced = false
+            showTag = false
+        }
     }
 
+    if(device && showTag){
+        label += " (Recently Replaced)"
+    }
+
+    return label
+}
     // Handle recently replaced tag
     def data = (device && state.history?.containsKey(device.id)) ? safeHistory(device) : null
     def showTag = data?.justReplaced == true
