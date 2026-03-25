@@ -1,6 +1,6 @@
 // ============================================================
 // Battery Monitor 2.0 (TESTER Collaboration)
-// Version 2.7.1
+// Version 2.4.0 beta 6
 // Author: Jdthomas24
 // Namespace: jdthomas24
 // Description: Advanced Hubitat battery monitoring with analytics, trends and replacement tracking (v2.3.2). Auto-adjusts drain for low-activity devices.
@@ -16,7 +16,7 @@ definition(
     iconUrl: "https://raw.githubusercontent.com/hubitat/HubitatPublic/master/examples/icons/battery.png",
     iconX2Url: "https://raw.githubusercontent.com/hubitat/HubitatPublic/master/examples/icons/battery@2x.png",
     iconX3Url: "https://raw.githubusercontent.com/hubitat/HubitatPublic/master/examples/icons/battery@2x.png",
-    version: "2.7.1"
+    version: "2.4.0 beta 6"
 )
 
 def installed() {
@@ -124,7 +124,7 @@ section("Auto Battery Discovery") {
         autoDevices.each { device ->
             if(!state.history[device.id]) {
                 state.history[device.id] = [
-                    lastLevel: device.currentValue("battery")?.toInteger() ?: 100,
+                    lastLevel: (device.currentValue("battery")?.toInteger()) != null ? device.currentValue("battery").toInteger() : 100,
                     lastDate: now(),
                     drain: 0.3,
                     samples: [],
@@ -152,7 +152,7 @@ section("Auto Battery Discovery") {
                       "every2": "Every 2 Days",
                       "every3": "Every 3 Days",
                       "weekly": "Weekly",
-                      "critical": "Only When Battery Is Low (≤25%)"
+                      "critical": "Only When Critical"
                   ],
                   defaultValue: "daily"
 
@@ -177,11 +177,11 @@ section("Auto Battery Discovery") {
             input "staleThresholdHours", "number",
             title: "Mark device as stale if no activity for X hours",
             defaultValue: 24
-
-			input "suppressEmptyReport", "bool", title: "🔕 Don't send notification if nothing to report", defaultValue: false
+			input "notifyIncludeAppLink", "bool", title: "🔗 Include link to Battery Monitor app",            defaultValue: false
+			input "suppressEmptyReport", "bool", title: "🔕 Don't send notification if nothing to report",    defaultValue: false
 
             paragraph "<b>Test notification:</b>"
-            input "sendTestNow", "bool", title: "📤 Send Notification Now (tap, then click Done)", defaultValue: false
+            input "sendTestNow", "bool", title: "📤 Send Notification Now (tap, then click Done)",            defaultValue: false
 
         }
 
@@ -255,7 +255,8 @@ def scheduledSummary() {
     ]
 
     devs.each { device ->
-        def lvl = device.currentValue("battery")?.toInteger() ?: 100
+        def lvl = device.currentValue("battery")?.toInteger()
+        lvl = lvl != null ? lvl : 100
         def cat = lvl == 100 ? "🟢 Excellent" : lvl > 70 ? "🟢 Good" : lvl > 25 ? "🟠 Fair" : "🔴 Poor"
         categories[cat].list << [device: device, name: device.displayName.trim(), level: lvl]
     }
@@ -268,15 +269,16 @@ def scheduledSummary() {
     }
 
     // ---- High Drain Section ----
-    // Flags any device whose health() is NOT Excellent (i.e. Good, Fair, or Poor drain rate)
-    def highDrainList = devs.findAll { device ->
-        getDrain(device) > 0.7
-    }.collect { device ->
-        def lvl = device.currentValue("battery")?.toInteger() ?: 100
-        [name: device.displayName.trim(), level: lvl, health: health(device), drain: displayDrain(device)]
-    }.sort { a, b ->
-        a.level != b.level ? a.level <=> b.level : a.name <=> b.name
-    }
+// Flags only devices in 🔴 Poor health (>1.2%/day drain)
+def highDrainList = devs.findAll { device ->
+    getDrain(device) > 1.2
+}.collect { device ->
+    def lvl = device.currentValue("battery")?.toInteger()
+    lvl = lvl != null ? lvl : 100
+    [name: device.displayName.trim(), level: lvl, health: health(device), drain: displayDrain(device)]
+}.sort { a, b ->
+    a.level != b.level ? a.level <=> b.level : a.name <=> b.name
+}
 
     // ---- Build message — only include enabled categories ----
     def msg = "🔋 Battery Summary\n"
@@ -299,16 +301,16 @@ def scheduledSummary() {
     }
 
     // High drain section
-if (notifyHighDrain != null ? notifyHighDrain : true) {
-    msg += "\n⚠️ High Drain Devices (Battery Health):\n"
-    if (highDrainList) {
-        highDrainList.each { dev ->
-            msg += "• ${dev.name} — ${dev.level}% (Drain: ${dev.drain}%/day, ${dev.health})\n"
+    if (notifyHighDrain != null ? notifyHighDrain : true) {
+        msg += "\n⚠️ High Drain (🔴 Poor):\n"
+        if (highDrainList) {
+            highDrainList.each { dev ->
+                msg += "• ${dev.health} (${dev.drain}%) ${dev.name} (${dev.level}%)\n"
+            }
+        } else {
+            msg += "None\n"
         }
-    } else {
-        msg += "None\n"
     }
-}
 
     // Stale Devices
     if (notifyStale != null ? notifyStale : true) {
@@ -330,6 +332,12 @@ if (notifyHighDrain != null ? notifyHighDrain : true) {
         if (!hasContent) return
     }
 
+    // Optionally append link to the Battery Monitor app
+    if (notifyIncludeAppLink != null ? notifyIncludeAppLink : false) {
+        def hubIp = location.hub.localIP
+        msg += "\n🔗 Battery Monitor: http://${hubIp}/installedapp/configure/${app.id}/mainPage"
+    }
+
     // Send notifications — always send if at least one category is enabled
     if (enablePush) sendPush(msg)
     if (notifyDevices) notifyDevices.each { it.deviceNotification(msg) }
@@ -339,11 +347,7 @@ if (notifyHighDrain != null ? notifyHighDrain : true) {
 // ===================== CRITICAL ALERTS =====================
 // ============================================================
 def sendCriticalReport(device, level) {
-    def msg = "🔴 Low Battery Alert\n\n" +
-              "${device.displayName} is at ${level}% battery.\n\n" +
-              "⚠️ This alert is based on battery level only.\n" +
-              "Check Battery Health (drain rate) in the report for additional insight."
-
+    def msg = "🔴 Battery Critical Alert\n\n${device.displayName} is at ${level}%."
     if (enablePush) sendPush(msg)
     if (notifyDevices) notifyDevices.each { it.deviceNotification(msg) }
 }
@@ -365,7 +369,7 @@ def updateBattery(device, level){
     // Initialize history entry if missing
     if(!data){
         state.history[device.id] = [
-            lastLevel: level ?: 100,
+            lastLevel: level != null ? level : 100,
             lastDate: now(),
             drain: 0.3,
             samples: [],
@@ -400,13 +404,13 @@ def updateBattery(device, level){
 
     // 🔹 Clear if battery has started draining (real usage detected)
     if(data.justReplaced && level < 95){
-    data.justReplaced = false
-}
+        data.justReplaced = false
+    }
 
     // 🔹 Fallback: clear after 24 hours
     else if(data.justReplaced && (now() - safeTime(replacedAt)) > 1000*60*60*24){
-    data.justReplaced = false
-}
+        data.justReplaced = false
+    }
 
     // Update drain based on lastLevel and samples
     def days = (now() - safeTime(data.lastDate)) / (1000*60*60*24)
@@ -438,7 +442,7 @@ def updateBattery(device, level){
 // ===================== DETECT REPLACEMENT ==================
 // ============================================================
 def detectReplacement(device, newLevel, oldLevel){
-    newLevel = newLevel ?: 100
+    newLevel = newLevel != null ? newLevel : 100
     oldLevel = oldLevel ?: state.history[device.id]?.lastLevel ?: 0
 
     if(!state.history[device.id]){
@@ -485,17 +489,18 @@ def updateTrend(device, drain){
         }
     }
 
-    if(adjustedDrain < 0.3) state.trend[device.id] = "Stable (Low Drain)"
-    else if(adjustedDrain < 0.8) state.trend[device.id] = "Normal Usage"
-    else state.trend[device.id] = "High Drain"
+    if(adjustedDrain < 0.3) state.trend[device.id] = "Stable"
+    else if(adjustedDrain < 0.8) state.trend[device.id] = "Moderate"
+    else state.trend[device.id] = "Heavy Drain"
 }
 
 def getDrain(device){ return state.history?.get(device.id)?.drain ?:0.3 }
 def displayDrain(device){ return String.format("%.2f",getDrain(device)) }
 def estDays(device){
-    def level=device.currentValue("battery")?.toInteger() ?:100
-    def drain=getDrain(device)
-    if(drain<=0) drain=0.3
+    def level = device.currentValue("battery")?.toInteger()
+    level = level != null ? level : 100
+    def drain = getDrain(device)
+    if (drain <= 0) drain = 0.3
     return Math.round(level/drain)
 }
 def health(device){
@@ -516,7 +521,7 @@ def safeHistory(device){
     def data = state.history?.get(device.id)
     if(!data){
         data = [
-            lastLevel: device.currentValue("battery")?.toInteger() ?: 100,
+            lastLevel: (device.currentValue("battery")?.toInteger()) != null ? device.currentValue("battery").toInteger() : 100,
             lastDate: now(),
             drain: 0.3,
             samples: [],
@@ -557,10 +562,12 @@ def formatTimeAgo(ts){
 def getBatteryLevelDisplay(level, device=null){
     level = (level instanceof Number ? level : null) != null ? level : 100
 
-    def label = ""
-    if(level > 70)      label = "🟢 ${level}%"
-    else if(level > 25) label = "🟠 ${level}%"
-    else                label = "🔴 ${level}%"
+    def cat = level == 100 ? "🟢 Excellent" :
+              level > 70  ? "🟢 Good" :
+              level > 25  ? "🟠 Fair" :
+                            "🔴 Poor"
+
+    def label = "${cat} (${level}%)"
 
     // Handle recently replaced tag
     def data = (device && state.history?.containsKey(device.id)) ? safeHistory(device) : null
@@ -592,7 +599,7 @@ def logReplacement(device, newLevel, manual=false){
     def data = state.history[device.id]
     if(!data){
         state.history[device.id] = [
-            lastLevel: newLevel ?: 100,
+            lastLevel: newLevel != null ? newLevel : 100,
             lastDate: now(),
             drain: 0.3,
             samples: [],
@@ -648,8 +655,10 @@ def summaryPage(){
         section("Battery Summary"){
             def devs = (autoDevices ?: []).findAll{ it?.currentValue("battery") != null }
             devs = devs.sort{ a,b -> 
-                def levelA = a.currentValue("battery") ?: 100
-                def levelB = b.currentValue("battery") ?: 100
+                def levelA = a.currentValue("battery")?.toInteger()
+                levelA = levelA != null ? levelA : 100
+                def levelB = b.currentValue("battery")?.toInteger()
+                levelB = levelB != null ? levelB : 100
                 levelA != levelB ? levelA <=> levelB : a.displayName <=> b.displayName
             }
 
@@ -666,7 +675,8 @@ def summaryPage(){
             devs.each{ device ->
                 def data = safeHistory(device)
 
-                def level = device.currentValue("battery")?.toInteger() ?: 100
+                def level = device.currentValue("battery")?.toInteger()
+                level = level != null ? level : 100
                 def drain = getDrain(device)
                 def est = estDays(device)
                 def h = health(device)
@@ -715,8 +725,10 @@ def trendsPage(){
 
             // Sort by worst battery first using same color thresholds
             devs = devs.sort { a, b ->
-                def levelA = a.currentValue("battery")?.toInteger() ?: 100
-                def levelB = b.currentValue("battery")?.toInteger() ?: 100
+                def levelA = a.currentValue("battery")?.toInteger()
+                levelA = levelA != null ? levelA : 100
+                def levelB = b.currentValue("battery")?.toInteger()
+                levelB = levelB != null ? levelB : 100
                 levelA != levelB ? levelA <=> levelB : a.displayName.trim() <=> b.displayName.trim()
             }
 
@@ -728,7 +740,8 @@ def trendsPage(){
 
             devs.each{ device ->
                 def hist = safeHistory(device)
-                def level = device.currentValue("battery")?.toInteger() ?: 100
+                def level = device.currentValue("battery")?.toInteger()
+                level = level != null ? level : 100
                 def drain = hist?.drain ?: 0.3
                 def trend = state.trend[device.id] ?: "Unknown"
 
@@ -739,7 +752,7 @@ def trendsPage(){
                 table+="<td>${device.displayName}</td>"
                 table+="<td>${color}</td>"
                 table+="<td>${trend}</td>"
-                table+="<td>${String.format('%.2f', drain)}%/day</td>"
+                table+="<td>${String.format('%.2f', drain)}</td>"
                 table+="</tr>"
             }
 
@@ -907,7 +920,8 @@ def manualReplacementConfirmPage() {
                 replaceDevicesManual.each { deviceId ->
                     def device = autoDevices.find { it.id == deviceId }
                     if(device) {
-                        def level = device.currentValue("battery")?.toInteger() ?: 100
+                        def level = device.currentValue("battery")?.toInteger()
+                        level = level != null ? level : 100
 
                         // Ensure history exists
                         if(!state.history[device.id]) {
@@ -967,107 +981,44 @@ def manualReplacementConfirmPage() {
 def infoPage(Map params = [:]){
     dynamicPage(name:"infoPage", title:"Battery Health Guide", install:false){
         
-        // ================= COLOR CLARIFICATION =================
+        // ✅ Updated note to reflect consistent colors
         section("<b>Note on Colors</b>") {
-           paragraph "Battery reports use color indicators for battery percentage:\n" +
-          "🔴 Low (≤25%)  |  🟠 Medium (26–70%)  |  🟢 Good (71–100%)\n\n" +
-          "Battery health is based on drain rate (how fast the battery is used), not battery percentage.\n\n" +
-          "Low battery and poor health are different:\n" +
-          "• 🔴 Low Battery = needs replacement soon\n" +
-          "• ⚠️ Poor Health = draining faster than expected"
+            paragraph "⚠ Colors in battery reports reflect battery percentage (🔴 low, 🟠 medium, 🟢 good), while health ratings also use the same color system for consistency (🟢 Excellent/Good, 🟠 Fair, 🔴 Poor)."
         }
 
-        // ================= HEALTH TABLE =================
         section("<b>Battery Health Breakdown</b>"){
             def table = """<table style='width:100%; border-collapse: collapse;'>
 <tr style='font-weight:bold;'><td>Health</td><td>Drain Rate (per day)</td><td>What It Means</td></tr>
-<tr><td>Excellent</td><td>&lt; 0.3%</td><td>Very efficient device with minimal battery usage</td></tr>
-<tr><td>Good</td><td>0.3 – 0.7%</td><td>Normal battery usage</td></tr>
-<tr><td>Fair</td><td>0.7 – 1.2%</td><td>Higher-than-normal drain</td></tr>
-<tr><td>Poor</td><td>&gt; 1.2%</td><td>Battery draining quickly — likely an issue</td></tr>
+<tr><td>🟢 Excellent</td><td>&lt; 0.3%</td><td>Battery is barely draining (very efficient device)</td></tr>
+<tr><td>🟢 Good</td><td>0.3 – 0.7%</td><td>Normal battery usage</td></tr>
+<tr><td>🟠 Fair</td><td>0.7 – 1.2%</td><td>Higher-than-normal drain</td></tr>
+<tr><td>🔴 Poor</td><td>&gt; 1.2%</td><td>Battery draining fast (problem likely)</td></tr>
 </table>"""
             paragraph table
-
-            paragraph "Devices with drain above 0.7%/day are flagged as <b>High Drain</b> in reports."
         }
 
-        // ================= DRAIN EXPLANATION =================
         section("<b>🔍 What is Battery Drain?</b>"){ 
-            paragraph "Battery drain represents the estimated percentage of battery a device uses per day.\n\n" +
-                      "This app calculates drain using a smoothed average of recent battery activity (up to 5 samples), rather than a single reading.\n\n" +
-                      "Key behaviors:\n" +
-                      "• Uses averaging to stabilize readings\n" +
-                      "• Filters out sudden spikes or bad reports\n" +
-                      "• Caps extreme values to prevent unrealistic drain\n" +
-                      "• Resets and recalculates after battery replacement\n\n" +
-                      "New or recently replaced devices may temporarily show a default drain (~0.30%/day) until enough data is collected.\n\n" +
-                      "<b>Lower drain = longer battery life</b>\n" +
-                      "<b>Higher drain = possible issue (signal, reporting frequency, or device behavior)</b>"
+            paragraph "Battery drain shows how fast a device uses battery (% per day). Lower values mean longer battery life. Higher values may indicate excessive usage, weak signal, or device issues." 
         }
-
-        // ================= DRAIN WARMUP =================
-        section("<b>⚙️ Why Drain May Look Incorrect at First</b>"){ 
-            paragraph "Battery drain becomes more accurate over time.\n\n" +
-                      "You may notice:\n" +
-                      "• New devices show ~0.30%/day (default baseline)\n" +
-                      "• Recently replaced batteries reset drain\n" +
-                      "• Devices that report infrequently update slowly\n\n" +
-                      "Allow devices time to report multiple battery readings for best accuracy."
+        
+        section("<b>📅 How Estimated Days Works</b>"){ 
+            paragraph "Estimated days remaining is calculated using the current battery level divided by the average daily drain rate. This becomes more accurate after multiple battery reports." 
         }
-
-        // ================= EST DAYS =================
-        section("<b>📅 Estimated Battery Life</b>"){ 
-            paragraph "Estimated days remaining is calculated using:\n\n" +
-                      "<b>Battery % ÷ Daily Drain Rate</b>\n\n" +
-                      "This value becomes more accurate as more drain data is collected."
-        }
-
-        // ================= TRENDS =================
+        
         section("<b>📊 Understanding Trends</b>"){ 
-            paragraph "Trends reflect how quickly a device is draining based on recent activity:\n\n" +
-                      	"• Stable (Low Drain) = very low drain (<0.3%/day)\n" +
-						"• Normal Usage = typical usage (0.3–0.8%/day)\n" +
-						"• High Drain = high usage (≥0.8%/day)\n\n"
-                      "Devices need multiple battery reports before trends become reliable."
+            paragraph "Trends are calculated using recent battery activity. Devices need multiple battery reports before trends become accurate.\n• Stable = very low drain\n• Moderate = normal usage\n• Heavy Drain = higher-than-normal usage" 
         }
-
-        // ================= REPLACEMENT =================
+        
         section("<b>🔋 Battery Replacement Detection</b>"){ 
-            paragraph "The app automatically detects battery replacement when a device jumps from ≤40% to ≥95%.\n\n" +
-                      "Additional logic helps detect replacements even with partial jumps when sufficient history exists.\n\n" +
-                      "Manual replacement can be used if a battery is changed outside these conditions.\n\n" +
-                      "After replacement:\n" +
-                      "• Drain resets to a baseline\n" +
-                      "• Device is marked as <b>Recently Replaced</b>\n" +
-                      "• Label clears after ~24 hours or once normal drain resumes"
+            paragraph "The app automatically detects battery replacement when a device jumps from ≤40% to ≥95%. Manual replacement can be used if a battery is changed outside this range.\n\nAfter a battery is replaced, the device will be marked as 'Recently Replaced'. This tag will automatically clear after about 24 hours or once the device reports again." 
         }
-
-        // ================= STALE =================
-        section("<b>⚠️ Stale Devices</b>"){ 
-            paragraph "A device is marked as <b>Stale</b> if it has not reported activity within the configured time threshold.\n\n" +
-                      "This may indicate:\n" +
-                      "• Device offline\n" +
-                      "• Communication issues\n" +
-                      "• Dead battery\n\n" +
-                      "Stale devices are highlighted in reports to help identify potential problems."
-        }
-
-        // ================= TROUBLESHOOTING =================
+        
         section("<b>⚠ Troubleshooting High Drain</b>"){ 
-            paragraph "If a device shows high drain:\n\n" +
-                      "• Check signal strength (Z-Wave/Zigbee routing)\n" +
-                      "• Verify device is not reporting too frequently\n" +
-                      "• Confirm correct battery type is installed\n" +
-                      "• Check for environmental factors (temperature, humidity)\n" +
-                      "• Review device firmware or driver behavior"
+            paragraph "If a device shows high drain:\n• Check signal strength (Z-Wave/Zigbee routing)\n• Verify device isn't reporting too frequently\n• Confirm correct battery type is used\n• Look for environmental factors (cold, humidity)\n• Consider device firmware or driver issues" 
         }
-
-        // ================= TIPS =================
+        
         section("<b>💡 Tips</b>"){ 
-            paragraph "• Consistent low drain = healthy device\n" +
-                      "• Sudden spikes usually indicate a problem\n" +
-                      "• Compare similar devices to identify outliers\n" +
-                      "• Allow time for data to stabilize after battery replacement"
+            paragraph "• Devices with consistent low drain are healthy\n• Sudden spikes usually indicate a problem\n• Compare similar devices to identify outliers\n" 
         }
     }
 }
