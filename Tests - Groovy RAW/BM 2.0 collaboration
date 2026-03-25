@@ -152,7 +152,7 @@ section("Auto Battery Discovery") {
                       "every2": "Every 2 Days",
                       "every3": "Every 3 Days",
                       "weekly": "Weekly",
-                      "critical": "Only When Critical"
+                      "critical": "Only When Low Battery (≤25%)"
                   ],
                   defaultValue: "daily"
 
@@ -347,7 +347,7 @@ def highDrainList = devs.findAll { device ->
 // ===================== CRITICAL ALERTS =====================
 // ============================================================
 def sendCriticalReport(device, level) {
-    def msg = "🔴 Battery Critical Alert\n\n${device.displayName} is at ${level}%."
+    def msg = "🔴 Low Battery Alert\n\n${device.displayName} is at ${level}%."
     if (enablePush) sendPush(msg)
     if (notifyDevices) notifyDevices.each { it.deviceNotification(msg) }
 }
