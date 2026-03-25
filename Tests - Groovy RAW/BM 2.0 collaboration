@@ -152,7 +152,7 @@ section("Auto Battery Discovery") {
                       "every2": "Every 2 Days",
                       "every3": "Every 3 Days",
                       "weekly": "Weekly",
-                      "critical": "Only When Critical"
+                      "critical": "Only When Battery Is Low (≤25%)"
                   ],
                   defaultValue: "daily"
 
@@ -299,16 +299,16 @@ def scheduledSummary() {
     }
 
     // High drain section
-    if (notifyHighDrain != null ? notifyHighDrain : true) {
-        msg += "\n⚠️ Health (Drain / Day):\n"
-        if (highDrainList) {
-            highDrainList.each { dev ->
-                msg += "• ${dev.health} (${dev.drain}%) ${dev.name} (${dev.level}%)\n"
-            }
-        } else {
-            msg += "None\n"
+if (notifyHighDrain != null ? notifyHighDrain : true) {
+    msg += "\n⚠️ High Drain Devices (Battery Health):\n"
+    if (highDrainList) {
+        highDrainList.each { dev ->
+            msg += "• ${dev.name} — ${dev.level}% (Drain: ${dev.drain}%/day, ${dev.health})\n"
         }
+    } else {
+        msg += "None\n"
     }
+}
 
     // Stale Devices
     if (notifyStale != null ? notifyStale : true) {
@@ -339,7 +339,11 @@ def scheduledSummary() {
 // ===================== CRITICAL ALERTS =====================
 // ============================================================
 def sendCriticalReport(device, level) {
-    def msg = "🔴 Battery Critical Alert\n\n${device.displayName} is at ${level}%."
+    def msg = "🔴 Low Battery Alert\n\n" +
+              "${device.displayName} is at ${level}% battery.\n\n" +
+              "⚠️ This alert is based on battery level only.\n" +
+              "Check Battery Health (drain rate) in the report for additional insight."
+
     if (enablePush) sendPush(msg)
     if (notifyDevices) notifyDevices.each { it.deviceNotification(msg) }
 }
@@ -481,9 +485,9 @@ def updateTrend(device, drain){
         }
     }
 
-    if(adjustedDrain < 0.3) state.trend[device.id] = "Stable"
-    else if(adjustedDrain < 0.8) state.trend[device.id] = "Moderate"
-    else state.trend[device.id] = "Heavy Drain"
+    if(adjustedDrain < 0.3) state.trend[device.id] = "Stable (Low Drain)"
+    else if(adjustedDrain < 0.8) state.trend[device.id] = "Normal Usage"
+    else state.trend[device.id] = "High Drain"
 }
 
 def getDrain(device){ return state.history?.get(device.id)?.drain ?:0.3 }
@@ -965,9 +969,12 @@ def infoPage(Map params = [:]){
         
         // ================= COLOR CLARIFICATION =================
         section("<b>Note on Colors</b>") {
-            paragraph "Battery reports use color indicators for battery percentage:\n" +
-                      "🔴 Low (≤25%)  |  🟠 Medium (26–70%)  |  🟢 Good (71–100%)\n\n" +
-                      "Battery health is shown as a rating (Excellent, Good, Fair, Poor) based on drain rate."
+           paragraph "Battery reports use color indicators for battery percentage:\n" +
+          "🔴 Low (≤25%)  |  🟠 Medium (26–70%)  |  🟢 Good (71–100%)\n\n" +
+          "Battery health is based on drain rate (how fast the battery is used), not battery percentage.\n\n" +
+          "Low battery and poor health are different:\n" +
+          "• 🔴 Low Battery = needs replacement soon\n" +
+          "• ⚠️ Poor Health = draining faster than expected"
         }
 
         // ================= HEALTH TABLE =================
