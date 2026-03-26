@@ -710,25 +710,15 @@ def summaryPage(){
         }
 
         // ✅ FORCE TOP RENDER (CRITICAL FIX)
-        section(" ") {
-            paragraph " "   // MUST NOT BE EMPTY
-        }
-
-        // ✅ Header section
-        section("Battery Summary"){
-            paragraph "<span style='color:red; font-weight:bold;'>⚠ Device links below are accessible only on your local network (LAN). They will not work remotely.</span>"
-        }
+        section(" ") { paragraph " " }
 
         def hubIp = location?.hub?.localIP ?: ""
 
         // --- SAFE FILTER + SORT ---
         def devs = (autoDevices ?: []).findAll { 
             try { it?.currentValue("battery") != null } catch(e){ return false }
-        }
-
-        devs = devs.sort { a, b ->
-            def timeA = 0
-            def timeB = 0
+        }.sort { a, b ->
+            def timeA = 0, timeB = 0
             try { timeA = a.getLastActivity()?.time ?: 0 } catch(e) {}
             try { timeB = b.getLastActivity()?.time ?: 0 } catch(e) {}
             return timeB <=> timeA
@@ -740,7 +730,7 @@ def summaryPage(){
         }
 
         // === Build HTML Table ===
-        def table = "<table style='width:100%; border-collapse: collapse;'>"
+        def table = "<table style='width:100%; border-collapse: collapse; table-layout:auto; word-wrap:break-word;'>"
         table += "<tr style='font-weight:bold;'>"
         table += "<td>Device</td><td>Battery</td><td>Drain</td><td>Est Days</td><td>Health</td><td>Last Battery</td><td>Last Activity</td>"
         table += "</tr>"
@@ -755,13 +745,10 @@ def summaryPage(){
             def lastActivityStr = "N/A"
             def lastActivity = null
             try { lastActivity = device.getLastActivity() } catch(e) {}
-            if(lastActivity){
-                try { lastActivityStr = formatTimeAgo(safeTime(lastActivity)) } catch(e) {}
-            }
-            def stale = isStale(device) ?: false
-            def color = getBatteryLevelDisplay(level, device)
-            def staleTag = stale && lastActivity ? " ⚠️ Stale (${((now() - safeTime(lastActivity))/(1000*60*60)).toInteger()}h)" : ""
+            if(lastActivity) lastActivityStr = formatTimeAgo(safeTime(lastActivity))
+            def staleTag = isStale(device) && lastActivity ? " ⚠️ Stale (${((now()-safeTime(lastActivity))/(1000*60*60)).toInteger()}h)" : ""
             def name = device.displayName ?: "Unknown Device"
+            def color = getBatteryLevelDisplay(level, device)
 
             table += "<tr>"
             table += hubIp ? "<td><a href='http://${hubIp}/device/edit/${device.id}' target='_blank'>${name}</a></td>" : "<td>${name}</td>"
@@ -776,10 +763,13 @@ def summaryPage(){
 
         table += "</table>"
 
-        // ✅ WRAP TABLE TO FIX SCROLL ISSUE
-        section("") { paragraph "<div style='white-space:normal !important;'>${table}</div>" }
+        // ✅ WRAP ENTIRE CONTENT TO FIX WRAPPING/SCROLL ISSUES
+        section("") { 
+            paragraph "<div style='white-space:normal !important; overflow-wrap:break-word;'>${table}</div>" 
+        }
     }
 }
+
 // ============================================================
 // ===================== TRENDS PAGE =========================
 // ============================================================
@@ -804,15 +794,13 @@ def trendsPage(){
             def prioA = trendPriority[trendA] ?: 3
             def prioB = trendPriority[trendB] ?: 3
             if(prioA != prioB) return prioA <=> prioB
-
             def levelA = a.currentValue("battery")?.toInteger() ?: 100
             def levelB = b.currentValue("battery")?.toInteger() ?: 100
             if(levelA != levelB) return levelA <=> levelB
-
             return a.displayName.trim() <=> b.displayName.trim()
         }
 
-        def table="<table style='width:100%; border-collapse: collapse;'>"
+        def table="<table style='width:100%; border-collapse: collapse; table-layout:auto; word-wrap:break-word;'>"
         table+="<tr style='font-weight:bold;'>"
         table+="<td>Device</td><td>Battery</td><td>Trend</td><td>Day Drain</td>"
         table+="</tr>"
@@ -835,46 +823,48 @@ def trendsPage(){
 
         table+="</table>"
 
-        // ✅ WRAP TABLE TO FIX SCROLL ISSUE
-        section("") { paragraph "<div style='white-space:normal !important;'>${table}</div>" }
+        // ✅ WRAP ENTIRE CONTENT
+        section("") { 
+            paragraph "<div style='white-space:normal !important; overflow-wrap:break-word;'>${table}</div>" 
+        }
     }
 }
 
 // ============================================================
 // ===================== HISTORY PAGE ========================
 // ============================================================
-def historyPage() {
-    dynamicPage(name:"historyPage", title:"Battery Replacement History", install:false){
+def deviceHistoryPage(){
+    dynamicPage(name:"deviceHistoryPage", title:"Device Battery History", install:false){
 
-        section("Battery Replacement History"){
-            paragraph "<b>Replacement Log</b>"
+        section("Battery History"){
+            paragraph "<b>Historical Battery Levels</b>"
         }
 
-        if(!state.replacements || state.replacements.size() == 0){
-            section(""){ paragraph "No battery replacements have been logged yet." }
+        def devs = (autoDevices ?: []).findAll{ it?.currentValue("battery") != null }
+        if(!devs){
+            section(""){ paragraph "No battery devices found." }
             return
         }
 
-        def table="<table style='width:100%; border-collapse: collapse;'>"
-        table+="<tr style='font-weight:bold;'>"
-        table+="<td>Device</td><td>Level</td><td>Date</td><td>Type?</td>"
-        table+="</tr>"
+        devs.each{ device ->
+            def hist = safeHistory(device) ?: []
+            def table="<table style='width:100%; border-collapse: collapse; table-layout:auto; word-wrap:break-word;'>"
+            table+="<tr style='font-weight:bold;'><td>Timestamp</td><td>Battery</td><td>Drain</td></tr>"
 
-        state.replacements.sort{ a,b -> b.date <=> a.date }.each{ r ->
-            def typeTag = r.type == "manual" ? "<span style='color:blue;'>M</span>" :
-                          r.type == "auto"   ? "<span style='color:green;'>A</span>" : "?"
-            table+="<tr>"
-            table+="<td>${r.device}</td>"
-            table+="<td>${r.level}%</td>"
-            table+="<td>${r.date}</td>"
-            table+="<td>${typeTag}</td>"
-            table+="</tr>"
+            hist.each{ h ->
+                table+="<tr>"
+                table+="<td>${formatTimeAgo(h.time)}</td>"
+                table+="<td>${h.level}%</td>"
+                table+="<td>${String.format('%.2f', h.drain)}</td>"
+                table+="</tr>"
+            }
+
+            table+="</table>"
+
+            section("${device.displayName}"){ 
+                paragraph "<div style='white-space:normal !important; overflow-wrap:break-word;'>${table}</div>" 
+            }
         }
-
-        table+="</table>"
-
-        // ✅ WRAP TABLE TO FIX SCROLL ISSUE
-        section("") { paragraph "<div style='white-space:normal !important;'>${table}</div>" }
     }
 }
 
@@ -968,37 +958,47 @@ def deleteHistoryConfirmPage() {
 // ============================================================
 // ===================== MANUAL REPLACEMENT PAGE =============
 // ============================================================
-def manualReplacementPage() {
-    if(state.replacements == null) state.replacements = []
-    if(!autoDevices) autoDevices = []
+def manualReplacementPage(){
+    dynamicPage(name:"manualReplacementPage", title:"Manual Battery Replacement", install:false){
 
-    app.removeSetting("replaceDevicesManual")
-    app.updateSetting("replaceConfirmManual",[value: false, type:"bool"])
-
-    dynamicPage(name: "manualReplacementPage", title: "Manual Battery Replacement", install: false) {
-        section("Select Devices") {
-            if(!autoDevices || autoDevices.size() == 0) {
-                paragraph "⚠ No battery devices available. Please select devices on the main page first."
-            } else {
-                input "replaceDevicesManual", "enum",
-                      title: "Select Devices (can choose multiple)",
-                      options: autoDevices.collectEntries { [(it.id): it.displayName] }
-                                         .sort { a, b -> a.value <=> b.value },
-                      multiple: true,
-                      required: false
-            }
+        section("Instructions"){
+            paragraph "<b>Manual Replacement</b><br>" +
+                      "Select a device below to manually update its battery or mark as replaced."
         }
 
-        section("Confirm Replacement") {
-            input "replaceConfirmManual", "bool",
-                  title: "Confirm Battery Replaced",
-                  required: false
+        def devs = (autoDevices ?: []).findAll{ it?.currentValue("battery") != null }
+        if(!devs){
+            section(""){ paragraph "No battery devices found." }
+            return
         }
 
-        section() { href "manualReplacementConfirmPage", title: "Submit Replacement" }
+        // --- Build Table ---
+        def table="<table style='width:100%; border-collapse: collapse; table-layout:auto; word-wrap:break-word;'>"
+        table+="<tr style='font-weight:bold;'>"
+        table+="<td>Device</td><td>Battery</td><td>Last Replaced</td><td>Action</td>"
+        table+="</tr>"
+
+        devs.each{ device ->
+            def level = device.currentValue("battery")?.toInteger() ?: 100
+            def lastReplaced = state.lastReplaced?.get(device.id) ?: "N/A"
+            def color = getBatteryLevelDisplay(level, device)
+
+            table+="<tr>"
+            table+="<td>${device.displayName}</td>"
+            table+="<td>${color}</td>"
+            table+="<td>${lastReplaced}</td>"
+            table+="<td><input type='button' value='Replace' onclick='manualReplace(\"${device.id}\")'></td>"
+            table+="</tr>"
+        }
+
+        table+="</table>"
+
+        // ✅ Wrap all content
+        section(""){ 
+            paragraph "<div style='white-space:normal !important; overflow-wrap:break-word;'>${table}</div>" 
+        }
     }
 }
-
 // ============================================================
 // ================ MANUAL REPLACEMENT CONFIRM PAGE ==========
 // ============================================================
