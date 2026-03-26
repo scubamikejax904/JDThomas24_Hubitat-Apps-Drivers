@@ -500,8 +500,10 @@ def updateTrend(device, drain){
 
     def adjustedDrain = drain
 
+    // Safely get device type as a string for C7/C8 compatibility
+    def devType = device?.getData()?.deviceType?.toString()?.toLowerCase() ?: ""
+
     // Reduce drain for known high-use devices
-    def devType = device?.getData()?.deviceType?.toLowerCase() ?: ""
     if(devType.contains("lock") || devType.contains("sensor") || devType.contains("contact")) {
         adjustedDrain = adjustedDrain * 0.5  // naturally high-use devices drain slower for trend calculation
     }
@@ -526,20 +528,16 @@ def updateTrend(device, drain){
     else state.trend[device.id] = "Heavy Drain"
 }
 
-def getDrain(device){ return state.history?.get(device.id)?.drain ?:0.3 }
-def displayDrain(device){ return String.format("%.2f",getDrain(device)) }
-def estDays(device){
-    def level = device.currentValue("battery")?.toInteger()
-    level = level != null ? level : 100
-    def drain = getDrain(device)
-    if (drain <= 0) drain = 0.3
-    return Math.round(level/drain)
-}
+// ============================================================
+// ===================== HEALTH CHECK ========================
+// ============================================================
 def health(device){
     def drain = getDrain(device)
 
+    // Safely get device type as a string for C7/C8 compatibility
+    def devType = device?.getData()?.deviceType?.toString()?.toLowerCase() ?: ""
+
     // Adjust health thresholds for high-use devices
-    def devType = device?.getData()?.deviceType?.toLowerCase() ?: ""
     if(devType.contains("lock") || devType.contains("sensor") || devType.contains("contact")) {
         drain = drain * 0.5  // same adjustment as updateTrend()
     }
@@ -547,7 +545,7 @@ def health(device){
     if(drain < 0.3)                     return "Excellent"
     if(drain >= 0.3 && drain <= 0.7)    return "Good"
     if(drain > 0.7 && drain <= 1.2)     return "Fair"
-                                        return "Poor"
+                                         return "Poor"
 }
 
 // ============================================================
