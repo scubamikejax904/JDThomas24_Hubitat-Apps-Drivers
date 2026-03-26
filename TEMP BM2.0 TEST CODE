@@ -696,7 +696,7 @@ def estDays(device) {
 // ============================================================
 // ===================== SUMMARY PAGE ========================
 // ============================================================
-ef summaryPage() {
+def summaryPage() {
     dynamicPage(name:"summaryPage", title:"Battery Summary", install:false){
 
         // 🛑 FIRST RUN PROTECTION
