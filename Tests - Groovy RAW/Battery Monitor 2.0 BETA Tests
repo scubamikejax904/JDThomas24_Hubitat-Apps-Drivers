@@ -2,12 +2,12 @@ definition(
     name: "Battery Monitor 2.0",
     namespace: "jdthomas24",
     author: "Jdthomas24",
-    description: "Advanced Hubitat battery monitoring with analytics, trends and replacement tracking (v2.4.0b17). Recurring scan schedule, confidence-weighted health, EWMA smoothing.",
+    description: "Advanced Hubitat battery monitoring with analytics, trends and replacement tracking (v2.4.0b24). Recurring scan schedule, confidence-weighted health, EWMA smoothing.",
     category: "Convenience",
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.0 beta 14"
+    version: "2.4.0 beta 15"
 )
 
 def installed() {
@@ -36,6 +36,12 @@ def updated() {
         scheduledSummary()
         app.updateSetting("sendNow", [value: false, type: "bool"])
     }
+
+    if (settings?.forceScanNow) {
+        scanAllDevices()
+        app.updateSetting("forceScanNow", [value: false, type: "bool"])
+        log.debug "Manual scan triggered by user"
+    }
 }
 
 def initialize() {
@@ -56,7 +62,7 @@ def initialize() {
 // =================== APPLY CUSTOM LABEL ===================
 def applyCustomLabel() {
     if (settings?.customAppName) {
-        if (app.label != settings.customAppName) {
+        if (app.label != settings?.customAppName) {
             app.updateLabel(settings.customAppName)
             log.debug "App label updated to: ${settings.customAppName}"
         }
@@ -90,7 +96,7 @@ def mainPage() {
             paragraph rawHtml: true, "<script>focusOnFirstEmptyTextInput = function() {};</script>"
         }
 
-        section("App Display Name (optional)") {
+        section("<b>App Display Name (optional)</b>") {
             input "customAppName", "text",
                   title: "Custom App Name",
                   description: "Change how the app name appears in Hubitat UI",
@@ -148,7 +154,7 @@ def mainPage() {
             paragraph "ℹ️ Enable the toggle below to reveal notification settings including frequency, timing, device targets, and which battery groups to include in reports."
             input "enablePush", "bool", title: "Enable notifications", defaultValue: true, submitOnChange: true
 
-            if (enablePush) {
+            if (settings?.enablePush != false) {
                 input "reportFrequency", "enum",
                       title: "Notification Frequency:",
                       options: [
@@ -166,7 +172,7 @@ def mainPage() {
                 input "notifyDevices", "capability.notification", title: "Notification devices", multiple: true, required: false
 
                 input "enablePushover", "bool", title: "⚙️ Enable Pushover markup", defaultValue: false, submitOnChange: true
-                if (enablePushover) {
+                if (settings?.enablePushover == true) {
                     input "pushoverPrefix", "text",
                           title: "Pushover tags",
                           description: "Pushover-specific additions to the Battery Monitor notifications, e.g. [H][TITLE=Battery Report][HTML][SELFDESTRUCT=43200]",
@@ -314,8 +320,9 @@ def scheduledSummary() {
         [name: device.displayName.trim(), level: lvl, health: health(device), drain: displayDrain(device)]
     }.sort { a, b -> a.level != b.level ? a.level <=> b.level : a.name <=> b.name }
 
-    def prefix = (enablePushover && pushoverPrefix?.trim()) ? "${pushoverPrefix.trim()}\n" : ""
-    def msg = "${prefix}🔋 Battery Summary\n"
+    def prefix   = (enablePushover && pushoverPrefix?.trim()) ? "${pushoverPrefix.trim()}\n" : ""
+    def body     = "🔋 Battery Summary\n"  // plain message body — no Pushover tags
+    def msg      = "${prefix}${body}"        // Pushover version — prefix + body
 
     def staleDevices = devList.findAll { isStale(it) }.collect {
         def last  = getLastActivityTime(it)
@@ -325,44 +332,44 @@ def scheduledSummary() {
 
     categories.each { cat, data ->
         if (data.enabled) {
-            msg += "\n${cat}:\n"
+            body += "\n${cat}:\n"
             if (data.list) {
                 data.list.each { dev ->
                     if (cat == "🔴 Poor") {
                         def info    = getCatalogBatteryInfo(dev.device)
                         def infoStr = info ? " (${info})" : ""
-                        msg += "• ${dev.level}% ${dev.name}${infoStr}\n"
+                        body += "• ${dev.level}% ${dev.name}${infoStr}\n"
                     } else {
-                        msg += "• ${dev.level}% ${dev.name}\n"
+                        body += "• ${dev.level}% ${dev.name}\n"
                     }
                 }
             } else {
-                msg += "None\n"
+                body += "None\n"
             }
         }
     }
 
     if (notifyHighDrain != null ? notifyHighDrain : true) {
-        msg += "\n⚠️ High Drain (Fair/Poor):\n"
+        body += "\n⚠️ High Drain (Fair/Poor):\n"
         if (highDrainList) {
             highDrainList.each { dev ->
-                msg += "• ${dev.health} (${dev.drain}%) ${dev.name} (${dev.level}%)\n"
+                body += "• ${dev.health} (${dev.drain}%) ${dev.name} (${dev.level}%)\n"
             }
         } else {
-            msg += "None\n"
+            body += "None\n"
         }
     }
 
     if (notifyStale != null ? notifyStale : true) {
-        msg += "\n⚠️ Stale Devices:\n"
+        body += "\n⚠️ Stale Devices:\n"
         if (staleDevices) {
             staleDevices.each { d ->
                 def info    = getCatalogBatteryInfo(d.device)
                 def infoStr = info ? " (${info})" : ""
-                msg += "• ${d.name}${infoStr} — no activity for ${d.hours}h\n"
+                body += "• ${d.name}${infoStr} — no activity for ${d.hours}h\n"
             }
         } else {
-            msg += "None\n"
+            body += "None\n"
         }
     }
 
@@ -375,15 +382,20 @@ def scheduledSummary() {
 
     if (notifyIncludeAppLink != null ? notifyIncludeAppLink : false) {
         def hubIp = location.hub.localIP
-        if (enablePushover && msg.contains("[HTML]")) {
-            msg += "\n🔗 <a href='http://${hubIp}/installedapp/configure/${app.id}/mainPage'>Battery Monitor</a>"
-        } else {
-            msg += "\n🔗 Battery Monitor: http://${hubIp}/installedapp/configure/${app.id}/mainPage"
-        }
+        // Pushover version — use HTML link if [HTML] tag is in the prefix
+        def pushoverLink = (enablePushover && prefix.contains("[HTML]")) ?
+            "\n🔗 <a href='http://${hubIp}/installedapp/configure/${app.id}/mainPage'>Battery Monitor</a>" :
+            "\n🔗 Battery Monitor: http://${hubIp}/installedapp/configure/${app.id}/mainPage"
+        // Plain version — always plain text link
+        def plainLink = "\n🔗 Battery Monitor: http://${hubIp}/installedapp/configure/${app.id}/mainPage"
+        body += plainLink
+        msg   = "${prefix}${body.replace(plainLink, pushoverLink)}"
+    } else {
+        msg = "${prefix}${body}"
     }
 
-    if (enablePush)    sendPush(msg)
-    if (notifyDevices) notifyDevices.each { it.deviceNotification(msg) }
+    if (enablePush)    sendPush(msg)                                        // Pushover-tagged version
+    if (notifyDevices) notifyDevices.each { it.deviceNotification(body) }  // clean plain-text version
 }
 
 // ============================================================
@@ -516,7 +528,7 @@ def updateTrend(device, drain) {
         if (avg > 3) adjustedDrain = Math.min(adjustedDrain, 1.0)
     }
 
-    if (adjustedDrain < 0.3)      state.trend[device.id] = "Stable"
+    if (adjustedDrain <= 0.3)     state.trend[device.id] = "Stable"
     else if (adjustedDrain < 0.8) state.trend[device.id] = "Moderate"
     else                          state.trend[device.id] = "Heavy Drain"
 }
@@ -715,8 +727,12 @@ def summaryPage() {
 
         def hubIp = location?.hub?.localIP ?: ""
 
-        section("Battery Summary") {
+        section("") {
             paragraph "<span style='color:red; font-weight:bold;'>⚠ Device links below are accessible only on your local network (LAN). They will not work remotely.</span>"
+            input "forceScanNow", "bool",
+                  title: "🔄 Force Scan Now — toggle on then click Done to immediately read all device battery levels",
+                  defaultValue: false,
+                  submitOnChange: false
 
             // FIX #8: Use local devList instead of reassigning autoDevices
             def devList = (autoDevices ?: []).findAll {
@@ -741,10 +757,11 @@ def summaryPage() {
 
             if (!devList) { paragraph "No battery devices found."; return }
 
-            def table = "<table style='width:100%; border-collapse: collapse;'>"
-            table += "<tr style='font-weight:bold;'>"
-            table += "<td>Device</td><td>Battery</td><td>Drain %/day</td><td>Est Days</td><td>Health</td><td>Last Battery¹</td><td>Last Activity</td><td>Battery Type</td>"
+            def table = "<table style='width:100%; border-collapse: collapse; border: 1px solid #ccc;'>"
+            table += "<tr style='font-weight:bold; background-color:#f0f0f0;'>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Device</td><td style='padding:4px; border:1px solid #ccc;'>Battery</td><td style='padding:4px; border:1px solid #ccc;'>Drain %/day</td><td style='padding:4px; border:1px solid #ccc;'>Est Days</td><td style='padding:4px; border:1px solid #ccc;'>Health</td><td style='padding:4px; border:1px solid #ccc;'>Last Battery¹</td><td style='padding:4px; border:1px solid #ccc;'>Last Activity</td><td style='padding:4px; border:1px solid #ccc;'>Battery Type</td>"
             table += "</tr>"
+            def summaryRowNum = 0
 
             devList.each { device ->
                 // FIX #5: Added log.warn to all catch blocks so errors surface in logs
@@ -823,21 +840,23 @@ def summaryPage() {
                 }
 
                 def name = device.displayName ?: "Unknown Device"
-                table += "<tr>"
+                def summaryRowBg = (summaryRowNum % 2 == 0) ? "#ffffff" : "#f9f9f9"
+                summaryRowNum++
+                table += "<tr style='background-color:${summaryRowBg};'>"
 
                 if (hubIp) {
-                    table += "<td><a href='http://${hubIp}/device/edit/${device.id}' target='_blank'>${name}</a></td>"
+                    table += "<td style='padding:4px; border:1px solid #ccc;'><a href='http://${hubIp}/device/edit/${device.id}' target='_blank'>${name}</a></td>"
                 } else {
-                    table += "<td>${name}</td>"
+                    table += "<td style='padding:4px; border:1px solid #ccc;'>${name}</td>"
                 }
 
-                table += "<td>${color}</td>"
-                table += "<td>${String.format('%.2f', drain)}</td>"
-                table += "<td>${est}</td>"
-                table += "<td>${healthDisplay}</td>"
-                table += "<td>${lastBatteryStr}</td>"
-                table += "<td>${lastActivityStr}${staleTag}</td>"
-                table += "<td>${catalogInfo}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${color}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${String.format('%.2f', drain)}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${est}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${healthDisplay}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${lastBatteryStr}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${lastActivityStr}${staleTag}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${catalogInfo}</td>"
                 table += "</tr>"
             }
 
@@ -859,7 +878,11 @@ def trendsPage() {
             paragraph rawHtml: true, "<script>focusOnFirstEmptyTextInput = function() {};</script>"
         }
 
-        section("Battery Trends") {
+        section("") {
+            input "forceScanNow", "bool",
+                  title: "🔄 Force Scan Now — toggle on then click Done to immediately read all device battery levels",
+                  defaultValue: false,
+                  submitOnChange: false
             // FIX #8: Use local devList instead of reassigning autoDevices
             def devList = (autoDevices ?: []).findAll { it?.currentValue("battery") != null }
 
@@ -879,8 +902,9 @@ def trendsPage() {
                 return a.displayName.trim() <=> b.displayName.trim()
             }
 
-            def table = "<table style='width:100%; border-collapse: collapse;'>"
-            table += "<tr style='font-weight:bold;'><td>Device</td><td>Battery</td><td>Trend</td><td>Day Drain</td><td>Health</td><td>Confidence</td></tr>"
+            def table = "<table style='width:100%; border-collapse: collapse; border: 1px solid #ccc;'>"
+            table += "<tr style='font-weight:bold; background-color:#f0f0f0;'><td style='padding:4px; border:1px solid #ccc;'>Device</td><td style='padding:4px; border:1px solid #ccc;'>Battery</td><td style='padding:4px; border:1px solid #ccc;'>Trend</td><td style='padding:4px; border:1px solid #ccc;'>Drain %/day</td><td style='padding:4px; border:1px solid #ccc;'>Health</td><td style='padding:4px; border:1px solid #ccc;'>Confidence</td></tr>"
+            def trendsRowNum = 0
 
             devList.each { device ->
                 def hist    = safeHistory(device)
@@ -897,13 +921,15 @@ def trendsPage() {
                 def confPct    = Math.round(conf * 100)
                 def confLabel  = h == "Pending" ? "⏳ ${samples}/5 samples" : "${confPct}%"
 
-                table += "<tr>"
-                table += "<td>${device.displayName}</td>"
-                table += "<td>${color}</td>"
-                table += "<td>${trendColor} ${trend}</td>"
-                table += "<td>${String.format('%.2f', drain)}</td>"
-                table += "<td>${h}</td>"
-                table += "<td>${confLabel}</td>"
+                def trendsRowBg = (trendsRowNum % 2 == 0) ? "#ffffff" : "#f9f9f9"
+                trendsRowNum++
+                table += "<tr style='background-color:${trendsRowBg};'>"  
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${device.displayName}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${color}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${trendColor} ${trend}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${String.format('%.2f', drain)}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${h}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${confLabel}</td>"
                 table += "</tr>"
             }
 
@@ -923,7 +949,7 @@ def historyPage() {
             paragraph rawHtml: true, "<script>focusOnFirstEmptyTextInput = function() {};</script>"
         }
 
-        section("Battery Replacement History") {
+        section("") {
             if (!state.replacements || state.replacements.size() == 0) {
                 paragraph "No battery replacements have been logged yet."
                 return
@@ -953,7 +979,7 @@ def historyPage() {
             paragraph "<b>Legend:</b> <span style='color:green;'>A</span> = Automatic, <span style='color:blue;'>M</span> = Manual"
         }
 
-        section("Delete an Entry") {
+        section("<b>Delete an Entry</b>") {
             href "deleteHistoryPage", title: "🗑️ Delete a History Entry"
         }
     }
@@ -977,14 +1003,14 @@ def deleteHistoryPage() {
             state.replacements.sort { a, b -> b.date <=> a.date }.eachWithIndex { r, i ->
                 options["${i}"] = "🗑️ ${r.device} — ${r.date}"
             }
-            section("Select Entry to Delete") {
+            section("<b>Select Entry to Delete</b>") {
                 input "deleteEntrySelection", "enum",
                       title: "Choose entry",
                       options: options,
                       multiple: false,
                       required: false
             }
-            section("Confirm") {
+            section("<b>Confirm Deletion</b>") {
                 input "confirmEntryDelete", "bool",
                       title: "Confirm deletion",
                       defaultValue: false
@@ -1004,7 +1030,7 @@ def deleteHistoryConfirmPage() {
         section("") {
             paragraph rawHtml: true, "<script>focusOnFirstEmptyTextInput = function() {};</script>"
         }
-        section("Result") {
+        section("<b>Result</b>") {
             if (!confirmEntryDelete) {
                 paragraph "⚠️ Deletion cancelled — confirm checkbox was not checked."
             } else if (deleteEntrySelection == null) {
@@ -1042,7 +1068,7 @@ def manualReplacementPage() {
         section("") {
             paragraph rawHtml: true, "<script>focusOnFirstEmptyTextInput = function() {};</script>"
         }
-        section("Select Devices") {
+        section("<b>Select Devices</b>") {
             if (!devList || devList.size() == 0) {
                 paragraph "⚠ No battery devices available. Please select devices on the main page first."
             } else {
@@ -1054,7 +1080,7 @@ def manualReplacementPage() {
                       required: false
             }
         }
-        section("Confirm Replacement") {
+        section("<b>Confirm Replacement</b>") {
             input "replaceConfirmManual", "bool",
                   title: "Confirm Battery Replaced",
                   required: false
@@ -1077,7 +1103,7 @@ def manualReplacementConfirmPage() {
         section("") {
             paragraph rawHtml: true, "<script>focusOnFirstEmptyTextInput = function() {};</script>"
         }
-        section("Replacement Registered") {
+        section("<b>Replacement Registered</b>") {
             if (replaceDevicesManual && replaceConfirmManual) {
                 def successCount = 0
 
@@ -1153,6 +1179,7 @@ def batteryCatalogPage() {
         def standardTypes = [
             "AA":     ["1", "2", "3", "4", "6", "8"],
             "AAA":    ["1", "2", "3", "4", "6", "8"],
+            "CR2":    ["1", "2"],
             "CR2016": ["1", "2"],
             "CR2032": ["1", "2"],
             "CR2430": ["1", "2"],
@@ -1183,7 +1210,7 @@ def batteryCatalogPage() {
             }
         }
 
-        section("Select battery type and quantity for each device. Tap Done to save.") {
+        section("<b>Select battery type and quantity for each device. Tap Done to save.</b>") {
             devList.each { device ->
                 section() {
                     input "battInfo_${device.id}",
@@ -1243,8 +1270,8 @@ def infoPage(Map params = [:]) {
                       "A short spike may push the Trend to 🔴 Heavy Drain while Health stays 🟢 Good until enough samples confirm the pattern."
             def table = """<table style='width:100%; border-collapse: collapse;'>
 <tr style='font-weight:bold;'><td>Trend</td><td>Drain Rate (per day)</td><td>Health Equivalent</td></tr>
-<tr><td>🟢 Stable</td><td>&lt; 0.3%</td><td>Excellent</td></tr>
-<tr><td>🟠 Moderate</td><td>0.3% – 0.8%</td><td>Good</td></tr>
+<tr><td>🟢 Stable</td><td>&lt;= 0.3%</td><td>Excellent</td></tr>
+<tr><td>🟠 Moderate</td><td>&gt; 0.3% – 0.8%</td><td>Good</td></tr>
 <tr><td>🔴 Heavy Drain</td><td>0.8% – 1.5%</td><td>Fair — worth monitoring, no alert</td></tr>
 <tr><td>🔴 Heavy Drain</td><td>&gt; 1.5%</td><td>Poor — High Drain alert fires</td></tr>
 </table>"""
@@ -1258,7 +1285,11 @@ def infoPage(Map params = [:]) {
                       "• At least <b>5 drain samples</b> collected — shown as ⏳ Pending (X/5 samples) in the Health column of the Summary and Trends pages<br>" +
                       "• At least <b>5 days</b> since the battery was replaced or first seen<br><br>" +
                       "Once both gates pass, a confidence-weighted verdict is calculated from the real data. " +
-                      "Samples accumulate from scheduled scans and device-triggered battery events — more frequent scans mean faster maturity."
+                      "Samples accumulate from scheduled scans and device-triggered battery events — more frequent scans mean faster maturity.<br><br>" +
+                      "<b>Tip for slow-reporting devices:</b> Some devices only report battery every few days or only when the level changes. " +
+                      "If a device is stuck on Pending, use the <b>Force Scan Now</b> toggle on the Battery Summary or Trends page to immediately read all devices. " +
+                      "Note that a scan can only generate a new sample if the battery level has changed since the last reading — " +
+                      "forcing scans more often will not help if the device reports the same level every time."
         }
 
         section("<b>📊 How Confidence Weighting Works</b>") {
