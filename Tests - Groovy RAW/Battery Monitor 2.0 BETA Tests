@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.0 beta 17"
+    version: "2.4.0 beta 18"
 )
 
 def installed() {
@@ -30,11 +30,6 @@ def updated() {
         state.history.remove(removedId)
         state.trend?.remove(removedId)
         log.debug "Cleaned up removed device: ${removedId}"
-    }
-
-    if (settings?.sendNow) {
-        scheduledSummary()
-        app.updateSetting("sendNow", [value: false, type: "bool"])
     }
 
 }
@@ -76,6 +71,7 @@ preferences {
     page(name: "infoPage")
     page(name: "batteryCatalogPage")
     page(name: "forceScanPage")
+    page(name: "sendNotificationPage")
 }
 
 // ============================================================
@@ -189,7 +185,7 @@ def mainPage() {
                 input "notifyIncludeAppLink", "bool", title: "🔗 Include link to Battery Monitor app <b>(Local Only)</b>", defaultValue: false
 
                 paragraph "<b>Send notification now:</b>"
-                input "sendNow", "bool", title: "📤 Send Notification Now <b>(toggle on then click Done)</b>", defaultValue: false
+                href "sendNotificationPage", title: "📤 Send Notification Now", description: "Tap to preview and send a battery summary notification"
             }
         }
 
@@ -445,13 +441,19 @@ def updateBattery(device, level) {
     // ── EWMA-smoothed drain calculation ──────────────────────────────────────
     def days = (now() - safeTime(data.lastDate)) / (1000 * 60 * 60 * 24)
     if (days > 0 && !data.justReplaced) {
-        // FIX #3: Use explicit != null checks so a valid drain of 0 is not treated as missing
         def lastLevel = data.lastLevel != null ? data.lastLevel : 100
         def rawDrain  = (lastLevel - level) / days
 
-        if (rawDrain > 0 && rawDrain < 5) {
+        // Accept positive drain readings normally.
+        // Also accept zero-drain readings (rawDrain == 0) if at least 24 hours have
+        // passed — a stable reading over a full day is valid data showing no drain
+        // occurred. This prevents devices on fresh batteries (motion sensors, smoke
+        // detectors) from staying at 0/5 samples indefinitely while the level holds.
+        def hours = days * 24
+        def validSample = (rawDrain > 0 && rawDrain < 5) || (rawDrain == 0 && hours >= 24)
+
+        if (validSample) {
             def alpha      = 0.3
-            // FIX #3: Explicit null check — samples[-1] could be 0 which is valid
             def prevSmooth = (data.samples && data.samples.size() > 0) ? data.samples[-1] : rawDrain
             def smoothed   = alpha * rawDrain + (1 - alpha) * prevSmooth
 
@@ -461,7 +463,6 @@ def updateBattery(device, level) {
 
         if (data.samples && data.samples.size() > 0) {
             def avg = data.samples.sum() / data.samples.size()
-            // FIX #3: avg could legitimately be 0; Math.min handles that correctly, no change needed here
             data.drain = Math.min(avg, 3.0)
             updateTrend(device, data.drain)
         }
@@ -512,7 +513,8 @@ def updateTrend(device, drain) {
 
     def adjustedDrain = drain
     def devType = device?.getData()?.deviceType?.toLowerCase() ?: ""
-    if (devType.contains("lock") || devType.contains("sensor") || devType.contains("contact")) {
+    if (devType.contains("lock") || devType.contains("sensor") || devType.contains("contact") ||
+        devType.contains("smoke") || devType.contains("carbonmonoxide")) {
         adjustedDrain = adjustedDrain * 0.5
     }
 
@@ -569,11 +571,16 @@ def health(device) {
         daysSinceReplaced = (now() - safeTime(hist.lastDate)) / (1000 * 60 * 60 * 24)
     }
 
-    if (samples < 5 || daysSinceReplaced < 5) return "Pending"
+    // Standard gate: 5 samples and 5 days
+    // Slow reporter gate: after 14 days accept minimum 2 samples — smoke detectors
+    // and other infrequent reporters may never reach 5 samples quickly enough
+    def slowReporter = (daysSinceReplaced >= 14 && samples >= 2)
+    if (!slowReporter && (samples < 5 || daysSinceReplaced < 5)) return "Pending"
 
     def rawDrain = getDrain(device)
     def devType  = device?.getData()?.deviceType?.toLowerCase() ?: ""
-    if (devType.contains("lock") || devType.contains("sensor") || devType.contains("contact")) {
+    if (devType.contains("lock") || devType.contains("sensor") || devType.contains("contact") ||
+        devType.contains("smoke") || devType.contains("carbonmonoxide")) {
         rawDrain = rawDrain * 0.5
     }
 
@@ -1146,6 +1153,32 @@ def manualReplacementConfirmPage() {
     }
 }
 
+
+// ============================================================
+// ============= SEND NOTIFICATION PAGE ======================
+// ============================================================
+def sendNotificationPage() {
+    dynamicPage(name: "sendNotificationPage", title: "Send Notification", install: false) {
+        section("") {
+            paragraph rawHtml: true, "<script>focusOnFirstEmptyTextInput = function() {};</script>"
+        }
+        section("<b>Confirm</b>") {
+            paragraph "This will send a battery summary notification to all configured notification devices right now."
+            input "sendNowConfirm", "bool",
+                  title: "✅ Confirm — send the notification",
+                  defaultValue: false,
+                  submitOnChange: true
+        }
+        if (settings?.sendNowConfirm) {
+            section("<b>Result</b>") {
+                scheduledSummary()
+                app.updateSetting("sendNowConfirm", [value: false, type: "bool"])
+                paragraph "✅ Notification sent to all configured devices."
+            }
+        }
+    }
+}
+
 // ============================================================
 // ===================== FORCE SCAN PAGE =====================
 // ============================================================
@@ -1272,13 +1305,13 @@ def infoPage(Map params = [:]) {
             paragraph rawHtml: true, "<script>focusOnFirstEmptyTextInput = function() {};</script>"
         }
 
-
+        // ── GROUP 1: Understanding Your Data ─────────────────────────────────
         section("") {
-            paragraph "<div style='background-color:#e8f0fe; padding:6px 10px; border-radius:4px; font-weight:bold;'>📊 Understanding Your Data</div>"
+            paragraph rawHtml: true, "<div style='background-color:#e8f0fe; padding:6px 10px; border-radius:4px; font-weight:bold;'>📊 Understanding Your Data</div>"
         }
 
         section("<b>🔑 Color & Icon Legend</b>") {
-            paragraph "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Battery level colors reflect current charge percentage. " +
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Battery level colors reflect current charge percentage. " +
                       "Health ratings use the same color scheme but are based on drain rate — not battery percentage. " +
                       "A device can show 🟢 Good battery level yet 🔴 Poor health if it is draining unusually fast.<br><br>" +
                       "<table style='width:100%; border-collapse: collapse;'>" +
@@ -1292,140 +1325,100 @@ def infoPage(Map params = [:]) {
                       "</table></div>"
         }
 
-        section("<b>🔋 Battery Health</b>") {
-            paragraph "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Based on long-term average drain rate. Requires at least 5 samples and 5 days of data before a verdict is assigned.<br><br>" +
+        section("<b>🔋 Battery Health & Trends</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Health is a long-term confidence-weighted average drain rate. " +
+                      "Trend uses the same thresholds but reacts faster to recent readings — a short spike may push Trend to 🔴 Heavy Drain " +
+                      "while Health stays 🟢 Good until enough samples confirm the pattern.<br><br>" +
                       "<table style='width:100%; border-collapse: collapse;'>" +
-                      "<tr style='font-weight:bold;'><td>Status</td><td>Drain Rate (per day)</td><td>What It Means</td></tr>" +
-                      "<tr><td>⏳ Pending</td><td>Not enough data yet</td><td>Less than 5 samples or 5 days collected — verdict withheld to prevent false positives</td></tr>" +
-                      "<tr><td>🟢 Excellent</td><td>&lt; 0.3%</td><td>Very efficient device, minimal drain</td></tr>" +
-                      "<tr><td>🟢 Good</td><td>0.3% – 0.8%</td><td>Normal battery usage</td></tr>" +
-                      "<tr><td>🟠 Fair</td><td>&gt; 0.8% – 1.5%</td><td>Above average drain — keep an eye on it</td></tr>" +
-                      "<tr><td>🔴 Poor</td><td>&gt; 1.5%</td><td>High drain, likely an issue worth investigating</td></tr>" +
+                      "<tr style='font-weight:bold;'><td>Health</td><td>Trend</td><td>Drain/day</td><td>What It Means</td></tr>" +
+                      "<tr><td>⏳ Pending</td><td>—</td><td>—</td><td>Not enough data yet</td></tr>" +
+                      "<tr><td>🟢 Excellent</td><td>🟢 Stable</td><td>&lt;= 0.3%</td><td>Very efficient, minimal drain</td></tr>" +
+                      "<tr><td>🟢 Good</td><td>🟠 Moderate</td><td>0.3–0.8%</td><td>Normal battery usage</td></tr>" +
+                      "<tr><td>🟠 Fair</td><td>🔴 Heavy Drain</td><td>0.8–1.5%</td><td>Above average — worth monitoring, no alert</td></tr>" +
+                      "<tr><td>🔴 Poor</td><td>🔴 Heavy Drain</td><td>&gt; 1.5%</td><td>High drain — High Drain alert fires</td></tr>" +
                       "</table></div>"
         }
 
-        section("<b>📈 Trends</b>") {
-            paragraph "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Trends use the same drain thresholds as Health. The difference is that Health is a long-term " +
-                      "confidence-weighted average while Trend reacts to recent samples and can shift faster. " +
-                      "A short spike may push the Trend to 🔴 Heavy Drain while Health stays 🟢 Good until enough samples confirm the pattern.<br><br>" +
-                      "<table style='width:100%; border-collapse: collapse;'>" +
-                      "<tr style='font-weight:bold;'><td>Trend</td><td>Drain Rate (per day)</td><td>Health Equivalent</td></tr>" +
-                      "<tr><td>🟢 Stable</td><td>&lt;= 0.3%</td><td>Excellent</td></tr>" +
-                      "<tr><td>🟠 Moderate</td><td>&gt; 0.3% – 0.8%</td><td>Good</td></tr>" +
-                      "<tr><td>🔴 Heavy Drain</td><td>0.8% – 1.5%</td><td>Fair — worth monitoring, no alert</td></tr>" +
-                      "<tr><td>🔴 Heavy Drain</td><td>&gt; 1.5%</td><td>Poor — High Drain alert fires</td></tr>" +
-                      "</table></div>"
-        }
-
-        section("<b>⏳ What Is 'Pending' Health?</b>") {
-            paragraph "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>When a battery is new or has just been replaced, the app intentionally withholds a health verdict " +
-                      "and shows <b>⏳ Pending</b> instead. This prevents false 'Poor' labels caused by sparse or noisy early readings.<br><br>" +
-                      "Two conditions must both be met before a health rating is assigned:<br>" +
-                      "• At least <b>5 drain samples</b> collected — shown as ⏳ Pending (X/5 samples) in the Health column of the Summary and Trends pages<br>" +
+        section("<b>⏳ Pending Health, Samples & Confidence</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>The app withholds a health verdict and shows <b>⏳ Pending</b> until enough data is collected. " +
+                      "This prevents false Poor ratings from sparse early readings.<br><br>" +
+                      "<b>Standard gate</b> — both must be met:<br>" +
+                      "• At least <b>5 samples</b> collected (shown as X/5 in the Health column)<br>" +
                       "• At least <b>5 days</b> since the battery was replaced or first seen<br><br>" +
-                      "Once both gates pass, a confidence-weighted verdict is calculated from the real data. " +
-                      "Samples accumulate from scheduled scans and device-triggered battery events — more frequent scans mean faster maturity.</div>"
+                      "<b>Slow reporter gate</b> — for devices like smoke detectors that rarely report:<br>" +
+                      "• After <b>14 days</b> with at least <b>2 samples</b>, Pending clears automatically<br>" +
+                      "• A stable reading held for 24+ hours counts as a valid zero-drain sample<br><br>" +
+                      "<b>Confidence weighting:</b> Early readings carry less weight than established ones. " +
+                      "With 5 samples the blend is partial — by 10 samples the full measured drain is used. " +
+                      "A single unusual reading cannot spike a device straight to Poor.</div>"
         }
 
+        section("<b>🔍 Drain, Estimated Days & Last Battery</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Drain shows how fast a device uses battery (% per day). " +
+                      "Calculated using EWMA (exponential weighted moving average) across the last 10 readings — " +
+                      "recent readings matter slightly more but a single spike won't throw off the average.<br><br>" +
+                      "<b>Estimated days remaining</b> = current level ÷ average daily drain. " +
+                      "Works best after 7+ days of history. Devices showing Pending will have less reliable estimates.<br><br>" +
+                      "<b>Last Battery</b> shows when the app last received a battery reading — from a scheduled scan or device event. " +
+                      "It is independent of Last Activity. A device can be recently active but show an old Last Battery timestamp " +
+                      "if its battery level has not changed or reported. This is normal.</div>"
+        }
+
+        // ── GROUP 2: Features & Actions ──────────────────────────────────────
         section("") {
-            paragraph "<div style='background-color:#e8f0fe; padding:6px 10px; border-radius:4px; font-weight:bold;'>⚙️ Features & Actions</div>"
+            paragraph rawHtml: true, "<div style='background-color:#e8f0fe; padding:6px 10px; border-radius:4px; font-weight:bold;'>⚙️ Features & Actions</div>"
         }
 
-        section("<b>🔄 What Does Force Scan Actually Do?</b>") {
-            paragraph "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>The <b>Force Scan Now</b> button on the Summary and Trends pages immediately reads the current " +
-                      "battery level from every monitored device instead of waiting for the next scheduled scan.<br><br>" +
-                      "<b>Force Scan does NOT instantly generate drain samples.</b> A drain sample requires two things:<br>" +
-                      "• The battery level must have <b>changed</b> since the last reading<br>" +
-                      "• Enough <b>time must have passed</b> for a meaningful drain calculation<br><br>" +
-                      "If a device reports the same level it reported last time — even hours later — no new sample is recorded. " +
-                      "Samples can only come from real battery drain over real time.<br><br>" +
-                      "<b>When Force Scan helps:</b> A device that has not reported in several days and the scheduled scan has not caught it yet. " +
-                      "If the level has dropped since the last reading, a sample will be recorded immediately.<br><br>" +
-                      "<b>When Force Scan does not help:</b> A device reporting the same level repeatedly, or a battery that simply " +
-                      "has not drained enough to register a change. The best way to build samples faster is to set the " +
-                      "Scan Interval to Hourly — more frequent reads over time means more opportunities to catch level changes.</div>"
+        section("<b>🔄 Force Scan & 🔁 Replacement Detection</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'><b>Force Scan Now</b> on the Summary and Trends pages immediately reads battery levels from all devices " +
+                      "instead of waiting for the next scheduled scan.<br><br>" +
+                      "<b>Force Scan does NOT instantly generate drain samples.</b> A sample requires the battery level to have " +
+                      "changed since the last reading, or 24+ hours to have passed at the same level. " +
+                      "The best way to build samples faster is to set Scan Interval to Hourly.<br><br>" +
+                      "<b>Replacement detection</b> fires automatically when a device jumps from ≤40% up to ≥90–95%. " +
+                      "If replaced before dropping to 40%, log it manually to keep trends accurate.<br>" +
+                      "After any replacement, drain history resets and the device returns to ⏳ Pending. " +
+                      "The Recently Replaced tag clears after 24 hours.</div>"
         }
 
-        section("<b>📊 How Confidence Weighting Works</b>") {
-            paragraph "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Even after the Pending gate clears, early readings carry less weight than established ones. " +
-                      "The app blends the measured drain toward a safe default (0.30%/day) based on how many samples " +
-                      "have been collected. With 5 samples the blend is partial; by 10 samples the full measured drain is used.<br><br>" +
-                      "This means a single unusual reading cannot spike a device straight to 'Poor' — the verdict builds gradually " +
-                      "as more real-world data arrives. Confidence is shown as a percentage in the Trends table.</div>"
-        }
-
-        section("<b>🔍 What Is Battery Drain?</b>") {
-            paragraph "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Drain shows how fast a device uses battery (% per day). Lower values mean longer battery life. " +
-                      "Drain is calculated using EWMA (exponential weighted moving average) across the last 10 readings — " +
-                      "recent readings matter slightly more than older ones, but a single spike won't throw off the average.<br><br>" +
-                      "The <b>Scan Interval</b> setting controls how often the app actively reads each device to generate a new sample. " +
-                      "Devices also contribute a sample automatically whenever they fire a battery event on their own. " +
-                      "Scanning more frequently means health ratings mature faster.</div>"
-        }
-
-        section("<b>📅 Estimated Days Remaining</b>") {
-            paragraph "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Estimated days remaining = current battery level ÷ average daily drain. " +
-                      "This is an approximation and works best once a device has 7+ days of history. " +
-                      "Devices showing ⏳ Pending will have less reliable estimates until enough data is collected.</div>"
-        }
-
-        section("<b>🔁 Battery Replacement Detection</b>") {
-            paragraph "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Replacement is automatically detected when a device jumps from ≤40% up to ≥90–95%. " +
-                      "If a battery is replaced before dropping to 40%, the jump may not meet the detection threshold — " +
-                      "in that case, log it manually from the main page to keep trends accurate.<br><br>" +
-                      "After any replacement (auto or manual), drain history resets, the device returns to ⏳ Pending, " +
-                      "and the 'Recently Replaced' tag clears after 24 hours.</div>"
-        }
-
+        // ── GROUP 3: Alerts & Monitoring ─────────────────────────────────────
         section("") {
-            paragraph "<div style='background-color:#e8f0fe; padding:6px 10px; border-radius:4px; font-weight:bold;'>🔔 Alerts & Monitoring</div>"
+            paragraph rawHtml: true, "<div style='background-color:#e8f0fe; padding:6px 10px; border-radius:4px; font-weight:bold;'>🔔 Alerts & Monitoring</div>"
         }
 
-        section("<b>⚠️ High Drain Alerts</b>") {
-            paragraph "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>A High Drain alert fires when a device crosses into 🔴 Poor health territory — meaning its drain rate exceeds 1.5% per day. " +
-                      "This threshold aligns with the Poor health boundary so the alert and the health rating always agree: " +
-                      "if you see a High Drain alert, the device will also show 🔴 Poor in the Health column.<br><br>" +
-                      "Devices rated 🟠 Fair (0.8–1.5%/day) are worth monitoring but do not trigger a High Drain alert — " +
-                      "the Health and Trend columns reflect that elevated drain without generating extra noise.</div>"
+        section("<b>⚠️ High Drain Alerts & ⏱ Stale Devices</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'><b>High Drain alert</b> fires when a device crosses into 🔴 Poor territory — drain exceeds 1.5%/day. " +
+                      "The alert and Health column always agree: if you see the alert, the device shows Poor.<br>" +
+                      "🟠 Fair devices (0.8–1.5%/day) are worth monitoring but do not trigger an alert.<br><br>" +
+                      "<b>Stale</b> means a device has not reported any activity within the configured threshold (default 24h). " +
+                      "Stale is based on Last Activity — not Last Battery. Check stale devices for connectivity issues.</div>"
         }
 
-        section("<b>⏱ Stale Devices & Last Battery</b>") {
-            paragraph "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>A device is <b>stale</b> if it has not reported any activity within the configured threshold (default: 24 hours). " +
-                      "Stale is based on <b>Last Activity</b> — the last time the device communicated anything to the hub.<br><br>" +
-                      "<b>Last Battery</b> is different — it shows the last time this app received a battery level reading for the device, " +
-                      "either from a scheduled scan or a device-triggered battery event. Some devices only report their battery level " +
-                      "infrequently (every few days, or only when the level actually changes), so Last Battery can appear much older " +
-                      "than Last Activity even on a perfectly healthy device. This is normal and expected.<br><br>" +
-                      "Stale devices are flagged in the summary and notifications. Check stale devices for connectivity issues.</div>"
-        }
-
+        // ── GROUP 4: Help & Troubleshooting ──────────────────────────────────
         section("") {
-            paragraph "<div style='background-color:#e8f0fe; padding:6px 10px; border-radius:4px; font-weight:bold;'>🛠 Help & Troubleshooting</div>"
+            paragraph rawHtml: true, "<div style='background-color:#e8f0fe; padding:6px 10px; border-radius:4px; font-weight:bold;'>🛠 Help & Troubleshooting</div>"
         }
 
-        section("<b>⚙️ Device Adjustments</b>") {
-            paragraph "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Locks, sensors, and contact devices report more frequently by nature. The app applies an adjusted " +
-                      "drain calculation for these device types to avoid overestimating their drain rate.</div>"
-        }
-
-        section("<b>⚠ Troubleshooting High Drain</b>") {
-            paragraph "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>If a device shows High Drain or Poor health after the Pending period:<br>" +
+        section("<b>⚙️ Device Adjustments & Troubleshooting</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Some device types have adjusted drain calculations to avoid overestimating their drain rate:<br>" +
+                      "• <b>Locks, sensors, contact sensors</b> — drain adjusted down by 50%<br>" +
+                      "• <b>Smoke & CO detectors</b> — drain adjusted down by 50%, slow reporter gate applied<br>" +
+                      "• <b>Motion sensors</b> — covered under sensors above<br>" +
+                      "• Other types use the standard calculation<br><br>" +
+                      "<b>If a device shows High Drain or Poor health after Pending:</b><br>" +
                       "• Check signal strength and mesh routing<br>" +
                       "• Verify reporting frequency in the device driver<br>" +
                       "• Confirm correct battery type in the Battery Catalog<br>" +
                       "• Consider environmental factors (temperature, distance)<br>" +
-                      "• Review device firmware or driver settings<br><br>" +
-                      "Note: devices that report very frequently (e.g. every few minutes) may show higher apparent drain " +
-                      "because each report captures a small but real drop. Compare similar devices to spot outliers.</div>"
+                      "• Devices reporting every few minutes may show higher apparent drain — compare with similar devices</div>"
         }
 
         section("<b>💡 Tips for Best Results</b>") {
-            paragraph "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>• Let new batteries run for at least a week before trusting health ratings<br>" +
-                      "• Use the Battery Catalog to log battery types — this helps with replacement planning<br>" +
-                      "• Consistent low drain over time = healthy, well-placed device<br>" +
-                      "• Devices with very infrequent reporting (days between updates) will take longer to fill samples<br>" +
-                      "• After replacing a battery, use Manual Replacement to reset the history immediately rather than " +
-                      "waiting for auto-detection</div>"
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>• Let new batteries run for at least a week before trusting health ratings<br>" +
+                      "• Use the Battery Catalog to log battery types — helps with replacement planning<br>" +
+                      "• Set Scan Interval to Hourly to build health ratings faster<br>" +
+                      "• After replacing a battery use Manual Replacement to reset history immediately<br>" +
+                      "• Consistent low drain over time = healthy, well-placed device</div>"
         }
     }
 }
