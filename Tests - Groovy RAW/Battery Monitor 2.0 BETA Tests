@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.0 beta 19"
+    version: "2.4.0 beta 20"
 )
 
 def installed() {
@@ -81,26 +81,36 @@ def mainPage() {
     applyCustomLabel()
 
     dynamicPage(name: "mainPage",
-                title: settings?.customAppName?.trim() ? "Battery Monitor: ${settings.customAppName}" : "Battery Monitor 2.0",
+                title: "Battery Monitor 2.0",
                 install: true, uninstall: true) {
 
         section("") {
             paragraph rawHtml: true, "<script>focusOnFirstEmptyTextInput = function() {};</script>"
         }
 
-        section("<b>App Display Name (optional)</b>") {
+        def hasCustomName = settings?.customAppName?.trim()
+        section("<b>App Display Name (optional)</b>", hideable: true, hidden: hasCustomName) {
+            def nameMsg = hasCustomName
+                ? "Current name: <b>${settings.customAppName}</b> — tap section header to change."
+                : "Enter a name to rename this app in your Hubitat app list."
+            paragraph nameMsg
             input "customAppName", "text",
                   title: "Custom App Name",
-                  description: "Change how the app name appears in Hubitat UI",
+                  description: "Rename how this app appears in your Hubitat app list",
                   required: false
-            if (settings?.customAppName?.trim()) {
-                paragraph "Current display name: <b>${settings.customAppName}</b>"
-            }
         }
 
-        section("Auto Battery Discovery") {
-            paragraph "<b>⚠ Important: The app automatically detects all devices reporting battery levels. " +
-                      "Select the devices you want to monitor from the list below. Only selected devices will be tracked for trends, battery health, and notifications.</b>"
+        def devicesSelected = (autoDevices?.size() ?: 0) > 0
+        section("") {
+            paragraph "<small>ℹ️ The device selection section below collapses automatically after initial setup.</small>"
+        }
+        section("<b>Auto Battery Discovery</b>", hideable: true, hidden: devicesSelected) {
+            if (devicesSelected) {
+                paragraph "<b>${autoDevices.size()} device(s) selected.</b> Tap the section header above to expand and change your selection."
+            } else {
+                paragraph "<b>⚠ Important: The app automatically detects all devices reporting battery levels. " +
+                          "Select the devices you want to monitor from the list below. Only selected devices will be tracked for trends, battery health, and notifications.</b>"
+            }
             paragraph "<span style='color:red; font-weight:bold;'>Note for mobile users:</span> If your device names are long, they may extend past the screen in the selection list. This is a UI limitation on smaller screens. You can still select devices as usual."
             paragraph "<span style='color:red; font-weight:bold;'>IMPORTANT: After selecting devices, you MUST click 'Done' to exit the app BEFORE viewing the battery report. Skipping this step may cause an error.</span>"
 
@@ -131,11 +141,9 @@ def mainPage() {
         }
 
         section("<b>Battery Scan Interval</b>") {
-            paragraph "Sets how often the app actively reads each device's battery level to build drain samples. " +
-                      "More frequent scans help health ratings mature faster. " +
-                      "Devices also update automatically whenever they report a battery event."
             input "scanInterval", "enum",
                   title: "Scan Frequency:",
+                  description: "How often battery levels are read. More frequent = faster health ratings. Devices also update on their own battery events.",
                   options: ["1": "Hourly", "3": "Every 3 Hours", "6": "Every 6 Hours"],
                   defaultValue: "3",
                   submitOnChange: true
@@ -894,8 +902,8 @@ def trendsPage() {
                 def prioA  = trendPriority[trendA] ?: 3
                 def prioB  = trendPriority[trendB] ?: 3
                 if (prioA != prioB) return prioA <=> prioB
-                def levelA = a.currentValue("battery")?.toInteger() != null ? a.currentValue("battery")?.toInteger() : 100
-                def levelB = b.currentValue("battery")?.toInteger() != null ? b.currentValue("battery")?.toInteger() : 100
+                def levelA = a.currentValue("battery")?.toInteger() ?: 100
+                def levelB = b.currentValue("battery")?.toInteger() ?: 100
                 if (levelA != levelB) return levelA <=> levelB
                 return a.displayName.trim() <=> b.displayName.trim()
             }
@@ -906,7 +914,7 @@ def trendsPage() {
 
             devList.each { device ->
                 def hist    = safeHistory(device)
-                def level   = device.currentValue("battery")?.toInteger() != null ? device.currentValue("battery")?.toInteger() : 100
+                def level   = device.currentValue("battery")?.toInteger() ?: 100
                 // FIX #3: Explicit null check on drain — 0 is a valid value
                 def drain   = hist?.drain != null ? hist.drain : 0.3
                 def trend   = state.trend[device.id] ?: "Unknown"
@@ -1227,12 +1235,12 @@ def batteryCatalogPage() {
             "AA":     ["1", "2", "3", "4", "6", "8"],
             "AAA":    ["1", "2", "3", "4", "6", "8"],
             "CR2":    ["1", "2"],
-            "CR123A": ["1", "2"],
             "CR2016": ["1", "2"],
             "CR2032": ["1", "2"],
             "CR2430": ["1", "2"],
             "CR2450": ["1"],
-            "CR2477": ["1", "2"],
+            "CR123A": ["1", "2"],
+            "18650":  ["1", "2"],
             "9V":     ["1"]
         ]
         def rechargeableTypes = [
@@ -1241,8 +1249,7 @@ def batteryCatalogPage() {
             "LIR2016": ["1", "2"],
             "LIR2032": ["1", "2"],
             "LIR2430": ["1", "2"],
-            "LIR2450": ["1"],
-            "18650":  ["1", "2", "3", "4"],
+            "LIR2450": ["1"]
         ]
         def otherTypes = [
             "Other": ["1", "2", "3", "4", "6", "8"]
