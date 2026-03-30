@@ -2,7 +2,7 @@ metadata {
     definition(
         name: "Pentair IntelliCenter Bridge",
         namespace: "intellicenter",
-        author: "Custom Integration",
+        author: "jdthomas24",
         description: "Bridge driver for Pentair IntelliCenter TCP connection"
     ) {
         capability "Initialize"
