@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.0 beta 20"
+    version: "2.4.0 beta 21"
 )
 
 def installed() {
@@ -101,16 +101,9 @@ def mainPage() {
         }
 
         def devicesSelected = (autoDevices?.size() ?: 0) > 0
-        section("") {
-            paragraph "<small>ℹ️ The device selection section below collapses automatically after initial setup.</small>"
-        }
         section("<b>Auto Battery Discovery</b>", hideable: true, hidden: devicesSelected) {
-            if (devicesSelected) {
-                paragraph "<b>${autoDevices.size()} device(s) selected.</b> Tap the section header above to expand and change your selection."
-            } else {
-                paragraph "<b>⚠ Important: The app automatically detects all devices reporting battery levels. " +
-                          "Select the devices you want to monitor from the list below. Only selected devices will be tracked for trends, battery health, and notifications.</b>"
-            }
+            paragraph "<b>⚠ Important: The app automatically detects all devices reporting battery levels. " +
+                      "Select the devices you want to monitor from the list below. Only selected devices will be tracked for trends, battery health, and notifications.</b>"
             paragraph "<span style='color:red; font-weight:bold;'>Note for mobile users:</span> If your device names are long, they may extend past the screen in the selection list. This is a UI limitation on smaller screens. You can still select devices as usual."
             paragraph "<span style='color:red; font-weight:bold;'>IMPORTANT: After selecting devices, you MUST click 'Done' to exit the app BEFORE viewing the battery report. Skipping this step may cause an error.</span>"
 
@@ -118,6 +111,11 @@ def mainPage() {
                   title: "Select battery devices to monitor",
                   multiple: true,
                   required: true
+        }
+        if (devicesSelected) {
+            section("") {
+                paragraph "<b><span style='color:blue;'>${autoDevices.size()} device(s)</span> selected.</b> Tap <b>Auto Battery Discovery</b> above to expand and change your selection."
+            }
 
             // FIX #8: Use local devList instead of reassigning autoDevices
             def devList = autoDevices ?: []
