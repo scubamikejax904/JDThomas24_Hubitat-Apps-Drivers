@@ -163,6 +163,23 @@ def requestEquipment() {
         condition: "OBJTYP=CIRCUIT",
         objectList: [[objnam: "ALL", keys: ["OBJTYP", "SUBTYP", "SNAME", "STATUS", "FEATR"]]]
     ])
+    runIn(2, "requestGroups")
+}
+
+def requestGroups() {
+    if (debugMode) log.debug "Requesting equipment — circuit groups"
+    // Request GRP objects explicitly — they have OBJTYP=CIRCUIT but
+    // may not always be returned reliably in a general CIRCUIT query
+    sendCommand([
+        command: "GetParamList",
+        objectList: [
+            [objnam: "GRP01", keys: ["OBJTYP", "SUBTYP", "SNAME", "STATUS"]],
+            [objnam: "GRP02", keys: ["OBJTYP", "SUBTYP", "SNAME", "STATUS"]],
+            [objnam: "GRP03", keys: ["OBJTYP", "SUBTYP", "SNAME", "STATUS"]],
+            [objnam: "GRP04", keys: ["OBJTYP", "SUBTYP", "SNAME", "STATUS"]],
+            [objnam: "GRP05", keys: ["OBJTYP", "SUBTYP", "SNAME", "STATUS"]]
+        ]
+    ])
     runIn(2, "requestBodies")
 }
 
