@@ -2,7 +2,7 @@ metadata {
     definition(
         name: "Pentair IntelliCenter Bridge",
         namespace: "intellicenter",
-        author: "jdthomas24",
+        author: "Custom Integration",
         description: "Bridge driver for Pentair IntelliCenter TCP connection"
     ) {
         capability "Initialize"
@@ -265,15 +265,18 @@ def routeUpdate(String objnam, Map params) {
 // ===================== DEVICE UPDATES ======================
 // ============================================================
 def processCircuit(String objnam, Map params) {
-    // Only create devices for real user circuits (C####)
-    // Skip internal/system objects: X#### (virtual), _#### (system), FTR, GRP, ALL subtypes
-    if (!objnam.matches("C\\d+")) {
+    def subtyp = params.SUBTYP ?: state.objectMap?.get(objnam)?.SUBTYP ?: ""
+
+    // Allow real user circuits (C####) and circuit groups (GRP####)
+    // Skip everything else: X#### virtual, _#### system, FTR features
+    def isUserCircuit = objnam.matches("C\\d+")
+    def isGroup       = objnam.matches("GRP\\d+")
+    if (!isUserCircuit && !isGroup) {
         if (debugMode) log.debug "Skipping internal circuit: ${objnam}"
         return
     }
+
     // Skip POOL and SPA subtype circuits — already represented as body devices
-    // with temperature, setpoint and heater control
-    def subtyp = params.SUBTYP ?: state.objectMap?.get(objnam)?.SUBTYP ?: ""
     if (subtyp == "POOL" || subtyp == "SPA") {
         if (debugMode) log.debug "Skipping body circuit (handled as body): ${objnam} (${subtyp})"
         return
@@ -288,7 +291,7 @@ def processCircuit(String objnam, Map params) {
     if (!child) return
 
     child.sendEvent(name: "switch", value: (status == "ON" ? "on" : "off"))
-    if (debugMode) log.debug "Circuit [${label}]: ${status}"
+    if (debugMode) log.debug "Circuit [${label}] (${subtyp}): ${status}"
 }
 
 def processBody(String objnam, Map params) {
