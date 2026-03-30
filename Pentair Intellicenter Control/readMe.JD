@@ -1,1 +1,99 @@
+Pentair IntelliCenter for Hubitat
+Local WebSocket integration for Pentair IntelliCenter pool controllers. No cloud, no API key — connects directly to your controller on your local network.
+
+Requirements
+
+Pentair IntelliCenter controller with firmware 1.064 or later
+Controller connected to your local network
+Hubitat Elevation hub (firmware 2.3.0 or later)
+Controller and hub on the same network/subnet
+
+
+What It Creates
+Once connected, the integration automatically discovers and creates devices for:
+DeviceDescriptionPool / SpaOn/off switch for each body of waterPool Temp / Spa TempCurrent water temperaturePool Set Point / Spa Set PointTarget temperaturePool Heater / Spa HeaterHeater on/off and modeCircuitsSwitch for each user circuit (Pool Light, Spa Light, Waterfall, etc.)VS RPMVariable speed pump RPMVS WattsVariable speed pump wattageAir SensorAir temperatureSolar SensorSolar temperature (if equipped)Salt ChlorinatorChlorinator on/off and salt level
+
+Installation
+Option A — Hubitat Package Manager (Recommended)
+
+Open Hubitat Package Manager
+Click Install
+Search for Pentair IntelliCenter
+Select the package and click Next → Install
+Follow the setup steps below
+
+Option B — Manual Install
+Install in this exact order — the driver must exist before the app.
+Step 1 — Install the Driver
+
+Go to Drivers Code → New Driver
+Paste the contents of driver.groovy
+Click Save
+
+Step 2 — Install the App
+
+Go to Apps Code → New App
+Paste the contents of Parent App Bridge.groovy
+Click Save
+
+
+Setup
+
+Go to Apps → Add User App → Pentair IntelliCenter
+Enter your IntelliCenter IP address (e.g. 192.168.1.218)
+Leave the port as 6680 (default)
+Click Done
+
+The app will automatically:
+
+Create a Bridge device in your device list
+Connect to your IntelliCenter
+Discover all equipment and create child devices
+
+Allow 10–15 seconds for all devices to appear after clicking Done.
+
+Finding Your IntelliCenter IP
+The easiest way is to check your router's device list and look for a device named IntelliCenter or Pentair. You can also find it in the official Pentair IntelliCenter mobile app under Settings → Status → Network.
+
+Troubleshooting
+No devices appearing after setup
+
+Confirm the IP address is correct and reachable from your hub
+Check that your hub and IntelliCenter are on the same subnet
+Open the Bridge device page and check the connectionStatus attribute — it should show Connected
+Check Hubitat logs for any error messages from the Bridge device
+
+Connection status shows Disconnected
+
+Open the Bridge device and click Initialize to force a reconnect
+Verify the IntelliCenter is powered on and reachable
+Confirm no firewall rules are blocking port 6680
+
+Duplicate devices appeared
+
+This can happen on first install if the app is initialized more than once
+Manually delete any duplicate devices from the Devices page — they will not be recreated
+
+Devices not updating
+
+The integration uses live push updates from the controller — no polling needed
+If values appear stuck, click Refresh on the Bridge device to request a full state update
+
+
+Removing the Integration
+
+Go to Devices and delete the IntelliCenter Bridge device and all child devices
+Go to Apps and remove the Pentair IntelliCenter app instance
+Go to Drivers Code and delete Pentair IntelliCenter Bridge
+Go to Apps Code and delete Pentair IntelliCenter
+
+Always delete devices before removing the app and code — Hubitat will not allow you to remove a driver that is still in use by a device.
+
+Notes
+
+The integration works entirely on your local network — no Pentair cloud account required
+Password-protected IntelliCenter controllers are not currently supported
+Tested with IntelliCenter firmware 1.064
+Pump GPM sensor is only created when the pump reports a non-zero GPM value
+
 
