@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.0 beta 23"
+    version: "2.4.0 beta 24"
 )
 
 def installed() {
@@ -105,10 +105,6 @@ def mainPage() {
             paragraph "<span style='color:red; font-weight:bold;'>Note for mobile users:</span> If your device names are long, they may extend past the screen in the selection list. This is a UI limitation on smaller screens. You can still select devices as usual."
             paragraph "<span style='color:red; font-weight:bold;'>IMPORTANT: After selecting devices, you MUST click 'Done' to exit the app BEFORE viewing the battery report. Skipping this step may cause an error.</span>"
 
-            // FIX: Changed required from true to false.
-            // With required: true, if no devices are selected the app blocks Done entirely,
-            // leaving the user with no option except to delete the app. required: false
-            // allows saving with an empty selection while the app handles that state gracefully.
             input "autoDevices", "capability.battery",
                   title: "Select battery devices to monitor",
                   multiple: true,
@@ -465,16 +461,9 @@ def updateBattery(device, level) {
     def days  = (now() - safeTime(data.lastDate)) / (1000 * 60 * 60 * 24)
     def hours = days * 24
 
-    // Require at least 1 hour between samples before calculating drain.
-    // Readings taken minutes apart produce astronomically high rawDrain values
-    // (e.g. 1% drop over 0.003 days = 333%/day) which blow past the old
-    // rawDrain < 5 cap and get silently rejected, causing samples to stay at
-    // 0/5 indefinitely and falsely showing Poor health on the first read.
     if (days > 0 && hours >= 1.0 && !data.justReplaced) {
         def lastLevel    = data.lastLevel != null ? data.lastLevel : 100
         def rawDrain     = (lastLevel - level) / days
-        // Clamp rather than reject — anything above 5%/day is noise from
-        // rapid testing or an erratic device, but samples should still accumulate.
         def clampedDrain = Math.max(0.0, Math.min(rawDrain, 5.0))
         def validSample  = (rawDrain > 0) || (rawDrain == 0 && hours >= 24)
 
@@ -784,7 +773,14 @@ def summaryPage() {
 
             def table = "<table style='width:100%; border-collapse: collapse; border: 1px solid #ccc;'>"
             table += "<tr style='font-weight:bold; background-color:#f0f0f0;'>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Device</td><td style='padding:4px; border:1px solid #ccc;'>Battery</td><td style='padding:4px; border:1px solid #ccc;'>Drain %/day</td><td style='padding:4px; border:1px solid #ccc;'>Est Days</td><td style='padding:4px; border:1px solid #ccc;'>Health</td><td style='padding:4px; border:1px solid #ccc;'>Last Battery¹</td><td style='padding:4px; border:1px solid #ccc;'>Last Activity</td><td style='padding:4px; border:1px solid #ccc;'>Battery Type</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Device</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Battery</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Drain %/day</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Est Days</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Health</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Last Battery¹</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Last Activity</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Battery Type</td>"
             table += "</tr>"
             def summaryRowNum = 0
 
@@ -884,7 +880,12 @@ def summaryPage() {
             }
 
             table += "</table>"
-            paragraph table
+
+            // FIX: Wrap table in a horizontally scrollable container.
+            // Without this, wide tables clip off-screen in portrait mode on mobile.
+            // overflow-x:auto enables horizontal scroll; -webkit-overflow-scrolling:touch
+            // ensures smooth momentum scrolling in the Hubitat iOS app.
+            paragraph "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>"
         }
     }
 }
@@ -920,7 +921,14 @@ def trendsPage() {
             }
 
             def table = "<table style='width:100%; border-collapse: collapse; border: 1px solid #ccc;'>"
-            table += "<tr style='font-weight:bold; background-color:#f0f0f0;'><td style='padding:4px; border:1px solid #ccc;'>Device</td><td style='padding:4px; border:1px solid #ccc;'>Battery</td><td style='padding:4px; border:1px solid #ccc;'>Trend</td><td style='padding:4px; border:1px solid #ccc;'>Drain %/day</td><td style='padding:4px; border:1px solid #ccc;'>Health</td><td style='padding:4px; border:1px solid #ccc;'>Confidence</td></tr>"
+            table += "<tr style='font-weight:bold; background-color:#f0f0f0;'>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Device</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Battery</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Trend</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Drain %/day</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Health</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Confidence</td>"
+            table += "</tr>"
             def trendsRowNum = 0
 
             devList.each { device ->
@@ -950,7 +958,9 @@ def trendsPage() {
             }
 
             table += "</table>"
-            paragraph table
+
+            // FIX: Horizontally scrollable wrapper for portrait mode on mobile.
+            paragraph "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>"
         }
     }
 }
@@ -998,7 +1008,9 @@ def historyPage() {
             }
 
             table += "</table>"
-            paragraph table
+
+            // FIX: Horizontally scrollable wrapper for portrait mode on mobile.
+            paragraph "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>"
             paragraph "<b>Legend:</b> <span style='color:green;'>A</span> = Automatic, <span style='color:blue;'>M</span> = Manual"
         }
 
@@ -1185,10 +1197,6 @@ def sendNotificationPage() {
             paragraph rawHtml: true, "<script>focusOnFirstEmptyTextInput = function() {}; window.scrollTo(0,0); document.addEventListener('DOMContentLoaded', function() { window.scrollTo(0,0); });</script>"
         }
 
-        // FIX: Check for missing devices and missing notification targets before
-        // allowing send. Previously the page reported success even when nothing
-        // was sent because scheduledSummary() exits silently on empty devList,
-        // and the sent-to check was independent of the actual send outcome.
         def devList      = autoDevices ?: []
         def hasDevices   = devList.size() > 0
         def hasTargets   = (settings?.notifyDevices?.size() ?: 0) > 0 ||
@@ -1370,7 +1378,7 @@ def infoPage(Map params = [:]) {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Battery level colors reflect current charge percentage. " +
                       "Health ratings use the same color scheme but are based on drain rate — not battery percentage. " +
                       "A device can show 🟢 Good battery level yet 🔴 Poor health if it is draining unusually fast.<br><br>" +
-                      "<table style='width:100%; border-collapse: collapse;'>" +
+                      "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'><table style='width:100%; border-collapse: collapse;'>" +
                       "<tr style='font-weight:bold;'><td>Icon</td><td>Color</td><td>Meaning</td></tr>" +
                       "<tr><td>🟢</td><td>Green</td><td>Good or Excellent — healthy battery or low drain</td></tr>" +
                       "<tr><td>🟠</td><td>Orange</td><td>Fair — moderate drain, worth monitoring</td></tr>" +
@@ -1378,21 +1386,21 @@ def infoPage(Map params = [:]) {
                       "<tr><td>⏳</td><td>—</td><td>Pending — not enough data yet to assign a health verdict</td></tr>" +
                       "<tr><td>⚠️</td><td>—</td><td>Warning — high drain device or stale activity</td></tr>" +
                       "<tr><td>⏱</td><td>—</td><td>Stale — device has not reported within the configured threshold</td></tr>" +
-                      "</table></div>"
+                      "</table></div></div>"
         }
 
         section("<b>🔋 Battery Health & Trends</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Health is a long-term confidence-weighted average drain rate. " +
                       "Trend uses the same thresholds but reacts faster to recent readings — a short spike may push Trend to 🔴 Heavy Drain " +
                       "while Health stays 🟢 Good until enough samples confirm the pattern.<br><br>" +
-                      "<table style='width:100%; border-collapse: collapse;'>" +
+                      "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'><table style='width:100%; border-collapse: collapse;'>" +
                       "<tr style='font-weight:bold;'><td>Health</td><td>Trend</td><td>Drain/day</td><td>What It Means</td></tr>" +
                       "<tr><td>⏳ Pending</td><td>—</td><td>—</td><td>Not enough data yet</td></tr>" +
                       "<tr><td>🟢 Excellent</td><td>🟢 Stable</td><td>&lt;= 0.3%</td><td>Very efficient, minimal drain</td></tr>" +
                       "<tr><td>🟢 Good</td><td>🟠 Moderate</td><td>0.3–0.8%</td><td>Normal battery usage</td></tr>" +
                       "<tr><td>🟠 Fair</td><td>🔴 Heavy Drain</td><td>0.8–1.5%</td><td>Above average — worth monitoring, no alert</td></tr>" +
                       "<tr><td>🔴 Poor</td><td>🔴 Heavy Drain</td><td>&gt; 1.5%</td><td>High drain — High Drain alert fires</td></tr>" +
-                      "</table></div>"
+                      "</table></div></div>"
         }
 
         section("<b>⏳ Pending Health, Samples & Confidence</b>") {
@@ -1475,3 +1483,4 @@ def infoPage(Map params = [:]) {
         }
     }
 }
+
