@@ -2,7 +2,7 @@ metadata {
     definition(
         name: "Pentair IntelliCenter Set Point",
         namespace: "intellicenter",
-        author: "Custom Integration",
+        author: "jdthomas24",
         description: "Set point child device for Pentair IntelliCenter body (pool/spa)"
     ) {
         capability "ThermostatHeatingSetpoint"
