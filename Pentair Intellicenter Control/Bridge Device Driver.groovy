@@ -1,5 +1,5 @@
 metadata {
-   definition(
+    definition(
         name: "Pentair IntelliCenter Bridge",
         namespace: "intellicenter",
         author: "Custom Integration",
@@ -526,5 +526,3 @@ def getOrCreateChild(String driver, String dni, String label) {
     }
     return child
 }
-}
-
