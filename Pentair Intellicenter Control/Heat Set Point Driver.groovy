@@ -2,14 +2,12 @@ metadata {
     definition(
         name: "Pentair IntelliCenter Set Point",
         namespace: "intellicenter",
-        author: "jdthomas24",
+        author: "Custom Integration",
         description: "Set point child device for Pentair IntelliCenter body (pool/spa)"
     ) {
-        capability "ThermostatHeatingSetpoint"
-
         attribute "heatingSetpoint", "number"
 
-        command "setHeatingSetpoint", [[name: "temperature*", type: "NUMBER", description: "Set point temperature (°F)"]]
+        command "setHeatingSetpoint", [[name: "temperature*", type: "NUMBER", description: "New set point (°F)"]]
     }
 
     preferences {
@@ -51,4 +49,3 @@ def setHeatingSetpoint(temperature) {
     // Call back to parent bridge driver
     parent?.setBodySetPoint(device.deviceNetworkId, temp)
 }
-
