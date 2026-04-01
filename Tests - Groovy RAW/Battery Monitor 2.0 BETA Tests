@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.0 beta 24"
+    version: "2.4.0 beta 25"
 )
 
 def installed() {
@@ -473,7 +473,7 @@ def updateBattery(device, level) {
             def smoothed   = alpha * clampedDrain + (1 - alpha) * prevSmooth
             data.samples << smoothed
             if (data.samples.size() > 10) data.samples.remove(0)
-            log.debug "updateBattery: ${device.displayName} sample added — rawDrain=${String.format('%.4f', rawDrain)} clamped=${String.format('%.4f', clampedDrain)} smoothed=${String.format('%.4f', smoothed)} samples=${data.samples.size()}"
+
         }
 
         if (data.samples && data.samples.size() > 0) {
@@ -481,8 +481,6 @@ def updateBattery(device, level) {
             data.drain = Math.min(avg, 3.0)
             updateTrend(device, data.drain)
         }
-    } else if (days > 0 && hours < 1.0) {
-        log.debug "updateBattery: ${device.displayName} — skipping sample, only ${String.format('%.1f', hours)}h elapsed (1h minimum required)"
     }
 
     data.lastLevel = level
@@ -1483,4 +1481,3 @@ def infoPage(Map params = [:]) {
         }
     }
 }
-
