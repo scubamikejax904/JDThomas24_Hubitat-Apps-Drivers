@@ -1,12 +1,12 @@
 definition(
     name: "Pentair IntelliCenter",
     namespace: "intellicenter",
-    author: "jdthomas24",
+    author: "Custom Integration",
     description: "Pentair IntelliCenter local integration for Hubitat",
     category: "Convenience",
     iconUrl: "",
     iconX2Url: "",
-    version: "1.0.0"
+    version: "1.2.0"
 )
 
 preferences {
@@ -52,6 +52,73 @@ def mainPage() {
 }
 
 // ============================================================
+// ===================== MAPPINGS ============================
+// ============================================================
+// These endpoints allow body device tiles to send commands
+// back to Hubitat without requiring a Maker API token.
+// All calls are local hub-to-hub — no external access needed.
+
+mappings {
+    path("/body/:dni/on")                    { action: [GET: "endpointOn"] }
+    path("/body/:dni/confirmOn")             { action: [GET: "endpointConfirmOn"] }
+    path("/body/:dni/off")                   { action: [GET: "endpointOff"] }
+    path("/body/:dni/setpoint/:temp")        { action: [GET: "endpointSetPoint"] }
+    path("/body/:dni/heatsource/:source")    { action: [GET: "endpointHeatSource"] }
+    path("/body/:dni/setpointup")            { action: [GET: "endpointSetPointUp"] }
+    path("/body/:dni/setpointdown")          { action: [GET: "endpointSetPointDown"] }
+}
+
+def endpointOn() {
+    def child = getChildDevice(params.dni)
+    if (!child) { render status: 404, data: "Device not found"; return }
+    child.on()
+    render status: 200, data: "OK"
+}
+
+def endpointConfirmOn() {
+    def child = getChildDevice(params.dni)
+    if (!child) { render status: 404, data: "Device not found"; return }
+    child.confirmOn()
+    render status: 200, data: "OK"
+}
+
+def endpointOff() {
+    def child = getChildDevice(params.dni)
+    if (!child) { render status: 404, data: "Device not found"; return }
+    child.off()
+    render status: 200, data: "OK"
+}
+
+def endpointSetPoint() {
+    def child = getChildDevice(params.dni)
+    if (!child) { render status: 404, data: "Device not found"; return }
+    child.setHeatingSetpoint(params.temp.toInteger())
+    render status: 200, data: "OK"
+}
+
+def endpointSetPointUp() {
+    def child = getChildDevice(params.dni)
+    if (!child) { render status: 404, data: "Device not found"; return }
+    child.adjustSetPointUp()
+    render status: 200, data: "OK"
+}
+
+def endpointSetPointDown() {
+    def child = getChildDevice(params.dni)
+    if (!child) { render status: 404, data: "Device not found"; return }
+    child.adjustSetPointDown()
+    render status: 200, data: "OK"
+}
+
+def endpointHeatSource() {
+    def child = getChildDevice(params.dni)
+    if (!child) { render status: 404, data: "Device not found"; return }
+    def source = params.source?.replaceAll("_", " ")?.toUpperCase()
+    child.setHeatSource(source)
+    render status: 200, data: "OK"
+}
+
+// ============================================================
 // ===================== LIFECYCLE ===========================
 // ============================================================
 def installed() {
@@ -65,7 +132,6 @@ def updated() {
 }
 
 def initialize() {
-    // Create or update the bridge driver device
     def bridgeDni = "intellicenter-bridge-${app.id}"
     def bridge    = getChildDevice(bridgeDni)
 
@@ -79,12 +145,16 @@ def initialize() {
         )
     }
 
-    // Pass settings to the bridge driver
-    bridge.updateSetting("ipAddress",  [value: intellicenterIP,          type: "text"])
-    bridge.updateSetting("portNumber", [value: intellicenterPort ?: 6680, type: "number"])
-    bridge.updateSetting("debugMode",  [value: debugMode ?: false,        type: "bool"])
+    // Build the local endpoint base URL — no token needed
+    // Format: http://[hub-ip]/apps/api/[app-id]/body/[dni]/[command]
+    def hubIP       = location.hubs[0].localIP
+    def endpointBase = "http://${hubIP}/apps/api/${app.id}"
 
-    // Initialize bridge — clears old schedules and reconnects cleanly
+    bridge.updateSetting("ipAddress",     [value: intellicenterIP,           type: "text"])
+    bridge.updateSetting("portNumber",    [value: intellicenterPort ?: 6680, type: "number"])
+    bridge.updateSetting("debugMode",     [value: debugMode ?: false,        type: "bool"])
+    bridge.updateSetting("endpointBase",  [value: endpointBase,              type: "text"])
+
     bridge.initialize()
 }
 
@@ -98,7 +168,6 @@ def uninstalled() {
 // ============================================================
 // ===================== CHILD DEVICE HELPERS ================
 // ============================================================
-// Called by the bridge driver to create/update pool child devices
 def getOrCreatePoolDevice(String driver, String dni, String label) {
     def child = getChildDevice(dni)
     if (!child) {
@@ -123,11 +192,16 @@ def sendEventToChild(String dni, String name, value, String unit = null) {
     }
 }
 
-// Called by child switch devices to control circuits
 def childOn(String dni) {
     def bridge = getChildDevice("intellicenter-bridge-${app.id}")
     bridge?.circuitOn(dni)
 }
+
+def childOff(String dni) {
+    def bridge = getChildDevice("intellicenter-bridge-${app.id}")
+    bridge?.circuitOff(dni)
+}
+
 
 def childOff(String dni) {
     def bridge = getChildDevice("intellicenter-bridge-${app.id}")
