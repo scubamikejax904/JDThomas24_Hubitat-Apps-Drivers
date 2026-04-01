@@ -328,10 +328,9 @@ def processBody(String objnam, Map params) {
         tc?.sendEvent(name: "temperature", value: temp.toInteger(), unit: "°F")
     }
 
-    // Set point — use LOTMP for SPA, HITMP for POOL
-    // Only update if the relevant key was actually included in this message
-    def setptKey = (subtyp == "SPA") ? "LOTMP" : "HITMP"
-    def setpt    = params[setptKey]
+    // Set point — LOTMP is the active set point for both POOL and SPA bodies
+    // HITMP is the upper temperature limit, not the set point
+    def setpt = params.LOTMP
     if (setpt != null) {
         def spDni = "intellicenter-setpt-${objnam}"
         // Use custom set point driver so user can change the value
@@ -414,15 +413,12 @@ def setBodySetPoint(String childDni, Integer temp) {
     def objnam = objnamFromDni(childDni)
     if (!objnam) { log.warn "setBodySetPoint: no objnam for DNI ${childDni}"; return }
 
-    // Determine which key to set based on body subtype
-    def subtyp  = state.objectMap?.get(objnam)?.SUBTYP ?: ""
-    def setKey  = (subtyp == "SPA") ? "LOTMP" : "HITMP"
-
-    if (debugMode) log.debug "setBodySetPoint: ${objnam} ${setKey}=${temp}"
+    // LOTMP is the active set point for both POOL and SPA bodies
+    if (debugMode) log.debug "setBodySetPoint: ${objnam} LOTMP=${temp}"
 
     sendCommand([
         command: "SetParamList",
-        objectList: [[objnam: objnam, params: [(setKey): temp.toString()]]]
+        objectList: [[objnam: objnam, params: [LOTMP: temp.toString()]]]
     ])
 }
 
@@ -499,7 +495,8 @@ def componentRefresh(child) {
 // ============================================================
 def objnamFromDni(String dni) {
     // DNI format: intellicenter-{type}-{objnam}
-    def idx = dni.indexOf("-", "intellicenter-".length())
+    // Always return the last segment — objnam is never compound
+    def idx = dni.lastIndexOf("-")
     return idx > 0 ? dni.substring(idx + 1) : null
 }
 
@@ -515,4 +512,5 @@ def getOrCreateChild(String driver, String dni, String label) {
     }
     return child
 }
+
 
