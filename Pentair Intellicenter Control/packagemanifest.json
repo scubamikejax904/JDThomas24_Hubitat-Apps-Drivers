@@ -16,7 +16,7 @@
   ],
   "drivers": [
     {
-      "name": "Driver",
+      "name": "Bridge Device Driver",
       "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Pentair%20Intellicenter%20Control/driver.groovy",
       "required": true
     }
