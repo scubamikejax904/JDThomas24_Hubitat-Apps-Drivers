@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "category": "Utility",
   "dateReleased": "3-26-26",
-  "minimumHEVersion": "2.3",
+  "minimumHEVersion": "2.3.0",
   "apps": [
     {
       "name": "Parent App Bridge",
