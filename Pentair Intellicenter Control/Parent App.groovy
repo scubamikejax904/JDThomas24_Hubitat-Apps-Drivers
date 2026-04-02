@@ -61,6 +61,7 @@ def mainPage() {
 mappings {
     path("/body/:dni/on")                    { action: [GET: "endpointOn"] }
     path("/body/:dni/confirmOn")             { action: [GET: "endpointConfirmOn"] }
+    path("/body/:dni/confirmbody")           { action: [GET: "endpointConfirmBody"] }
     path("/body/:dni/off")                   { action: [GET: "endpointOff"] }
     path("/body/:dni/setpoint/:temp")        { action: [GET: "endpointSetPoint"] }
     path("/body/:dni/heatsource/:source")    { action: [GET: "endpointHeatSource"] }
@@ -79,6 +80,13 @@ def endpointConfirmOn() {
     def child = getChildDevice(params.dni)
     if (!child) { render status: 404, data: "Device not found"; return }
     child.confirmOn()
+    render status: 200, data: "OK"
+}
+
+// Called by body device itself after confirmOn — relays STATUS:ON to bridge
+def endpointConfirmBody() {
+    def bridge = getChildDevice("intellicenter-bridge-${app.id}")
+    bridge?.setBodyStatus(params.dni, "ON")
     render status: 200, data: "OK"
 }
 
@@ -252,4 +260,3 @@ def childOff(String dni) {
     def bridge = getChildDevice("intellicenter-bridge-${app.id}")
     bridge?.circuitOff(dni)
 }
-
