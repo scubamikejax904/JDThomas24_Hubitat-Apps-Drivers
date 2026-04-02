@@ -320,11 +320,16 @@ def processBody(String objnam, Map params) {
     def htmode = params.HTMODE
     def htsrc  = params.HTSRC
 
-    // Single combined body controller device — created via parent app
-    // to avoid grandchild limitation in Hubitat
+    // Single combined body controller device — created under bridge
+    // Commands are routed via app endpoint URLs baked into the tile
     def dni  = "intellicenter-body-${objnam}"
-    def body = parent?.getOrCreateBodyDevice(dni, label, endpointBase ?: "")
+    def body = getOrCreateChild("Pentair IntelliCenter Body", dni, label)
     if (!body) return
+
+    // Pass endpoint base so tile buttons can fire local HTTP calls
+    if (endpointBase) {
+        body.updateSetting("endpointBase", [value: endpointBase, type: "text"])
+    }
 
     if (status != null) {
         body.sendEvent(name: "switch",      value: (status == "ON" ? "on" : "off"))
