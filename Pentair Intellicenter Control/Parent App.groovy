@@ -6,7 +6,7 @@ definition(
     category: "Convenience",
     iconUrl: "",
     iconX2Url: "",
-    version: "1.3.0"
+    version: "1.4.0"
 )
 
 preferences {
@@ -56,14 +56,12 @@ def mainPage() {
 // ============================================================
 // These endpoints allow body device tiles to send commands
 // back to Hubitat without requiring a Maker API token.
-// All calls are local hub-to-hub on port 80 — no external
-// access is required or implied. The app ID in the URL is
-// the only gate; these endpoints are not reachable externally
-// unless the hub is explicitly port-forwarded (not recommended).
+// All calls are local hub-to-hub on port 8080.
+// The app ID in the URL is the only gate; these endpoints are
+// not reachable externally unless the hub is port-forwarded.
 
 mappings {
     path("/body/:dni/on")                 { action: [GET: "endpointOn"] }
-    path("/body/:dni/confirmOn")          { action: [GET: "endpointConfirmOn"] }
     path("/body/:dni/off")                { action: [GET: "endpointOff"] }
     path("/body/:dni/setpoint/:temp")     { action: [GET: "endpointSetPoint"] }
     path("/body/:dni/heatsource/:source") { action: [GET: "endpointHeatSource"] }
@@ -71,21 +69,13 @@ mappings {
     path("/body/:dni/setpointdown")       { action: [GET: "endpointSetPointDown"] }
 }
 
-// ── On / Off / Confirm ──────────────────────────────────────
+// ── On / Off ────────────────────────────────────────────────
 
 def endpointOn() {
     def child = getChildDevice(params.dni)
     if (!child) { render status: 404, data: "Device not found"; return }
+    // Sends STATUS:ON immediately — no confirmation step
     child.on()
-    render status: 200, data: "OK"
-}
-
-def endpointConfirmOn() {
-    def child = getChildDevice(params.dni)
-    if (!child) { render status: 404, data: "Device not found"; return }
-    // confirmOn() updates local state and then relays STATUS:ON
-    // to the bridge via the app's setBodyStatus relay below.
-    child.confirmOn()
     render status: 200, data: "OK"
 }
 
@@ -102,7 +92,7 @@ def endpointSetPoint() {
     def child = getChildDevice(params.dni)
     if (!child) { render status: 404, data: "Device not found"; return }
     def temp = params.temp.toInteger()
-    // Update device attribute and send to controller
+    // Update local attribute AND write to controller
     child.setHeatingSetpoint(temp)
     setBodySetPoint(params.dni, temp)
     render status: 200, data: "OK"
@@ -111,6 +101,7 @@ def endpointSetPoint() {
 def endpointSetPointUp() {
     def child = getChildDevice(params.dni)
     if (!child) { render status: 404, data: "Device not found"; return }
+    // adjustSetPointUp() increments the set point and sends to controller
     child.adjustSetPointUp()
     render status: 200, data: "OK"
 }
@@ -127,14 +118,13 @@ def endpointSetPointDown() {
 def endpointHeatSource() {
     def child = getChildDevice(params.dni)
     if (!child) { render status: 404, data: "Device not found"; return }
-    // Convert URL slug: solar_preferred → Solar Preferred
+    // Convert URL slug back to title case: solar_preferred → Solar Preferred
     def source = params.source?.replaceAll("_", " ")
                                 ?.split(" ")
                                 ?.collect { it.capitalize() }
                                 ?.join(" ")
-    // Update device attribute
+    // Update local attribute AND write to controller
     child.setHeatSource(source)
-    // Relay to controller via bridge
     setBodyHeatSource(params.dni, source)
     render status: 200, data: "OK"
 }
@@ -166,18 +156,17 @@ def initialize() {
         )
     }
 
-    // Build the local endpoint base URL — no token needed.
-    // Format: http://[hub-ip]/apps/api/[app-id]
+    // Hubitat's local app API runs on port 8080 (not port 80).
+    // Format: http://[hub-ip]:8080/apps/api/[app-id]
     def hubIP        = location.hubs[0].localIP
-    def endpointBase = "http://${hubIP}/apps/api/${app.id}"
+    def endpointBase = "http://${hubIP}:8080/apps/api/${app.id}"
 
-    bridge.updateSetting("ipAddress",     [value: intellicenterIP,           type: "text"])
-    bridge.updateSetting("portNumber",    [value: intellicenterPort ?: 6680, type: "number"])
-    bridge.updateSetting("debugMode",     [value: debugMode ?: false,        type: "bool"])
-    // Bridge needs endpointBase so it can stamp it into body child devices as they are discovered
-    bridge.updateSetting("endpointBase",  [value: endpointBase,              type: "text"])
+    bridge.updateSetting("ipAddress",    [value: intellicenterIP,           type: "text"])
+    bridge.updateSetting("portNumber",   [value: intellicenterPort ?: 6680, type: "number"])
+    bridge.updateSetting("debugMode",    [value: debugMode ?: false,        type: "bool"])
+    bridge.updateSetting("endpointBase", [value: endpointBase,              type: "text"])
 
-    // Small delay so updateSetting calls propagate before the bridge connects
+    // Small delay so settings propagate before the WebSocket connects
     runIn(2, "initBridge")
 }
 
@@ -191,45 +180,24 @@ def uninstalled() {
     // Delete bridge children first (circuits, pumps, sensors)
     def bridge = getChildDevice("intellicenter-bridge-${app.id}")
     bridge?.getChildDevices()?.each {
-        try { bridge.deleteChildDevice(it.deviceNetworkId) } catch (e) { log.warn "Could not delete bridge child ${it.deviceNetworkId}: ${e.message}" }
+        try { bridge.deleteChildDevice(it.deviceNetworkId) }
+        catch (e) { log.warn "Could not delete bridge child ${it.deviceNetworkId}: ${e.message}" }
     }
-    // Then delete all app children (body devices + bridge itself)
+    // Delete all app children (body devices + bridge itself)
     getChildDevices().each {
-        try { deleteChildDevice(it.deviceNetworkId) } catch (e) { log.warn "Could not delete ${it.deviceNetworkId}: ${e.message}" }
+        try { deleteChildDevice(it.deviceNetworkId) }
+        catch (e) { log.warn "Could not delete ${it.deviceNetworkId}: ${e.message}" }
     }
-}
-
-// ============================================================
-// ===================== BODY DEVICE MANAGEMENT ==============
-// ============================================================
-// Body devices are created directly under the app (not the bridge)
-// to avoid Hubitat's grandchild device limitation and to keep
-// the app-endpoint relay chain direct (app ↔ body ↔ bridge).
-
-def getOrCreateBodyDevice(String dni, String label) {
-    def child = getChildDevice(dni)
-    if (!child) {
-        try {
-            log.info "Creating body device: ${label} (${dni})"
-            child = addChildDevice("intellicenter", "Pentair IntelliCenter Body", dni,
-                [label: label, isComponent: false])
-        } catch (e) {
-            log.warn "Could not create body device ${label}: ${e.message}"
-            return null
-        }
-    }
-    // Stamp current endpoint base — refreshed every time in case hub IP or app ID changed
-    def hubIP        = location.hubs[0].localIP
-    def endpointBase = "http://${hubIP}/apps/api/${app.id}"
-    child.updateSetting("endpointBase", [value: endpointBase, type: "text"])
-    return child
 }
 
 // ============================================================
 // ===================== BODY COMMAND RELAY ==================
 // ============================================================
-// Body devices call these on their parent (the app).
-// The app relays to the bridge, which sends to IntelliCenter.
+// Body devices are bridge children. Their parent is the bridge,
+// which has setBodyStatus/SetPoint/HeatSource methods directly.
+// These app-level relays are kept so that app HTTP endpoints
+// (endpointOn, endpointHeatSource, etc.) can also drive the
+// bridge without needing a direct reference to it.
 
 def setBodyStatus(String bodyDni, String status) {
     def bridge = getChildDevice("intellicenter-bridge-${app.id}")
