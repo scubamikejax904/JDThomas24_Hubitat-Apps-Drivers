@@ -18,10 +18,10 @@ metadata {
     }
 
     preferences {
-        input "ipAddress",    "text",   title: "IntelliCenter IP Address",                             required: true
-        input "portNumber",   "number", title: "Port (IntelliCenter 1 = 6680 / IntelliCenter 2 = 6680 or 6681)", defaultValue: 6680
-        input "debugMode",    "bool",   title: "Debug Logging (auto-disables after 60 min)",           defaultValue: false
-        input "endpointBase", "text",   title: "App Endpoint Base (set automatically by app)",         required: false
+        input "ipAddress",    "text",   title: "IntelliCenter IP Address",                              required: true
+        input "portNumber",   "number", title: "Port (IntelliCenter 1 = 6680 / IC2 try 6681)",          defaultValue: 6680
+        input "debugMode",    "bool",   title: "Debug Logging (auto-disables after 60 min)",            defaultValue: false
+        input "endpointBase", "text",   title: "App Endpoint Base (set automatically by app)",          required: false
     }
 }
 
@@ -30,8 +30,6 @@ metadata {
 // ============================================================
 def installed() {
     log.info "IntelliCenter Bridge installed"
-    // Initialize — if IP isn't set yet the connect() guard will handle it gracefully.
-    // The app will also call initialize() via runIn(2,"initBridge") after pushing settings.
     initialize()
 }
 
@@ -47,10 +45,8 @@ def initialize() {
     state.connected   = false
 
     unschedule()
-    // Watchdog every 2 minutes — reconnects if WebSocket has dropped
     schedule("0 0/2 * * * ?", reconnectIfNeeded)
 
-    // Auto-disable debug logging after 60 minutes to avoid log spam
     if (debugMode) {
         log.info "Debug logging enabled — will auto-disable in 60 minutes"
         runIn(3600, disableDebugLogging)
@@ -60,17 +56,8 @@ def initialize() {
 }
 
 def refresh() {
-    // Do a lightweight status refresh rather than full rediscovery.
-    // Full rediscovery (requestEquipment) floods the controller with 6 sequential
-    // queries and causes the lag reported with Spa updates.
-    // Use it only on first connect — not on every user-triggered refresh.
     if (state.connected) {
-        if (debugMode) log.debug "Bridge refresh — requesting current status for all objects"
-        sendCommand([
-            command: "GetParamList",
-            condition: "OBJTYP=BODY,CIRCUIT,PUMP",
-            objectList: [[objnam: "ALL", keys: ["STATUS","TEMP","LOTMP","HITMP","HTMODE","HTSRC","RPM","WATTS","GPM"]]]
-        ])
+        requestEquipment()
     } else {
         connect()
     }
@@ -81,14 +68,14 @@ def refresh() {
 // ============================================================
 def connect() {
     if (!ipAddress) {
-        log.warn "No IP address configured — open the Pentair IntelliCenter app and click Done to apply settings"
+        log.warn "No IP address configured — open the Pentair IntelliCenter app and click Done"
         sendEvent(name: "connectionStatus", value: "Not Configured — open app and click Done")
         return
     }
 
     try {
         def uri = "ws://${ipAddress}:${portNumber ?: 6680}"
-        log.info "Connecting to IntelliCenter at ${uri} (IC1 default port: 6680 / IC2 try: 6681 if connection fails)"
+        if (debugMode) log.debug "Connecting via WebSocket to ${uri}"
         interfaces.webSocket.connect(uri)
     } catch (e) {
         log.error "Connection failed: ${e.message}"
@@ -158,6 +145,9 @@ def processMessage(String raw) {
         case "SendParamList":
             handleParamList(json)
             break
+        case "WriteParamList":
+            handleWriteParamList(json)
+            break
         case "NotifyList":
             handleNotifyList(json)
             break
@@ -187,7 +177,6 @@ def requestEquipment() {
 
 def requestGroups() {
     if (debugMode) log.debug "Requesting equipment — circuit groups"
-    // Use condition-based query instead of hardcoded GRP01-GRP05
     sendCommand([
         command: "GetParamList",
         condition: "OBJTYP=CIRCGRP",
@@ -198,9 +187,6 @@ def requestGroups() {
 
 def requestBodies() {
     if (debugMode) log.debug "Requesting equipment — bodies"
-    // Request HTSRC (current heat source) and HTRLST (available heater list)
-    // HTRLST returns the list of all heater object IDs configured for this body,
-    // which we use to build a reliable source→ID map for setBodyHeatSource.
     sendCommand([
         command: "GetParamList",
         condition: "OBJTYP=BODY",
@@ -211,9 +197,6 @@ def requestBodies() {
 
 def requestHeaters() {
     if (debugMode) log.debug "Requesting equipment — heaters"
-    // Heater objects tell us the canonical SNAME and object ID for each heat source.
-    // We store them in state.heaterNames so setBodyHeatSource can look up the
-    // correct HTSRC ID by the friendly name the user selected.
     sendCommand([
         command: "GetParamList",
         condition: "OBJTYP=HEATER",
@@ -267,7 +250,7 @@ def subscribeToUpdates() {
 def handleParamList(json) {
     json?.objectList?.each { obj ->
         def name   = obj.objnam
-        def params = normaliseParams(obj.params)
+        def params = obj.params
         if (!name || !params) return
 
         if (!state.objectMap) state.objectMap = [:]
@@ -282,37 +265,33 @@ def handleParamList(json) {
 def handleNotifyList(json) {
     json?.objectList?.each { obj ->
         def name   = obj.objnam
-        def params = normaliseParams(obj.params)
+        def params = obj.params
         if (!name || !params) return
 
         if (!state.objectMap) state.objectMap = [:]
         if (!state.objectMap[name]) state.objectMap[name] = [:]
-        // Merge so partial NotifyList updates always have full object context (e.g. SUBTYP)
         params.each { k, v -> state.objectMap[name][k] = v }
 
         routeUpdate(name, params)
     }
 }
 
-// ── IC1 vs IC2 params normalisation ─────────────────────────
-// IC1 returns params as a Map:   { STATUS: "ON", TEMP: "82" }
-// IC2 may return params as a List: [{ key: "STATUS", value: "ON" }, ...]
-// Normalise both formats to a plain Map before processing.
-def normaliseParams(raw) {
-    if (raw == null) return null
-    // JsonSlurper returns LazyMap which is a Map — handle first
-    if (raw instanceof Map) return raw
-    // Some IC2 firmware versions return params as a List of {key, value} objects
-    if (raw instanceof List) {
-        def m = [:]
-        raw.each { entry ->
-            if (entry?.key != null) m[entry.key] = entry.value
+// WriteParamList — full state push from controller after a SetParamList.
+// Uses "changes" array instead of "objectList" params.
+def handleWriteParamList(json) {
+    json?.objectList?.each { obj ->
+        def name       = obj.objnam
+        def changeList = obj.changes
+        if (!name || !changeList) return
+        changeList.each { change ->
+            def params = change.params
+            if (!params) return
+            if (!state.objectMap) state.objectMap = [:]
+            if (!state.objectMap[name]) state.objectMap[name] = [:]
+            params.each { k, v -> state.objectMap[name][k] = v }
+            routeUpdate(name, params)
         }
-        return m.isEmpty() ? null : m
     }
-    // Any other type — log and return null so it's visible if something unexpected arrives
-    log.warn "normaliseParams: unexpected params type — skipping"
-    return null
 }
 
 def routeUpdate(String objnam, Map params) {
@@ -344,11 +323,6 @@ def processCircuit(String objnam, Map params) {
         return
     }
 
-    // POOL and SPA subtypes are managed as body devices.
-    // Three-layer guard to catch all timing scenarios:
-    //  1. SUBTYP is present in this update
-    //  2. bodyObjnams already registered (body processed first)
-    //  3. A body child device with this objnam already exists
     if (subtyp == "POOL" || subtyp == "SPA") {
         if (debugMode) log.debug "Skipping body circuit (subtyp): ${objnam} (${subtyp})"
         return
@@ -357,10 +331,8 @@ def processCircuit(String objnam, Map params) {
         if (debugMode) log.debug "Skipping body circuit (bodyObjnams): ${objnam}"
         return
     }
-    // Check if a body device for this objnam already exists under the bridge
     if (getChildDevice("intellicenter-body-${objnam}")) {
         if (debugMode) log.debug "Skipping body circuit (body device exists): ${objnam}"
-        // Ensure it's tracked for future updates
         if (!state.bodyObjnams) state.bodyObjnams = []
         if (!state.bodyObjnams.contains(objnam)) state.bodyObjnams << objnam
         return
@@ -388,12 +360,9 @@ def processBody(String objnam, Map params) {
     def htmode = params.HTMODE
     def htsrc  = params.HTSRC
 
-    // Track body objnams so processCircuit can filter them out even when
-    // SUBTYP is missing from a partial NotifyList update
     if (!state.bodyObjnams) state.bodyObjnams = []
     if (!state.bodyObjnams.contains(objnam)) state.bodyObjnams << objnam
 
-    // Body devices are bridge children, same as circuits and pumps.
     def dni  = "intellicenter-body-${objnam}"
     def body = getOrCreateChild("Pentair IntelliCenter Body", dni, label)
     if (!body) {
@@ -401,7 +370,6 @@ def processBody(String objnam, Map params) {
         return
     }
 
-    // Stamp endpointBase so tile buttons can reach the app's HTTP endpoints
     if (endpointBase) {
         body.updateSetting("endpointBase", [value: endpointBase, type: "text"])
     }
@@ -419,25 +387,17 @@ def processBody(String objnam, Map params) {
                        "4":"Heat Pump","5":"Heat Pump Preferred","OFF":"Off"]
         def modeFriendly = modeMap[htmode.toString()] ?: htmode
         body.sendEvent(name: "heaterMode", value: modeFriendly)
-
-        // When heating mode is Off, also clear heatSource so the tile reflects
-        // the true state even if HTSRC wasn't included in this push.
-        // HTMODE is the authoritative "is heating active" signal from the controller.
+        // When HTMODE goes Off with no HTSRC in this push, clear heatSource
         if (modeFriendly == "Off" && htsrc == null) {
             body.sendEvent(name: "heatSource", value: "Off")
-            if (debugMode) log.debug "Body [${label}]: HTMODE=Off — clearing heatSource to Off"
         }
     }
 
     if (htsrc != null) {
-        // Static fallback map for known HTSRC IDs
         def staticSrcMap = ["00000":"Off","H0001":"Heater","S0001":"Solar Only",
                             "H0002":"Solar Preferred","H0003":"Heat Pump","H0004":"Heat Pump Preferred"]
         def friendlyName = staticSrcMap[htsrc] ?: htsrc
 
-        // Store the raw HTSRC ID we received from the controller keyed by
-        // friendly name, per body. This lets setBodyHeatSource send back the
-        // exact ID the controller reported rather than a hardcoded guess.
         if (!state.htsrcIds) state.htsrcIds = [:]
         if (!state.htsrcIds[objnam]) state.htsrcIds[objnam] = [:]
         state.htsrcIds[objnam][friendlyName] = htsrc
@@ -445,10 +405,8 @@ def processBody(String objnam, Map params) {
         body.sendEvent(name: "heatSource", value: friendlyName)
     }
 
-    if (debugMode) log.debug "Body [${label}] (${subtyp}): status=${status} temp=${temp} setpt=${lotmp} maxTemp=${hitmp} htmode=${htmode} htsrc=${htsrc}"
+    if (debugMode) log.debug "Body [${label}] (${subtyp}): status=${status} temp=${temp} setpt=${lotmp} htmode=${htmode} htsrc=${htsrc}"
 
-    // Always re-render the tile after any attribute update from the controller.
-    // sendEvent() alone does not trigger renderTile — debounceTile() must be called.
     body.debounceTile()
 }
 
@@ -461,21 +419,16 @@ def processPump(String objnam, Map params) {
     def pumpDni = "intellicenter-pump-${objnam}"
     def pump    = getOrCreateChild("Pentair IntelliCenter Pump", pumpDni, label)
     if (pump) {
-        if (rpm   != null)                         pump.sendEvent(name: "rpm",   value: rpm.toInteger(),   unit: "RPM")
-        if (watts != null)                         pump.sendEvent(name: "watts", value: watts.toInteger(), unit: "W")
-        if (gpm   != null && gpm.toInteger() > 0)  pump.sendEvent(name: "gpm",   value: gpm.toInteger(),   unit: "GPM")
+        if (rpm   != null)                        pump.sendEvent(name: "rpm",   value: rpm.toInteger(),   unit: "RPM")
+        if (watts != null)                        pump.sendEvent(name: "watts", value: watts.toInteger(), unit: "W")
+        if (gpm   != null && gpm.toInteger() > 0) pump.sendEvent(name: "gpm",   value: gpm.toInteger(),   unit: "GPM")
     }
-
     if (debugMode) log.debug "Pump [${label}]: rpm=${rpm} watts=${watts} gpm=${gpm}"
 }
 
 def processSensor(String objnam, Map params) {
     def subtyp = params.SUBTYP ?: state.objectMap?.get(objnam)?.SUBTYP ?: ""
-    // POOL and SPA temps are already reported on the body device
-    if (subtyp == "POOL" || subtyp == "SPA") {
-        if (debugMode) log.debug "Skipping body sensor (handled by body temp): ${objnam} (${subtyp})"
-        return
-    }
+    if (subtyp == "POOL" || subtyp == "SPA") { return }
 
     def label  = params.SNAME ?: state.objectMap?.get(objnam)?.SNAME ?: objnam
     def source = params.SOURCE
@@ -491,23 +444,17 @@ def processChem(String objnam, Map params) {
     def status = params.STATUS
     def salt   = params.SALT
 
-    // Use a generic switch for on/off; salt level stored as a separate attribute.
-    // Note: Generic Component Switch does not have a saltLevel capability — this is
-    // informational only and will appear in the device's current states list.
     def c = getOrCreateChild("Generic Component Switch", "intellicenter-chem-${objnam}", label)
     if (!c) return
 
     if (status != null) c.sendEvent(name: "switch",    value: (status == "ON" ? "on" : "off"))
     if (salt   != null) c.sendEvent(name: "saltLevel", value: salt.toInteger(), unit: "PPM")
-
     if (debugMode) log.debug "Chem [${label}]: status=${status} salt=${salt}"
 }
 
 def processHeater(String objnam, Map params) {
     def label = params.SNAME ?: state.objectMap?.get(objnam)?.SNAME
     if (!label) return
-    // Store heater objnam → friendly name mapping.
-    // This gives setBodyHeatSource a direct ID lookup by name.
     if (!state.heaterNames) state.heaterNames = [:]
     state.heaterNames[objnam] = label
     if (debugMode) log.debug "Heater registered: ${objnam} = '${label}'"
@@ -540,41 +487,32 @@ def setBodyHeatSource(String childDni, String source) {
     def objnam = objnamFromDni(childDni)
     if (!objnam) { log.warn "setBodyHeatSource: no objnam for DNI ${childDni}"; return }
 
-    // "Off" means turn heating off — send HTMODE=0 to disable active heating.
-    // Also send HTSRC=00000 as belt-and-suspenders.
-    // HTMODE controls whether heating is actively running;
-    // HTSRC controls which source would be used if heating were enabled.
     if (source == "Off") {
-        if (debugMode) log.debug "setBodyHeatSource: ${objnam} — turning heat off (HTMODE=0)"
+        if (debugMode) log.debug "setBodyHeatSource: ${objnam} — heat off (HTSRC=00000)"
         sendCommand([
             command: "SetParamList",
-            objectList: [[objnam: objnam, params: [HTMODE: "0", HTSRC: "00000"]]]
+            objectList: [[objnam: objnam, params: [HTSRC: "00000"]]]
         ])
         return
     }
 
-    // Priority 1: raw HTSRC ID the controller previously reported for this body
+    // Priority 1: raw HTSRC ID from controller
     def htsrcId = state.htsrcIds?.get(objnam)?.get(source)
 
-    // Priority 2: reverse-lookup from heater name → objnam via processHeater data
+    // Priority 2: heater object name lookup
     if (!htsrcId) {
         htsrcId = state.heaterNames?.find { k, v -> v?.equalsIgnoreCase(source) }?.key
     }
 
-    // Priority 3: static fallback map (last resort — IDs vary by controller config)
+    // Priority 3: static fallback
     if (!htsrcId) {
-        def staticSrcMap = [
-            "Heater"              : "H0001",
-            "Solar Only"          : "S0001",
-            "Solar Preferred"     : "H0002",
-            "Heat Pump"           : "H0003",
-            "Heat Pump Preferred" : "H0004"
-        ]
+        def staticSrcMap = ["Heater":"H0001","Solar Only":"S0001","Solar Preferred":"H0002",
+                            "Heat Pump":"H0003","Heat Pump Preferred":"H0004"]
         htsrcId = staticSrcMap[source]
-        if (htsrcId) log.warn "setBodyHeatSource: using static fallback ID '${htsrcId}' for '${source}' — may not match your controller"
+        if (htsrcId) log.warn "setBodyHeatSource: using static fallback '${htsrcId}' for '${source}'"
     }
 
-    if (!htsrcId) { log.warn "setBodyHeatSource: unknown source '${source}' for body ${objnam}"; return }
+    if (!htsrcId) { log.warn "setBodyHeatSource: unknown source '${source}' for ${objnam}"; return }
 
     if (debugMode) log.debug "setBodyHeatSource: ${objnam} HTSRC=${htsrcId} (${source})"
     sendCommand([
@@ -649,7 +587,7 @@ def sendCommand(Map payload) {
 // ============================================================
 def componentRefresh(child) {
     if (!child?.deviceNetworkId) {
-        if (debugMode) log.debug "componentRefresh: child or DNI not yet available — skipping (normal during install)"
+        if (debugMode) log.debug "componentRefresh: child or DNI not yet available — skipping"
         return
     }
     if (debugMode) log.debug "componentRefresh: ${child.displayName}"
@@ -674,13 +612,10 @@ def refreshBody(String dni) {
 // ===================== HELPERS =============================
 // ============================================================
 def objnamFromDni(String dni) {
-    // DNI format: intellicenter-{type}-{OBJNAM}
-    // Strip known prefixes so objnam is never ambiguous even if it contained a hyphen
     for (prefix in ["intellicenter-body-", "intellicenter-circuit-", "intellicenter-pump-",
                      "intellicenter-sensor-", "intellicenter-chem-"]) {
         if (dni.startsWith(prefix)) return dni.substring(prefix.length())
     }
-    // Fallback: last segment after final hyphen
     def idx = dni.lastIndexOf("-")
     return idx > 0 ? dni.substring(idx + 1) : null
 }
