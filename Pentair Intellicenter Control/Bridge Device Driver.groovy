@@ -3,7 +3,7 @@ metadata {
         name: "Pentair IntelliCenter Bridge",
         namespace: "intellicenter",
         author: "jdthomas24",
-        description: "Bridge driver for Pentair IntelliCenter TCP connection"
+        description: "Bridge driver for Pentair IntelliCenter TCP connection — v1.5.0"
     ) {
         capability "Initialize"
         capability "Refresh"
@@ -51,8 +51,17 @@ def initialize() {
 }
 
 def refresh() {
+    // Do a lightweight status refresh rather than full rediscovery.
+    // Full rediscovery (requestEquipment) floods the controller with 6 sequential
+    // queries and causes the lag reported with Spa updates.
+    // Use it only on first connect — not on every user-triggered refresh.
     if (state.connected) {
-        requestEquipment()
+        if (debugMode) log.debug "Bridge refresh — requesting current status for all objects"
+        sendCommand([
+            command: "GetParamList",
+            condition: "OBJTYP=BODY,CIRCUIT,PUMP",
+            objectList: [[objnam: "ALL", keys: ["STATUS","TEMP","LOTMP","HITMP","HTMODE","HTSRC","RPM","WATTS","GPM"]]]
+        ])
     } else {
         connect()
     }
