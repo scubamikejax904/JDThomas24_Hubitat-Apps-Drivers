@@ -87,8 +87,9 @@ def disableDebugLogging() {
 // These match the tile buttons exactly — same label, same action.
 // ============================================================
 
-// "🔥 Heat and Start Pump" — sets target temp, keeps current heat
-// source, and starts the pump. One tap does everything.
+// "🔥 Heat and Start Pump" — sets target temp, re-sends current heat
+// source (activating HTMODE), and starts the pump. One tap does everything.
+// Mirrors exactly what the tile button does via the HTTP endpoint.
 def "🔥 Heat and Start Pump"(degrees) {
     def temp = degrees.toInteger()
     def minT = (minSetPoint ?: 40).toInteger()
@@ -98,15 +99,24 @@ def "🔥 Heat and Start Pump"(degrees) {
         return
     }
     if (debugMode) log.debug "${device.displayName}: Heat and Start Pump — target ${temp}°F"
-    // Set target temp
+
+    // 1. Set target temperature
     sendEvent(name: "heatingSetpoint", value: temp, unit: "°F")
     parent?.setBodySetPoint(device.deviceNetworkId, temp)
-    // Start pump if not already on
-    if (device.currentValue("switch") != "on") {
-        sendEvent(name: "switch",     value: "on")
-        sendEvent(name: "bodyStatus", value: "On")
-        parent?.setBodyStatus(device.deviceNetworkId, "ON")
-    }
+
+    // 2. Re-send current heat source so controller activates HTMODE.
+    //    Without this, HTSRC is selected but heating stays off.
+    def source = device.currentValue("heatSource") ?: "Heater"
+    if (source == "Off" || source == "—") source = "Heater"
+    sendEvent(name: "heatSource", value: source)
+    parent?.setBodyHeatSource(device.deviceNetworkId, source)
+    if (debugMode) log.debug "${device.displayName}: heat source '${source}' sent with HTMODE"
+
+    // 3. Start pump
+    sendEvent(name: "switch",     value: "on")
+    sendEvent(name: "bodyStatus", value: "On")
+    parent?.setBodyStatus(device.deviceNetworkId, "ON")
+
     debounceTile()
 }
 
