@@ -229,7 +229,10 @@ def renderTile() {
 
     def isOn      = (sw == "on")
     def isLocked  = (heatLock == "locked")
-    def isHeating = isOn && htsrc != "Off" && htsrc != "—"
+    // isHeating uses heaterMode (HTMODE from controller) as primary truth.
+    // heatSource (HTSRC) is the selected source but stays set even when heat is off.
+    // Only HTMODE going to "Off" reliably means heating is inactive.
+    def isHeating = isOn && htmode != "Off" && htmode != "—" && htmode != "0" && htsrc != "Off"
 
     def name   = device.displayName
     def dni    = device.deviceNetworkId
