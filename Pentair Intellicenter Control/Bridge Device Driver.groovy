@@ -483,20 +483,30 @@ def setBodyHeatSource(String childDni, String source) {
     def objnam = objnamFromDni(childDni)
     if (!objnam) { log.warn "setBodyHeatSource: no objnam for DNI ${childDni}"; return }
 
+    // "Off" means turn heating off — send HTMODE=0 to disable active heating.
+    // Also send HTSRC=00000 as belt-and-suspenders.
+    // HTMODE controls whether heating is actively running;
+    // HTSRC controls which source would be used if heating were enabled.
+    if (source == "Off") {
+        if (debugMode) log.debug "setBodyHeatSource: ${objnam} — turning heat off (HTMODE=0)"
+        sendCommand([
+            command: "SetParamList",
+            objectList: [[objnam: objnam, params: [HTMODE: "0", HTSRC: "00000"]]]
+        ])
+        return
+    }
+
     // Priority 1: raw HTSRC ID the controller previously reported for this body
-    // (most reliable — built from actual controller responses in processBody)
     def htsrcId = state.htsrcIds?.get(objnam)?.get(source)
 
     // Priority 2: reverse-lookup from heater name → objnam via processHeater data
-    // (covers sources not yet seen as the active HTSRC but known from HEATER objects)
-    if (!htsrcId && source != "Off") {
+    if (!htsrcId) {
         htsrcId = state.heaterNames?.find { k, v -> v?.equalsIgnoreCase(source) }?.key
     }
 
     // Priority 3: static fallback map (last resort — IDs vary by controller config)
     if (!htsrcId) {
         def staticSrcMap = [
-            "Off"                 : "00000",
             "Heater"              : "H0001",
             "Solar Only"          : "S0001",
             "Solar Preferred"     : "H0002",
@@ -631,4 +641,3 @@ def getOrCreateChild(String driver, String dni, String label) {
     }
     return child
 }
-
