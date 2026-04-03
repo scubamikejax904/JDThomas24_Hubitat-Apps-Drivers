@@ -97,19 +97,26 @@ def endpointHeatAndStart() {
 def endpointHeatAndStartWithSource() {
     def child = getChildDevice(params.dni)
     if (!child) { render status: 404, data: "Device not found"; return }
+
+    def dni = params.dni
+
+    // 1. Set target temperature
     def temp = params.temp?.toInteger()
     if (temp) {
         child.setHeatingSetpoint(temp)
-        setBodySetPoint(params.dni, temp)
+        setBodySetPoint(dni, temp)
     }
-    // Re-send the heat source so the controller re-activates heating
-    // (needed when controller cleared HTMODE externally)
+
+    // 2. Set heat source AFTER pump on
     def source = params.source?.replaceAll("_"," ")?.split(" ")?.collect{it.capitalize()}?.join(" ")
     if (source && source != "Off") {
         child.setHeatSource(source)
         setBodyHeatSource(params.dni, source)
     }
+
+    // 3. Start pump
     child.on()
+
     render status: 200, data: "OK"
 }
 
