@@ -175,10 +175,26 @@ def requestGroups() {
 
 def requestBodies() {
     if (debugMode) log.debug "Requesting equipment — bodies"
+    // Request HTSRC (current heat source) and HTRLST (available heater list)
+    // HTRLST returns the list of all heater object IDs configured for this body,
+    // which we use to build a reliable source→ID map for setBodyHeatSource.
     sendCommand([
         command: "GetParamList",
         condition: "OBJTYP=BODY",
-        objectList: [[objnam: "ALL", keys: ["OBJTYP", "SUBTYP", "SNAME", "STATUS", "TEMP", "LOTMP", "HITMP", "HTMODE", "HTSRC"]]]
+        objectList: [[objnam: "ALL", keys: ["OBJTYP", "SUBTYP", "SNAME", "STATUS", "TEMP", "LOTMP", "HITMP", "HTMODE", "HTSRC", "HTRLST"]]]
+    ])
+    runIn(2, "requestHeaters")
+}
+
+def requestHeaters() {
+    if (debugMode) log.debug "Requesting equipment — heaters"
+    // Heater objects tell us the canonical SNAME and object ID for each heat source.
+    // We store them in state.heaterNames so setBodyHeatSource can look up the
+    // correct HTSRC ID by the friendly name the user selected.
+    sendCommand([
+        command: "GetParamList",
+        condition: "OBJTYP=HEATER",
+        objectList: [[objnam: "ALL", keys: ["OBJTYP", "SNAME"]]]
     ])
     runIn(2, "requestPumps")
 }
@@ -266,6 +282,7 @@ def routeUpdate(String objnam, Map params) {
         case "PUMP":     processPump(objnam, params);    break
         case "SENSE":    processSensor(objnam, params);  break
         case "CHEM":     processChem(objnam, params);    break
+        case "HEATER":   processHeater(objnam, params);  break
     }
 }
 
@@ -350,9 +367,19 @@ def processBody(String objnam, Map params) {
     }
 
     if (htsrc != null) {
-        def srcMap = ["00000":"Off","H0001":"Heater","S0001":"Solar Only",
-                      "H0002":"Solar Preferred","H0003":"Heat Pump","H0004":"Heat Pump Preferred"]
-        body.sendEvent(name: "heatSource", value: srcMap[htsrc] ?: htsrc)
+        // Static fallback map for known HTSRC IDs
+        def staticSrcMap = ["00000":"Off","H0001":"Heater","S0001":"Solar Only",
+                            "H0002":"Solar Preferred","H0003":"Heat Pump","H0004":"Heat Pump Preferred"]
+        def friendlyName = staticSrcMap[htsrc] ?: htsrc
+
+        // Store the raw HTSRC ID we received from the controller keyed by
+        // friendly name, per body. This lets setBodyHeatSource send back the
+        // exact ID the controller reported rather than a hardcoded guess.
+        if (!state.htsrcIds) state.htsrcIds = [:]
+        if (!state.htsrcIds[objnam]) state.htsrcIds[objnam] = [:]
+        state.htsrcIds[objnam][friendlyName] = htsrc
+
+        body.sendEvent(name: "heatSource", value: friendlyName)
     }
 
     if (debugMode) log.debug "Body [${label}] (${subtyp}): status=${status} temp=${temp} setpt=${lotmp} maxTemp=${hitmp} htmode=${htmode} htsrc=${htsrc}"
@@ -409,6 +436,16 @@ def processChem(String objnam, Map params) {
     if (debugMode) log.debug "Chem [${label}]: status=${status} salt=${salt}"
 }
 
+def processHeater(String objnam, Map params) {
+    def label = params.SNAME ?: state.objectMap?.get(objnam)?.SNAME
+    if (!label) return
+    // Store heater objnam → friendly name mapping.
+    // This gives setBodyHeatSource a direct ID lookup by name.
+    if (!state.heaterNames) state.heaterNames = [:]
+    state.heaterNames[objnam] = label
+    if (debugMode) log.debug "Heater registered: ${objnam} = '${label}'"
+}
+
 // ============================================================
 // ===================== BODY COMMANDS =======================
 // ============================================================
@@ -436,17 +473,31 @@ def setBodyHeatSource(String childDni, String source) {
     def objnam = objnamFromDni(childDni)
     if (!objnam) { log.warn "setBodyHeatSource: no objnam for DNI ${childDni}"; return }
 
-    // Map friendly name → IntelliCenter HTSRC object ID
-    def srcMap = [
-        "Off"                  : "00000",
-        "Heater"               : "H0001",
-        "Solar Only"           : "S0001",
-        "Solar Preferred"      : "H0002",
-        "Heat Pump"            : "H0003",
-        "Heat Pump Preferred"  : "H0004"
-    ]
-    def htsrcId = srcMap[source]
-    if (!htsrcId) { log.warn "setBodyHeatSource: unknown source '${source}'"; return }
+    // Priority 1: raw HTSRC ID the controller previously reported for this body
+    // (most reliable — built from actual controller responses in processBody)
+    def htsrcId = state.htsrcIds?.get(objnam)?.get(source)
+
+    // Priority 2: reverse-lookup from heater name → objnam via processHeater data
+    // (covers sources not yet seen as the active HTSRC but known from HEATER objects)
+    if (!htsrcId && source != "Off") {
+        htsrcId = state.heaterNames?.find { k, v -> v?.equalsIgnoreCase(source) }?.key
+    }
+
+    // Priority 3: static fallback map (last resort — IDs vary by controller config)
+    if (!htsrcId) {
+        def staticSrcMap = [
+            "Off"                 : "00000",
+            "Heater"              : "H0001",
+            "Solar Only"          : "S0001",
+            "Solar Preferred"     : "H0002",
+            "Heat Pump"           : "H0003",
+            "Heat Pump Preferred" : "H0004"
+        ]
+        htsrcId = staticSrcMap[source]
+        if (htsrcId) log.warn "setBodyHeatSource: using static fallback ID '${htsrcId}' for '${source}' — may not match your controller"
+    }
+
+    if (!htsrcId) { log.warn "setBodyHeatSource: unknown source '${source}' for body ${objnam}"; return }
 
     if (debugMode) log.debug "setBodyHeatSource: ${objnam} HTSRC=${htsrcId} (${source})"
     sendCommand([
@@ -520,6 +571,10 @@ def sendCommand(Map payload) {
 // ===================== COMPONENT CALLBACKS =================
 // ============================================================
 def componentRefresh(child) {
+    if (!child?.deviceNetworkId) {
+        log.warn "componentRefresh: child or DNI is null — skipping"
+        return
+    }
     if (debugMode) log.debug "componentRefresh: ${child.displayName}"
     def objnam = objnamFromDni(child.deviceNetworkId)
     if (!objnam) return
@@ -566,5 +621,3 @@ def getOrCreateChild(String driver, String dni, String label) {
     }
     return child
 }
-
-
