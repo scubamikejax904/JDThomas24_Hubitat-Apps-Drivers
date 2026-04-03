@@ -311,7 +311,7 @@ def normaliseParams(raw) {
         return m.isEmpty() ? null : m
     }
     // Any other type — log and return null so it's visible if something unexpected arrives
-    log.warn "normaliseParams: unexpected params type ${raw?.getClass()?.simpleName} — skipping"
+    log.warn "normaliseParams: unexpected params type — skipping"
     return null
 }
 
