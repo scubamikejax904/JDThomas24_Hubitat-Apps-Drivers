@@ -3,10 +3,10 @@ definition(
     namespace: "intellicenter",
     author: "jdthomas24",
     description: "Pentair IntelliCenter local integration for Hubitat",
+    version: "1.5.0",
     category: "Convenience",
     iconUrl: "",
-    iconX2Url: "",
-    version: "1.4.0"
+    iconX2Url: ""
 )
 
 preferences {
@@ -68,6 +68,7 @@ mappings {
     path("/body/:dni/heatsource/:source")        { action: [GET: "endpointHeatSource"] }
     path("/body/:dni/setpointup")                { action: [GET: "endpointSetPointUp"] }
     path("/body/:dni/setpointdown")              { action: [GET: "endpointSetPointDown"] }
+    path("/body/:dni/heatandstart/:temp")        { action: [GET: "endpointHeatAndStart"] }
 }
 
 // ── On / Off ────────────────────────────────────────────────
@@ -75,7 +76,19 @@ mappings {
 def endpointOn() {
     def child = getChildDevice(params.dni)
     if (!child) { render status: 404, data: "Device not found"; return }
-    // Sends STATUS:ON immediately — no confirmation step
+    child.on()
+    render status: 200, data: "OK"
+}
+
+def endpointHeatAndStart() {
+    def child = getChildDevice(params.dni)
+    if (!child) { render status: 404, data: "Device not found"; return }
+    def temp = params.temp?.toInteger()
+    if (temp) {
+        child.setHeatingSetpoint(temp)
+        setBodySetPoint(params.dni, temp)
+    }
+    // Start pump — heat source stays as previously set on controller
     child.on()
     render status: 200, data: "OK"
 }
