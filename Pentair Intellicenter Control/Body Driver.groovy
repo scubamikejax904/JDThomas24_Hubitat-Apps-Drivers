@@ -181,14 +181,16 @@ def "⚙ Set Heat Source"(source) {
 }
 
 def "⚙ Disable Heat Lock"() {
-    log.info "${device.displayName} — Heat Lock ENABLED (heat controls locked)"
-    sendEvent(name: "heatLock", value: "locked")
+    // Disable Heat Lock = REMOVE the lock = heating controls are now FREE to use
+    log.info "${device.displayName} — Heat Lock removed (heating controls unlocked)"
+    sendEvent(name: "heatLock", value: "unlocked")
     debounceTile()
 }
 
 def "⚙ Enable Heat Lock"() {
-    log.info "${device.displayName} — Heat Lock DISABLED (heat controls unlocked)"
-    sendEvent(name: "heatLock", value: "unlocked")
+    // Enable Heat Lock = APPLY the lock = heating controls are now BLOCKED
+    log.info "${device.displayName} — Heat Lock applied (heating controls locked)"
+    sendEvent(name: "heatLock", value: "locked")
     debounceTile()
 }
 
@@ -267,7 +269,15 @@ def renderTile() {
     // ── Fetch URLs ─────────────────────────────────────────────
     def btnUpFetch     = hasUrl ? "fetch('${url('setpointup')}');"   : ""
     def btnDnFetch     = hasUrl ? "fetch('${url('setpointdown')}');" : ""
-    def heatStartFetch = hasUrl ? "fetch('${url('heatandstart/' + Math.round(setpt).toInteger())}');" : ""
+    // Heat & Start: single endpoint sends setpoint + re-sends current heat source + starts pump.
+    // Using the source-aware endpoint ensures the controller re-activates heating
+    // even if HTMODE was cleared externally (e.g. turned off via Pentair app).
+    def currentSrcSlug = (htsrc && htsrc != "Off" && htsrc != "—")
+        ? htsrc.replaceAll(' ','_').toLowerCase()
+        : 'heater'
+    def heatStartFetch = hasUrl
+        ? "fetch('${url('heatandstart/' + Math.round(setpt).toInteger() + '/' + currentSrcSlug)}');"
+        : ""
     def heatOffFetch   = hasUrl ? "fetch('${url('heatoff')}');"      : ""
     def pumpOnFetch    = hasUrl ? "fetch('${url('on')}');"           : ""
     def pumpOffFetch   = hasUrl ? "fetch('${url('off')}');"          : ""
