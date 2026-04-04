@@ -1,15 +1,6 @@
 // ============================================================
 // Pentair IntelliCenter Body Driver
 // Version: 1.5.1
-// All files in this integration share this version number.
-//
-// CHANGES FROM 1.5.1:
-//   - Added capability "Switch", "Thermostat", "TemperatureMeasurement"
-//     so Hubitat shows a proper pool/thermostat icon instead of "?"
-//   - renderTile() fully rewritten with all CSS inlined via style=""
-//     attributes — no <style> block. Hubitat's dashboard sanitizer
-//     strips <style> blocks, which was preventing the tile from
-//     rendering any visual output.
 // ============================================================
 
 metadata {
