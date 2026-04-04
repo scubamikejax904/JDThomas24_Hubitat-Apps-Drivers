@@ -107,17 +107,17 @@ def renderTile() {
     // and automations see the correct on/off state
     sendEvent(name: "switch", value: isRunning ? "on" : "off")
 
-    def html = "<div style='font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;background:#0f172a;border-radius:20px;padding:16px 14px;color:#fff;margin:0 auto;box-sizing:border-box;'>" +
-        "<div style='font-size:14px;font-weight:800;text-align:center;margin-bottom:4px;color:#e2e8f0;'>${name}</div>" +
+    def html = "<div style='font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;background:#0f172a;border-radius:16px;padding:10px;color:#fff;width:100%;height:100%;margin:auto;box-sizing:border-box;'>" +
+        "<div style='font-size:13px;font-weight:800;text-align:center;margin-bottom:3px;color:#e2e8f0;'>${name}</div>" +
         "<div style='text-align:center;font-size:11px;font-weight:700;margin-bottom:12px;color:${statusColor};'>${statusLabel}</div>" +
-        "<div style='text-align:center;margin-bottom:12px;'>" +
-            "<div style='font-size:42px;font-weight:800;color:#38bdf8;line-height:1;'>${rpmVal}</div>" +
-            "<div style='font-size:11px;color:#64748b;margin-top:2px;text-transform:uppercase;letter-spacing:.5px;'>RPM</div>" +
+        "<div style='text-align:center;margin-bottom:8px;'>" +
+            "<div style='font-size:32px;font-weight:800;color:#38bdf8;line-height:1;'>${rpmVal}</div>" +
+            "<div style='font-size:10px;color:#64748b;margin-top:2px;text-transform:uppercase;letter-spacing:.5px;'>RPM</div>" +
         "</div>" +
         "<div style='display:flex;gap:6px;'>" +
-            "<div style='flex:1;background:#1e3a5f;border-radius:10px;padding:8px 6px;text-align:center;'>" +
+            "<div style='flex:1;background:#1e3a5f;border-radius:10px;padding:6px;text-align:center;'>" +
                 "<div style='font-size:8px;color:#64748b;text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px;'>Water</div>" +
-                "<div style='font-size:14px;font-weight:700;color:#e2e8f0;'>${tempVal}</div>" +
+                "<div style='font-size:12px;font-weight:700;color:#e2e8f0;'>${tempVal}</div>" +
             "</div>" +
         "</div>" +
         "</div>"
