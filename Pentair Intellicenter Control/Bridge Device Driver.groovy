@@ -4,7 +4,7 @@ metadata {
         namespace: "intellicenter",
         author: "jdthomas24",
         description: "Bridge driver for Pentair IntelliCenter TCP connection",
-        version: "1.5.0"
+        version: "1.5.1"
     ) {
         capability "Initialize"
         capability "Refresh"
