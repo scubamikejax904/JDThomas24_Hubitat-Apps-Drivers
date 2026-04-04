@@ -219,7 +219,7 @@ def renderTile() {
     def statLbl = isHeating ? "Heating"  : (isOn ? "Running"  : "Off")
     def lock    = isLocked  ? " (LOCKED)" : ""
     def pumpTxt = isOn ? "On" : "Off"
-    def heatClr = (htmode != "Off" && htmode != "0") ? "#f97316" : "#64748b"
+    def heatClr = isHeating ? "#4ade80" : "#ef4444"
     def tNow    = Math.round(temp).toInteger()
     def tSet    = Math.round(setpt).toInteger()
 
@@ -236,4 +236,3 @@ def renderTile() {
 
     sendEvent(name: "tile", value: html, displayed: false)
 }
-
