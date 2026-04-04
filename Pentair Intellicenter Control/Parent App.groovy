@@ -133,7 +133,7 @@ def endpointHeatOff() {
     // "Heat Off" on the body driver calls parent?.setBodyHeatSource("Off")
     // which reaches the bridge and sends HTMODE=0 + HTSRC=00000.
     // No need to call setBodyHeatSource here separately.
-    child."⚙ Heat Off Keep Pump Running"()
+    child."⚙ Heat Off, Keep Pump On"()
     render status: 200, data: "OK"
 }
 
