@@ -33,7 +33,7 @@ metadata {
 // ============================================================
 def installed() {
     log.info "IntelliCenter Pump installed: ${device.displayName}"
-    debounceTile()
+    renderTile()
 }
 
 def updated() {
@@ -43,7 +43,7 @@ def updated() {
         log.info "${device.displayName}: debug logging enabled — will auto-disable in 60 minutes"
         runIn(3600, disableDebugLogging)
     }
-    debounceTile()
+    renderTile()
 }
 
 def disableDebugLogging() {
@@ -66,10 +66,12 @@ def setSpeed(rpm) {
     if (debugMode) log.debug "setSpeed: ${target} RPM"
     sendEvent(name: "rpm", value: target, unit: "RPM")
     parent?.setPumpSpeed(device.deviceNetworkId, target)
+    debounceTile()
 }
 
 def refresh() {
     parent?.componentRefresh(this)
+    renderTile()
 }
 
 // ============================================================
