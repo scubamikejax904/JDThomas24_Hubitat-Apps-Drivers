@@ -108,9 +108,9 @@ def webSocketStatus(String message) {
         sendEvent(name: "connectionStatus", value: "Connected")
         runIn(1, requestEquipment)
         // Start polling to catch external state changes (Pentair app, panel)
-        def interval = (pollInterval ?: 60).toInteger()
-        schedule("0/${interval} * * * * ?", pollState)
-        log.info "State polling started — every ${interval} seconds"
+        // pollState() reschedules itself via runIn so no cron needed
+        runIn((pollInterval ?: 60).toInteger(), pollState)
+        log.info "State polling started — every ${pollInterval ?: 60} seconds"
     } else if (message.contains("failure") || message.contains("error") || message.contains("clos")) {
         log.warn "WebSocket disconnected: ${message}"
         state.connected = false
@@ -147,6 +147,8 @@ def pollState() {
         objectList: [[objnam: "ALL", keys: ["OBJTYP", "SUBTYP", "SNAME", "STATUS", "FEATR"]]]
     ])
     runIn(2, pollBodies)
+    // Reschedule next poll
+    runIn((pollInterval ?: 60).toInteger(), pollState)
 }
 
 def pollBodies() {
