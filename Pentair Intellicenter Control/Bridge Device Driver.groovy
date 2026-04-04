@@ -343,7 +343,9 @@ def processCircuit(String objnam, Map params) {
     if (status == null) return
 
     def dni   = "intellicenter-circuit-${objnam}"
-    def child = getOrCreateChild("Generic Component Switch", dni, label)
+    // isComponent: false — circuits and features need to be accessible
+    // from the dashboard and apps so users can add on/off switch tiles
+    def child = getOrCreateChild("Generic Component Switch", dni, label, false)
     if (!child) return
 
     child.sendEvent(name: "switch", value: (status == "ON" ? "on" : "off"))
@@ -364,7 +366,8 @@ def processBody(String objnam, Map params) {
     if (!state.bodyObjnams.contains(objnam)) state.bodyObjnams << objnam
 
     def dni  = "intellicenter-body-${objnam}"
-    def body = getOrCreateChild("Pentair IntelliCenter Body", dni, label)
+    // isComponent: false — body devices need dashboard tile access
+    def body = getOrCreateChild("Pentair IntelliCenter Body", dni, label, false)
     if (!body) {
         log.warn "processBody: could not get/create body device ${label} (${dni})"
         return
@@ -417,7 +420,8 @@ def processPump(String objnam, Map params) {
     def gpm   = params.GPM
 
     def pumpDni = "intellicenter-pump-${objnam}"
-    def pump    = getOrCreateChild("Pentair IntelliCenter Pump", pumpDni, label)
+    // isComponent: false — pumps appear in dashboard for RPM/watts display
+    def pump    = getOrCreateChild("Pentair IntelliCenter Pump", pumpDni, label, false)
     if (pump) {
         if (rpm   != null)                        pump.sendEvent(name: "rpm",   value: rpm.toInteger(),   unit: "RPM")
         if (watts != null)                        pump.sendEvent(name: "watts", value: watts.toInteger(), unit: "W")
@@ -434,7 +438,7 @@ def processSensor(String objnam, Map params) {
     def source = params.SOURCE
     if (source == null) return
 
-    def c = getOrCreateChild("Generic Component Temperature Sensor", "intellicenter-sensor-${objnam}", label)
+    def c = getOrCreateChild("Generic Component Temperature Sensor", "intellicenter-sensor-${objnam}", label, true)
     c?.sendEvent(name: "temperature", value: source.toInteger(), unit: "°F")
     if (debugMode) log.debug "Sensor [${label}]: ${source}°F"
 }
@@ -444,7 +448,7 @@ def processChem(String objnam, Map params) {
     def status = params.STATUS
     def salt   = params.SALT
 
-    def c = getOrCreateChild("Generic Component Switch", "intellicenter-chem-${objnam}", label)
+    def c = getOrCreateChild("Generic Component Switch", "intellicenter-chem-${objnam}", label, true)
     if (!c) return
 
     if (status != null) c.sendEvent(name: "switch",    value: (status == "ON" ? "on" : "off"))
@@ -620,13 +624,13 @@ def objnamFromDni(String dni) {
     return idx > 0 ? dni.substring(idx + 1) : null
 }
 
-def getOrCreateChild(String driver, String dni, String label) {
+def getOrCreateChild(String driver, String dni, String label, Boolean isComponent = false) {
     def child = getChildDevice(dni)
     if (!child) {
         def namespace = driver.startsWith("Pentair") ? "intellicenter" : "hubitat"
         try {
-            child = addChildDevice(namespace, driver, dni, [label: label, isComponent: true])
-            if (debugMode) log.debug "Created child: ${label} (${dni}) [${namespace}]"
+            child = addChildDevice(namespace, driver, dni, [label: label, isComponent: isComponent])
+            if (debugMode) log.debug "Created child: ${label} (${dni}) [${namespace}] isComponent=${isComponent}"
         } catch (e) {
             log.warn "Could not create ${label}: ${e.message}"
         }
