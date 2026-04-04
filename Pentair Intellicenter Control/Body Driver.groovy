@@ -225,11 +225,10 @@ def renderTile() {
 
     def html = "<div style=\"font-family:sans-serif;background:#0f172a;border-radius:16px;padding:12px;color:#fff;text-align:center;\">" +
         "<div style=\"font-weight:800;color:#e2e8f0;margin-bottom:4px;\">${name}${lock}</div>" +
-        "<div style=\"color:${statClr};font-size:11px;margin-bottom:8px;\">&#9679; ${statLbl}</div>" +
-        "<div style=\"background:#1e3a5f;border-radius:8px;padding:10px;margin-bottom:8px;\">" +
+        "<div style=\"background:#1e3a5f;border-radius:8px;padding:12px;margin-bottom:8px;\">" +
         "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr>" +
-        "<td style=\"text-align:center;width:50%;\"><div style=\"font-size:9px;color:#64748b;\">NOW</div><div style=\"font-size:30px;font-weight:800;color:#fff;\">${tNow}&#176;</div></td>" +
-        "<td style=\"text-align:center;width:50%;\"><div style=\"font-size:9px;color:#64748b;\">TARGET</div><div style=\"font-size:30px;font-weight:800;color:#38bdf8;\">${tSet}&#176;</div></td>" +
+        "<td style=\"text-align:center;width:50%;\"><div style=\"font-size:9px;color:#64748b;\">NOW</div><div style=\"font-size:38px;font-weight:800;color:#fff;\">${tNow}&#176;</div></td>" +
+        "<td style=\"text-align:center;width:50%;\"><div style=\"font-size:9px;color:#64748b;\">TARGET</div><div style=\"font-size:38px;font-weight:800;color:#38bdf8;\">${tSet}&#176;</div></td>" +
         "</tr></table></div>" +
         "<div style=\"font-size:10px;color:#94a3b8;\">Pump: <b style=\"color:${pumpClr};\">${pumpTxt}</b>  |  Src: ${htsrc}  |  Heat: <b style=\"color:${heatClr};\">${htmode}</b></div>" +
         "</div>"
