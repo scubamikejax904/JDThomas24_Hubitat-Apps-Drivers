@@ -21,15 +21,12 @@ metadata {
         attribute "bodyStatus",      "string"
         attribute "tile",            "string"
         attribute "heatLock",        "string"
-        attribute "pumpRpm",         "number"
-        attribute "pumpWatts",       "number"
-        attribute "pumpGpm",         "number"
 
         // ── Main controls — labels match the tile buttons exactly ──
         // A user sees the same words on the device page and the tile.
 
         // Tile: "🔥 Heat & Start Pump" / "🔥 Heating Active — Tap to Update"
-        command "🔥 Heat and Start Pump", [[name: "degrees*", type: "NUMBER", description: "Target temp °F — sets temp, heat source stays as last chosen, starts pump"]]
+        command "🔥 Heat and Start Pump", [[name: "degrees*", type: "NUMBER", description: "Target temp °F"]]
 
         // Tile: "▶ Start Pump Only (no heat)"
         command "▶ Start Pump Only"   // Starts pump, no change to heat
@@ -50,7 +47,7 @@ metadata {
         command "⚙ Enable Heat Lock"   // UNLOCKS heat controls — restores normal operation
 
         // Heat Off without stopping pump — for advanced use / automations only
-        command "⚙ Heat Off Keep Pump Running"
+        command "⚙ Heat Off, Keep Pump On"
     }
 
     preferences {
@@ -65,19 +62,19 @@ metadata {
 // ===================== LIFECYCLE ===========================
 // ============================================================
 def installed() {
-    log.info "IntelliCenter Body v1.5.0 installed: ${device.displayName}"
+    log.info "IntelliCenter Body v1.5.1 installed: ${device.displayName}"
     sendEvent(name: "heatLock", value: "unlocked")
-    debounceTile()
+    renderTile()
 }
 
 def updated() {
-    log.info "IntelliCenter Body v1.5.0 updated: ${device.displayName}"
+    log.info "IntelliCenter Body v1.5.1 updated: ${device.displayName}"
     unschedule(disableDebugLogging)
     if (debugMode) {
         log.info "${device.displayName}: debug logging enabled — will auto-disable in 60 minutes"
         runIn(3600, disableDebugLogging)
     }
-    debounceTile()
+    renderTile()
 }
 
 def disableDebugLogging() {
@@ -123,9 +120,9 @@ def "🔥 Heat and Start Pump"(degrees) {
     debounceTile()
 }
 
-// "⚙ Heat Off Keep Pump Running" — stops heater, pump keeps running.
+// "⚙ Heat Off, Keep Pump On" — stops heater, pump keeps running.
 // Advanced use only — available for automations.
-def "⚙ Heat Off Keep Pump Running"() {
+def "⚙ Heat Off, Keep Pump On"() {
     if (debugMode) log.debug "${device.displayName}: Heat Off"
     sendEvent(name: "heatSource", value: "Off")
     sendEvent(name: "heaterMode", value: "Off")
@@ -245,9 +242,6 @@ def debounceTile() {
 // ============================================================
 def renderTile() {
     def sw       = device.currentValue("switch")           ?: "off"
-    def pumpRpm   = device.currentValue("pumpRpm")
-    def pumpWatts = device.currentValue("pumpWatts")
-    def pumpGpm   = device.currentValue("pumpGpm")
     def temp     = (device.currentValue("temperature")     ?: 0).toDouble()
     def setpt    = (device.currentValue("heatingSetpoint") ?: 0).toDouble()
     def maxTemp  = (device.currentValue("maxSetTemp")      ?: 104).toDouble()
@@ -423,11 +417,6 @@ def renderTile() {
     <div class='ic-box'><div class='ic-blbl'>Target</div><div class='ic-bval'>${Math.round(setpt)}°</div></div>
     <div class='ic-box'><div class='ic-blbl'>Max</div><div class='ic-bval'>${Math.round(maxTemp)}°</div></div>
     <div class='ic-box'><div class='ic-blbl'>Pump</div><div class='ic-bval' style='color:${pumpClr};'>${isOn ? "On" : "Off"}</div></div>
-  </div>
-  <div class='ic-row'>
-    <div class='ic-box'><div class='ic-blbl'>RPM</div><div class='ic-bval'>${pumpRpm ?: "—"}</div></div>
-    <div class='ic-box'><div class='ic-blbl'>Watts</div><div class='ic-bval'>${pumpWatts ?: "—"}</div></div>
-    <div class='ic-box'><div class='ic-blbl'>GPM</div><div class='ic-bval'>${pumpGpm ?: "—"}</div></div>
   </div>
   <hr class='ic-div'>
   ${heatSectionHtml}
