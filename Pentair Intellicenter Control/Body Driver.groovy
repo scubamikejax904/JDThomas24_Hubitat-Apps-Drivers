@@ -1,6 +1,6 @@
 // ============================================================
 // Pentair IntelliCenter Body Driver
-// Version: 1.5.2
+// Version: 1.5.3
 // All files in this integration share this version number.
 // ============================================================
 
@@ -10,10 +10,8 @@ metadata {
         namespace: "intellicenter",
         author: "jdthomas24",
         description: "Pool / Spa controller — pump, temperature and heat control",
-        version: "1.5.2"
+        version: "1.5.3"
     ) {
-        capability "Switch"
-
         attribute "switch",          "string"
         attribute "temperature",     "number"
         attribute "heatingSetpoint", "number"
@@ -26,13 +24,13 @@ metadata {
 
         command "🔥 Heat and Start Pump", [[name: "degrees*", type: "NUMBER", description: "Target temp °F"]]
         command "▶ Start Pump Only"
-        command "⏹ Stop Pump and Heat"
+        command "⏹ Stop Heat and Pump"
         command "refresh"
         command "⚙ Set Heat Source", [[name: "source*", type: "ENUM",
             constraints: ["Off", "Heater", "Solar Only", "Solar Preferred", "Heat Pump", "Heat Pump Preferred"]]]
         command "⚙ Disable Heat Lock"
         command "⚙ Enable Heat Lock"
-        command "⚙ Heat Off, Keep Pump On"
+        command "⚙ Stop Heat - Keep Pump On"
     }
 
     preferences {
@@ -86,7 +84,7 @@ def "🔥 Heat and Start Pump"(degrees) {
     debounceTile()
 }
 
-def "⚙ Heat Off, Keep Pump On"() {
+def "⚙ Stop Heat - Keep Pump On"() {
     if (debugMode) log.debug "${device.displayName}: Heat Off"
     sendEvent(name: "heatSource", value: "Off")
     sendEvent(name: "heaterMode", value: "Off")
@@ -102,7 +100,7 @@ def "▶ Start Pump Only"() {
     debounceTile()
 }
 
-def "⏹ Stop Pump and Heat"() {
+def "⏹ Stop Heat and Pump"() {
     if (debugMode) log.debug "${device.displayName}: Stop Pump and Heat"
     sendEvent(name: "switch",     value: "off")
     sendEvent(name: "bodyStatus", value: "Off")
@@ -111,7 +109,7 @@ def "⏹ Stop Pump and Heat"() {
 }
 
 def on()  { "▶ Start Pump Only"() }
-def off() { "⏹ Stop Pump and Heat"() }
+def off() { "⏹ Stop Heat and Pump"() }
 
 def setHeatingSetpoint(temp) {
     sendEvent(name: "heatingSetpoint", value: temp.toInteger(), unit: "°F")
