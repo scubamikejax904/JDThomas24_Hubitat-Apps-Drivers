@@ -1,6 +1,6 @@
 // ============================================================
 // Pentair IntelliCenter Bridge Driver
-// Version: 1.5.1
+// Version: 1.5.2
 // All files in this integration share this version number.
 // ============================================================
 
@@ -10,7 +10,7 @@ metadata {
         namespace: "intellicenter",
         author: "jdthomas24",
         description: "Bridge driver for Pentair IntelliCenter TCP connection",
-        version: "1.5.1"
+        version: "1.5.2"
     ) {
         capability "Initialize"
         capability "Refresh"
@@ -114,7 +114,6 @@ def webSocketStatus(String message) {
         unschedule(pollState)
     }
 }
-
 
 def reconnectIfNeeded() {
     if (!state.connected) {
@@ -329,6 +328,8 @@ def handleNotifyList(json) {
     }
 }
 
+// WriteParamList — full state push from controller after a SetParamList.
+// Uses "changes" array instead of "objectList" params.
 def handleWriteParamList(json) {
     json?.objectList?.each { obj ->
         def name       = obj.objnam
@@ -394,6 +395,8 @@ def processCircuit(String objnam, Map params) {
     if (status == null) return
 
     def dni   = "intellicenter-circuit-${objnam}"
+    // isComponent: false — circuits and features need to be accessible
+    // from the dashboard and apps so users can add on/off switch tiles
     def child = getOrCreateChild("Generic Component Switch", dni, label, false)
     if (!child) return
 
@@ -415,6 +418,7 @@ def processBody(String objnam, Map params) {
     if (!state.bodyObjnams.contains(objnam)) state.bodyObjnams << objnam
 
     def dni  = "intellicenter-body-${objnam}"
+    // isComponent: false — body devices need dashboard tile access
     def body = getOrCreateChild("Pentair IntelliCenter Body", dni, label, false)
     if (!body) {
         log.warn "processBody: could not get/create body device ${label} (${dni})"
@@ -438,6 +442,7 @@ def processBody(String objnam, Map params) {
                        "4":"Heat Pump","5":"Heat Pump Preferred","OFF":"Off"]
         def modeFriendly = modeMap[htmode.toString()] ?: htmode
         body.sendEvent(name: "heaterMode", value: modeFriendly)
+        // When HTMODE goes Off with no HTSRC in this push, clear heatSource
         if (modeFriendly == "Off" && htsrc == null) {
             body.sendEvent(name: "heatSource", value: "Off")
         }
@@ -457,6 +462,7 @@ def processBody(String objnam, Map params) {
 
     if (debugMode) log.debug "Body [${label}] (${subtyp}): status=${status} temp=${temp} setpt=${lotmp} htmode=${htmode} htsrc=${htsrc}"
 
+    // Push water temperature to all pump devices so their tiles stay current
     if (temp != null) {
         getChildDevices()
             .findAll { it.deviceNetworkId.startsWith("intellicenter-pump-") }
@@ -476,6 +482,7 @@ def processPump(String objnam, Map params) {
     def gpm   = params.GPM
 
     def pumpDni = "intellicenter-pump-${objnam}"
+    // isComponent: false — pumps appear in dashboard for RPM/watts display
     def pump    = getOrCreateChild("Pentair IntelliCenter Pump", pumpDni, label, false)
     if (pump) {
         if (rpm   != null)                        pump.sendEvent(name: "rpm",   value: rpm.toInteger(),   unit: "RPM")
@@ -556,12 +563,15 @@ def setBodyHeatSource(String childDni, String source) {
         return
     }
 
+    // Priority 1: raw HTSRC ID from controller
     def htsrcId = state.htsrcIds?.get(objnam)?.get(source)
 
+    // Priority 2: heater object name lookup
     if (!htsrcId) {
         htsrcId = state.heaterNames?.find { k, v -> v?.equalsIgnoreCase(source) }?.key
     }
 
+    // Priority 3: static fallback
     if (!htsrcId) {
         def staticSrcMap = ["Heater":"H0001","Solar Only":"S0001","Solar Preferred":"H0002",
                             "Heat Pump":"H0003","Heat Pump Preferred":"H0004"]
