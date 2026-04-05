@@ -12,6 +12,8 @@ metadata {
         description: "Pool / Spa controller — pump, temperature and heat control",
         version: "1.5.3"
     ) {
+        capability "Switch"
+
         attribute "switch",          "string"
         attribute "temperature",     "number"
         attribute "heatingSetpoint", "number"
@@ -23,14 +25,14 @@ metadata {
         attribute "heatLock",        "string"
 
         command "🔥 Heat and Start Pump", [[name: "degrees*", type: "NUMBER", description: "Target temp °F"]]
-        command "▶ Start Pump Only"
+        command "▶ Start Pump Only (same as Switch On)"
         command "⏹ Stop Heat and Pump"
+        command "⚙ Stop Heat - Keep Pump On"
         command "refresh"
         command "⚙ Set Heat Source", [[name: "source*", type: "ENUM",
             constraints: ["Off", "Heater", "Solar Only", "Solar Preferred", "Heat Pump", "Heat Pump Preferred"]]]
         command "⚙ Disable Heat Lock"
         command "⚙ Enable Heat Lock"
-        command "⚙ Stop Heat - Keep Pump On"
     }
 
     preferences {
@@ -42,13 +44,13 @@ metadata {
 }
 
 def installed() {
-    log.info "IntelliCenter Body v1.5.2 installed: ${device.displayName}"
+    log.info "IntelliCenter Body v1.5.3 installed: ${device.displayName}"
     sendEvent(name: "heatLock", value: "unlocked")
     renderTile()
 }
 
 def updated() {
-    log.info "IntelliCenter Body v1.5.2 updated: ${device.displayName}"
+    log.info "IntelliCenter Body v1.5.3 updated: ${device.displayName}"
     unschedule(disableDebugLogging)
     if (debugMode) {
         log.info "${device.displayName}: debug logging enabled — will auto-disable in 60 minutes"
@@ -92,7 +94,7 @@ def "⚙ Stop Heat - Keep Pump On"() {
     debounceTile()
 }
 
-def "▶ Start Pump Only"() {
+def "▶ Start Pump Only (same as Switch On)"() {
     if (debugMode) log.debug "${device.displayName}: Start Pump Only"
     sendEvent(name: "switch",     value: "on")
     sendEvent(name: "bodyStatus", value: "On")
@@ -108,7 +110,7 @@ def "⏹ Stop Heat and Pump"() {
     debounceTile()
 }
 
-def on()  { "▶ Start Pump Only"() }
+def on()  { "▶ Start Pump Only (same as Switch On)"() }
 def off() { "⏹ Stop Heat and Pump"() }
 
 def setHeatingSetpoint(temp) {
@@ -215,3 +217,4 @@ def renderTile() {
 
     sendEvent(name: "tile", value: html, displayed: false)
 }
+
