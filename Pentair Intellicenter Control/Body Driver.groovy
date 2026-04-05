@@ -26,11 +26,11 @@ metadata {
 
         command "⚙ Disable Heat Lock"
         command "⚙ Enable Heat Lock"
-        command "⚙ Set Heat Source", [[name: "source*", type: "ENUM",
-            constraints: ["Off", "Heater", "Solar Only", "Solar Preferred", "Heat Pump", "Heat Pump Preferred"]]]
+        command "🔴 Stop Heat and Pump"
         command "⚙ Stop Heat - Keep Pump On"
         command "🔥 Heat and Start Pump", [[name: "degrees*", type: "NUMBER", description: "Target temp °F"]]
-        command "🔴 Stop Heat and Pump"
+        command "⚙ Set Heat Source", [[name: "source*", type: "ENUM",
+            constraints: ["Off", "Heater", "Solar Only", "Solar Preferred", "Heat Pump", "Heat Pump Preferred"]]]
         command "refresh"
     }
 
@@ -210,3 +210,4 @@ def renderTile() {
 
     sendEvent(name: "tile", value: html, displayed: false)
 }
+
