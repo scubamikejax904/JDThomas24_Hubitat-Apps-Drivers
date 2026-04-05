@@ -24,15 +24,15 @@ metadata {
         attribute "tile",            "string"
         attribute "heatLock",        "string"
 
+        command "refresh"
+        command "▶ Start Pump Only (same as Switch On)"
+        command "⚙ Disable Heat Lock"
+        command "⚙ Enable Heat Lock"
         command "🔥 Heat and Start Pump", [[name: "degrees*", type: "NUMBER", description: "Target temp °F"]]
         command "⚙ Set Heat Source", [[name: "source*", type: "ENUM",
             constraints: ["Off", "Heater", "Solar Only", "Solar Preferred", "Heat Pump", "Heat Pump Preferred"]]]
         command "🔴 Stop Heat and Pump"
         command "⚙ Stop Heat - Keep Pump On"
-        command "refresh"
-        command "▶ Start Pump Only (same as Switch On)"
-        command "⚙ Disable Heat Lock"
-        command "⚙ Enable Heat Lock"
     }
 
     preferences {
