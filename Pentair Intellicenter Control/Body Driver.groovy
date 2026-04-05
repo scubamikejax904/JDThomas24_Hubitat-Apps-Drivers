@@ -1,6 +1,6 @@
 // ============================================================
 // Pentair IntelliCenter Body Driver
-// Version: 1.5.1
+// Version: 1.5.2
 // All files in this integration share this version number.
 // ============================================================
 
@@ -10,7 +10,7 @@ metadata {
         namespace: "intellicenter",
         author: "jdthomas24",
         description: "Pool / Spa controller — pump, temperature and heat control",
-        version: "1.5.1"
+        version: "1.5.2"
     ) {
         capability "Switch"
 
@@ -44,13 +44,13 @@ metadata {
 }
 
 def installed() {
-    log.info "IntelliCenter Body v1.5.1 installed: ${device.displayName}"
+    log.info "IntelliCenter Body v1.5.2 installed: ${device.displayName}"
     sendEvent(name: "heatLock", value: "unlocked")
     renderTile()
 }
 
 def updated() {
-    log.info "IntelliCenter Body v1.5.1 updated: ${device.displayName}"
+    log.info "IntelliCenter Body v1.5.2 updated: ${device.displayName}"
     unschedule(disableDebugLogging)
     if (debugMode) {
         log.info "${device.displayName}: debug logging enabled — will auto-disable in 60 minutes"
