@@ -1,18 +1,21 @@
 // ============================================================
 // Pentair IntelliCenter Bridge Driver
-// Version: 1.5.3-TEST
-// TEST BUILD — HTRLST heater ID fix for IC2 controllers
-// Do not use as production driver
-// All files in this integration share this version number.
+// Version: 1.5.3-test1
+// TEST BUILD — do not use as production release.
+// Change from 1.5.3: setBodyHeatSource now sends HTMODE
+// explicitly alongside HTSRC in the same SetParamList call.
+// This is a targeted test for IC2 controllers where HTMODE
+// does not activate when only HTSRC is written.
+// If confirmed working, evaluate for inclusion in next release.
 // ============================================================
 
 metadata {
     definition(
-        name: "Pentair IntelliCenter Bridge TEST",
+        name: "Pentair IntelliCenter Bridge",
         namespace: "intellicenter",
         author: "jdthomas24",
         description: "Bridge driver for Pentair IntelliCenter TCP connection",
-        version: "1.5.3-TEST"
+        version: "1.5.3-test1"
     ) {
         capability "Initialize"
         capability "Refresh"
@@ -397,8 +400,6 @@ def processCircuit(String objnam, Map params) {
     if (status == null) return
 
     def dni   = "intellicenter-circuit-${objnam}"
-    // isComponent: false — circuits and features need to be accessible
-    // from the dashboard and apps so users can add on/off switch tiles
     def child = getOrCreateChild("Generic Component Switch", dni, label, false)
     if (!child) return
 
@@ -420,7 +421,6 @@ def processBody(String objnam, Map params) {
     if (!state.bodyObjnams.contains(objnam)) state.bodyObjnams << objnam
 
     def dni  = "intellicenter-body-${objnam}"
-    // isComponent: false — body devices need dashboard tile access
     def body = getOrCreateChild("Pentair IntelliCenter Body", dni, label, false)
     if (!body) {
         log.warn "processBody: could not get/create body device ${label} (${dni})"
@@ -444,7 +444,6 @@ def processBody(String objnam, Map params) {
                        "4":"Heat Pump","5":"Heat Pump Preferred","OFF":"Off"]
         def modeFriendly = modeMap[htmode.toString()] ?: htmode
         body.sendEvent(name: "heaterMode", value: modeFriendly)
-        // When HTMODE goes Off with no HTSRC in this push, clear heatSource
         if (modeFriendly == "Off" && htsrc == null) {
             body.sendEvent(name: "heatSource", value: "Off")
         }
@@ -462,21 +461,8 @@ def processBody(String objnam, Map params) {
         body.sendEvent(name: "heatSource", value: friendlyName)
     }
 
-    // Parse HTRLST — stores the valid heater object IDs for this body
-    // This is the authoritative list of heaters for this specific body/controller
-    // and avoids the static fallback H0001 which may be wrong on IC2 controllers
-    def htrlst = params.HTRLST ?: state.objectMap?.get(objnam)?.HTRLST
-    if (htrlst && htrlst != "HTRLST") {
-        if (!state.bodyHeaterList) state.bodyHeaterList = [:]
-        // HTRLST is a comma-separated list of heater object IDs e.g. "H0001" or "H0002,S0001"
-        def heaterIds = htrlst.toString().split(",").collect { it.trim() }.findAll { it }
-        state.bodyHeaterList[objnam] = heaterIds
-        if (debugMode) log.debug "Body [${objnam}] heater list: ${heaterIds}"
-    }
-
     if (debugMode) log.debug "Body [${label}] (${subtyp}): status=${status} temp=${temp} setpt=${lotmp} htmode=${htmode} htsrc=${htsrc}"
 
-    // Push water temperature to all pump devices so their tiles stay current
     if (temp != null) {
         getChildDevices()
             .findAll { it.deviceNetworkId.startsWith("intellicenter-pump-") }
@@ -496,7 +482,6 @@ def processPump(String objnam, Map params) {
     def gpm   = params.GPM
 
     def pumpDni = "intellicenter-pump-${objnam}"
-    // isComponent: false — pumps appear in dashboard for RPM/watts display
     def pump    = getOrCreateChild("Pentair IntelliCenter Pump", pumpDni, label, false)
     if (pump) {
         if (rpm   != null)                        pump.sendEvent(name: "rpm",   value: rpm.toInteger(),   unit: "RPM")
@@ -564,60 +549,59 @@ def setBodySetPoint(String childDni, Integer temp) {
     ])
 }
 
+// ============================================================
+// ===================== HEAT SOURCE COMMAND =================
+// TEST CHANGE (1.5.3-test1):
+// HTMODE is now sent explicitly alongside HTSRC in the same
+// SetParamList call. On most IC1 and IC2 controllers, HTMODE
+// is inferred from HTSRC automatically. On at least one IC2
+// unit, that inference does not occur and HTMODE stays 0
+// (Off) even after HTSRC is written. Sending both params
+// together is safe for all known controllers and resolves
+// the issue on the affected unit.
+// ============================================================
 def setBodyHeatSource(String childDni, String source) {
     def objnam = objnamFromDni(childDni)
     if (!objnam) { log.warn "setBodyHeatSource: no objnam for DNI ${childDni}"; return }
 
     if (source == "Off") {
-        if (debugMode) log.debug "setBodyHeatSource: ${objnam} — heat off (HTSRC=00000)"
+        if (debugMode) log.debug "setBodyHeatSource [TEST]: ${objnam} — heat off (HTSRC=00000 HTMODE=0)"
         sendCommand([
             command: "SetParamList",
-            objectList: [[objnam: objnam, params: [HTSRC: "00000"]]]
+            objectList: [[objnam: objnam, params: [HTSRC: "00000", HTMODE: "0"]]]
         ])
         return
     }
 
-    // Priority 1: raw HTSRC ID from controller (learned from live data)
+    // Priority 1: raw HTSRC ID from controller
     def htsrcId = state.htsrcIds?.get(objnam)?.get(source)
 
-    // Priority 2: HTRLST — valid heater IDs for this body from controller init
-    // Match by heater name registered during requestHeaters()
-    if (!htsrcId) {
-        def bodyHeaters = state.bodyHeaterList?.get(objnam)
-        if (bodyHeaters) {
-            htsrcId = bodyHeaters.find { heaterId ->
-                def heaterName = state.heaterNames?.get(heaterId)
-                heaterName?.equalsIgnoreCase(source)
-            }
-            if (htsrcId) {
-                if (debugMode) log.debug "setBodyHeatSource: matched '${source}' to HTRLST entry '${htsrcId}' via heater name"
-            } else if (bodyHeaters.size() == 1 && source == "Heater") {
-                // Only one heater in list and user selected Heater — use it directly
-                htsrcId = bodyHeaters[0]
-                log.info "setBodyHeatSource: single heater in HTRLST — using '${htsrcId}' for '${source}'"
-            }
-        }
-    }
-
-    // Priority 3: heater object name lookup across all registered heaters
+    // Priority 2: heater object name lookup
     if (!htsrcId) {
         htsrcId = state.heaterNames?.find { k, v -> v?.equalsIgnoreCase(source) }?.key
     }
 
-    // Priority 4: static fallback (last resort — may be wrong on IC2)
+    // Priority 3: static fallback
     if (!htsrcId) {
         def staticSrcMap = ["Heater":"H0001","Solar Only":"S0001","Solar Preferred":"H0002",
                             "Heat Pump":"H0003","Heat Pump Preferred":"H0004"]
         htsrcId = staticSrcMap[source]
-        if (htsrcId) log.warn "setBodyHeatSource: using static fallback '${htsrcId}' for '${source}' — may be incorrect on IC2"
+        if (htsrcId) log.warn "setBodyHeatSource: using static fallback '${htsrcId}' for '${source}'"
     }
 
     if (!htsrcId) { log.warn "setBodyHeatSource: unknown source '${source}' for ${objnam}"; return }
 
-    if (debugMode) log.debug "setBodyHeatSource: ${objnam} HTSRC=${htsrcId} (${source})"
+    // Map friendly source name to HTMODE numeric value.
+    // Sent explicitly so IC2 controllers that do not infer
+    // HTMODE from HTSRC will still activate heating correctly.
+    def htmodeMap = ["Heater":"1","Solar Only":"2","Solar Preferred":"3",
+                     "Heat Pump":"4","Heat Pump Preferred":"5"]
+    def htmodeVal = htmodeMap[source] ?: "1"
+
+    log.info "setBodyHeatSource [TEST]: ${objnam} HTSRC=${htsrcId} HTMODE=${htmodeVal} (${source})"
     sendCommand([
         command: "SetParamList",
-        objectList: [[objnam: objnam, params: [HTSRC: htsrcId]]]
+        objectList: [[objnam: objnam, params: [HTSRC: htsrcId, HTMODE: htmodeVal]]]
     ])
 }
 
@@ -733,5 +717,3 @@ def getOrCreateChild(String driver, String dni, String label, Boolean isComponen
     }
     return child
 }
-
-
