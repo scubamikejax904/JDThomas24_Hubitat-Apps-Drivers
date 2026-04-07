@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.1",
+    version: "2.4.2",
     doNotFocus: true
 )
  
@@ -78,6 +78,8 @@ preferences {
     page(name: "batteryCatalogPage")
     page(name: "forceScanPage")
     page(name: "sendNotificationPage")
+    page(name: "resetDrainPage")
+    page(name: "resetDrainConfirmPage")
 }
  
 // ============================================================
@@ -308,8 +310,7 @@ def scheduledSummary() {
     ]
  
     devList.each { device ->
-        def lvl = device.currentValue("battery")?.toInteger()
-        lvl = lvl != null ? lvl : 100
+        def lvl = device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : 100
         def cat = lvl >= 100 ? "🟢 Excellent" : lvl > 70 ? "🟢 Good" : lvl > 25 ? "🟠 Fair" : "🔴 Poor"
         categories[cat].list << [device: device, name: device.displayName.trim(), level: lvl]
     }
@@ -324,8 +325,7 @@ def scheduledSummary() {
         def h = health(device)
         (h == "Poor" || h == "Fair") && getDrain(device) > 1.5
     }.collect { device ->
-        def lvl = device.currentValue("battery")?.toInteger()
-        lvl = lvl != null ? lvl : 100
+        def lvl = device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : 100
         [name: device.displayName.trim(), level: lvl, health: health(device), drain: displayDrain(device)]
     }.sort { a, b -> a.level != b.level ? a.level <=> b.level : a.name <=> b.name }
  
@@ -536,7 +536,7 @@ def detectReplacement(device, newLevel, oldLevel) {
 def updateTrend(device, drain) {
     if (!device || drain == null) return
  
-    def devType = device?.getData()?.deviceType?.toLowerCase() ?: ""
+    def devType = (device?.name ?: device?.typeName ?: "").toLowerCase()
     def isHighReporter = devType.contains("lock") || devType.contains("sensor") ||
                          devType.contains("contact") || devType.contains("smoke") ||
                          devType.contains("carbonmonoxide")
@@ -550,8 +550,6 @@ def updateTrend(device, drain) {
         if (avg > 3) adjustedDrain = Math.min(adjustedDrain, 1.0)
     }
  
-    // Relax thresholds for high-reporter device types so normal
-    // lock/sensor drain does not falsely trigger Heavy Drain
     def stableThreshold   = isHighReporter ? 0.6 : 0.3
     def moderateThreshold = isHighReporter ? 1.5 : 0.8
  
@@ -581,8 +579,7 @@ def getDrain(device) {
 def displayDrain(device) { return String.format("%.2f", getDrain(device)) }
  
 def estDays(device) {
-    def level = device.currentValue("battery")?.toInteger()
-    level = level != null ? level : 100
+    def level = device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : 100
     def drain = getDrain(device)
     if (drain <= 0) drain = 0.3
     return Math.round(level / drain)
@@ -603,7 +600,7 @@ def health(device) {
     if (!slowReporter && (samples < 5 || daysSinceReplaced < 5)) return "Pending"
  
     def rawDrain = getDrain(device)
-    def devType  = device?.getData()?.deviceType?.toLowerCase() ?: ""
+    def devType  = (device?.name ?: device?.typeName ?: "").toLowerCase()
     if (devType.contains("lock") || devType.contains("sensor") || devType.contains("contact") ||
         devType.contains("smoke") || devType.contains("carbonmonoxide")) {
         rawDrain = rawDrain * 0.5
@@ -749,7 +746,6 @@ def logReplacement(device, newLevel, manual = false) {
 def summaryPage() {
     dynamicPage(name: "summaryPage", title: "Battery Summary", install: false) {
  
- 
         if (!state.history || !autoDevices || autoDevices.size() == 0) {
             section("Setup Required") {
                 paragraph "⚠ <b>Setup Not Complete</b><br><br>" +
@@ -773,16 +769,18 @@ def summaryPage() {
                 }
             }
  
+            // FIX: Use explicit null check instead of truthy check to correctly handle 0% battery
             devList = devList.sort { a, b ->
-                def levelA = null; def levelB = null
-                try { levelA = a.currentValue("battery")?.toInteger() } catch (e) {
+                def levelA = null
+                def levelB = null
+                try { levelA = a.currentValue("battery") != null ? a.currentValue("battery").toInteger() : 100 } catch (e) {
                     log.warn "Error getting battery level for ${a.displayName}: ${e.message}"
+                    levelA = 100
                 }
-                try { levelB = b.currentValue("battery")?.toInteger() } catch (e) {
+                try { levelB = b.currentValue("battery") != null ? b.currentValue("battery").toInteger() : 100 } catch (e) {
                     log.warn "Error getting battery level for ${b.displayName}: ${e.message}"
+                    levelB = 100
                 }
-                levelA = levelA != null ? levelA : 100
-                levelB = levelB != null ? levelB : 100
                 levelA != levelB ? levelA <=> levelB : (a.displayName ?: "") <=> (b.displayName ?: "")
             }
  
@@ -803,10 +801,10 @@ def summaryPage() {
  
             devList.each { device ->
                 def level = null
-                try { level = device.currentValue("battery")?.toInteger() } catch (e) {
+                try { level = device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : 100 } catch (e) {
                     log.warn "summaryPage: Error getting battery level for ${device.displayName}: ${e.message}"
+                    level = 100
                 }
-                level = level != null ? level : 100
  
                 def catalogInfo = ""
                 try { catalogInfo = getCatalogBatteryInfo(device) ?: "" } catch (e) {
@@ -908,7 +906,6 @@ def summaryPage() {
 def trendsPage() {
     dynamicPage(name: "trendsPage", title: "Battery Trends", install: false) {
  
- 
         section("") {
             href "forceScanPage", title: "🔄 Force Scan Now", description: "Tap to immediately read battery levels from all monitored devices"
             def devList = (autoDevices ?: []).findAll { it?.currentValue("battery") != null }
@@ -917,14 +914,15 @@ def trendsPage() {
  
             def trendPriority = ["Heavy Drain": 1, "Moderate": 2, "Stable": 3]
  
+            // FIX: Use explicit null check instead of truthy check to correctly handle 0% battery
             devList = devList.sort { a, b ->
                 def trendA = state.trend[a.id] ?: "Stable"
                 def trendB = state.trend[b.id] ?: "Stable"
                 def prioA  = trendPriority[trendA] ?: 3
                 def prioB  = trendPriority[trendB] ?: 3
                 if (prioA != prioB) return prioA <=> prioB
-                def levelA = a.currentValue("battery")?.toInteger() ? a.currentValue("battery")?.toInteger() : 100
-                def levelB = b.currentValue("battery")?.toInteger() ? b.currentValue("battery")?.toInteger() : 100
+                def levelA = a.currentValue("battery") != null ? a.currentValue("battery").toInteger() : 100
+                def levelB = b.currentValue("battery") != null ? b.currentValue("battery").toInteger() : 100
                 if (levelA != levelB) return levelA <=> levelB
                 return a.displayName.trim() <=> b.displayName.trim()
             }
@@ -942,7 +940,8 @@ def trendsPage() {
  
             devList.each { device ->
                 def hist    = safeHistory(device)
-                def level   = device.currentValue("battery")?.toInteger() ? device.currentValue("battery")?.toInteger() : 100
+                // FIX: Use explicit null check instead of truthy check to correctly handle 0% battery
+                def level   = device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : 100
                 def drain   = hist?.drain != null ? hist.drain : 0.3
                 def trend   = state.trend[device.id] ?: "Unknown"
                 def h       = health(device)
@@ -970,15 +969,109 @@ def trendsPage() {
  
             paragraph "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>"
         }
+
+        section("<b>🔄 Reset Drain History</b>", hideable: true, hidden: true) {
+            paragraph "Use this to reset drain history for specific devices. " +
+                      "This clears accumulated samples and resets drain to default — health returns to ⏳ Pending. " +
+                      "Use when a device shows incorrect Heavy Drain due to stale or inaccurate samples. " +
+                      "<b>This does not log a battery replacement.</b>"
+            href "resetDrainPage", title: "🔄 Reset Drain History", description: "Select devices to reset"
+        }
     }
 }
  
+// ============================================================
+// ===================== RESET DRAIN PAGE ====================
+// ============================================================
+def resetDrainPage() {
+    app.removeSetting("resetDrainDevices")
+    app.updateSetting("resetDrainConfirm", [value: false, type: "bool"])
+
+    def devList = (autoDevices ?: []).sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
+
+    dynamicPage(name: "resetDrainPage", title: "Reset Drain History", install: false) {
+        section("<b>Select Devices to Reset</b>") {
+            if (!devList || devList.size() == 0) {
+                paragraph "No battery devices available. Please select devices on the main page first."
+            } else {
+                paragraph "Select one or more devices to reset. Their drain history, samples, and trend will be cleared. " +
+                          "Health will return to Pending while fresh data is collected. " +
+                          "<b>Battery replacement history is not affected.</b>"
+                input "resetDrainDevices", "enum",
+                      title: "Select devices to reset",
+                      options: devList.collectEntries { [(it.id): "${it.displayName} (${it.currentValue('battery') ?: '?'}% - ${state.trend[it.id] ?: 'Unknown'})"] }
+                                      .sort { a, b -> a.value <=> b.value },
+                      multiple: true,
+                      required: false
+            }
+        }
+        section("<b>Confirm Reset</b>") {
+            input "resetDrainConfirm", "bool",
+                  title: "Confirm - clear drain history for selected devices",
+                  defaultValue: false
+        }
+        section() {
+            href "resetDrainConfirmPage", title: "Submit Reset"
+        }
+    }
+}
+
+// ============================================================
+// ================ RESET DRAIN CONFIRM PAGE =================
+// ============================================================
+def resetDrainConfirmPage() {
+    def devList = autoDevices ?: []
+
+    dynamicPage(name: "resetDrainConfirmPage", title: "Reset Drain History", install: false) {
+        section("<b>Result</b>") {
+            if (!resetDrainConfirm) {
+                paragraph "Reset cancelled - confirm checkbox was not checked."
+            } else if (!resetDrainDevices) {
+                paragraph "No devices selected."
+            } else {
+                def successCount = 0
+                def resetNames = []
+
+                resetDrainDevices.each { deviceId ->
+                    def device = devList.find { it.id == deviceId }
+                    if (device) {
+                        if (!state.history[device.id]) {
+                            state.history[device.id] = [
+                                lastLevel:    device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : 100,
+                                lastDate:     now(),
+                                drain:        0.3,
+                                samples:      [],
+                                justReplaced: false
+                            ]
+                        } else {
+                            state.history[device.id].drain   = 0.3
+                            state.history[device.id].samples = []
+                        }
+                        state.trend[device.id] = "Stable"
+                        resetNames << device.displayName
+                        successCount++
+                        if (debugMode) log.debug "Reset drain history for ${device.displayName}"
+                    }
+                }
+
+                if (successCount > 0) {
+                    paragraph "Drain history reset for ${successCount} device(s): " +
+                              resetNames.join(", ") +
+                              ". Health will show Pending while fresh samples are collected. " +
+                              "Return to Battery Trends to confirm."
+                } else {
+                    paragraph "No valid devices found."
+                }
+            }
+        }
+    }
+}
+
 // ============================================================
 // ===================== HISTORY PAGE ========================
 // ============================================================
 def historyPage() {
     dynamicPage(name: "historyPage", title: "Battery Replacement History", install: false) {
- 
  
         section("") {
             if (!state.replacements || state.replacements.size() == 0) {
@@ -1135,8 +1228,7 @@ def manualReplacementConfirmPage() {
                 replaceDevicesManual.each { deviceId ->
                     def device = devList.find { it.id == deviceId }
                     if (device) {
-                        def level = device.currentValue("battery")?.toInteger()
-                        level = level != null ? level : 100
+                        def level = device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : 100
  
                         if (!state.history[device.id]) {
                             state.history[device.id] = [
@@ -1266,7 +1358,6 @@ def forceScanPage() {
 def batteryCatalogPage() {
     dynamicPage(name: "batteryCatalogPage", title: "🔋 Battery Catalog", install: false) {
  
- 
         def devList = (autoDevices ?: []).sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
  
         if (!devList) {
@@ -1352,7 +1443,6 @@ def batteryCatalogPage() {
 // ============================================================
 def infoPage(Map params = [:]) {
     dynamicPage(name: "infoPage", title: "App Guide & Reference", install: false) {
- 
  
         section("<b>🔑 Color & Icon Legend</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Battery level colors reflect current charge percentage. " +
@@ -1471,11 +1561,32 @@ def infoPage(Map params = [:]) {
                       "• Devices reporting every few minutes may show higher apparent drain — compare with similar devices</div>"
         }
  
+        section("<b>🔄 Reset Drain History</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'><b>Reset Drain History</b> is available at the bottom of the Battery Trends page. " +
+                      "It clears accumulated drain samples and resets a device back to ⏳ Pending without logging a battery replacement.<br><br>" +
+                      "<b>When to use it:</b><br>" +
+                      "• A device shows 🔴 Heavy Drain but you know the battery is healthy<br>" +
+                      "• A lock, sensor, or smoke detector is showing inflated drain from stale early samples<br>" +
+                      "• You updated the app and want to clear old inaccurate drain data for specific devices<br>" +
+                      "• A device was moved, repaired, or had its reporting frequency changed<br><br>" +
+                      "<b>What it resets:</b><br>" +
+                      "• Drain samples array — cleared completely<br>" +
+                      "• Drain rate — reset to 0.3%/day default<br>" +
+                      "• Trend — reset to Stable<br>" +
+                      "• Health — returns to Pending until 5 new samples are collected<br><br>" +
+                      "<b>What it does NOT change:</b><br>" +
+                      "• Battery replacement history<br>" +
+                      "• Last battery level or last seen date<br>" +
+                      "• Any other device state<br><br>" +
+                      "This action only runs when you explicitly submit it — it never fires automatically on app save or hub restart.</div>"
+        }
+
         section("<b>💡 Tips for Best Results</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>• Let new batteries run for at least a week before trusting health ratings<br>" +
                       "• Use the Battery Catalog to log battery types — helps with replacement planning<br>" +
                       "• Set Scan Interval to Hourly to build health ratings faster<br>" +
                       "• After replacing a battery use Manual Replacement to reset history immediately<br>" +
+                      "• Use Reset Drain History on locks and sensors if they show Heavy Drain after first install<br>" +
                       "• Consistent low drain over time = healthy, well-placed device</div>"
         }
     }
