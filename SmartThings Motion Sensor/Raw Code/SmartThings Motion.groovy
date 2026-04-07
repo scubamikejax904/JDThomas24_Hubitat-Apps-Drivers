@@ -1,7 +1,7 @@
 /*
 SmartThings Motion Sensor Enhanced
  
-Version: 1.7.1
+Version: 1.7.2
 Author: jdthomas24
 Namespace: jdthomas24
  
@@ -24,7 +24,7 @@ Enhancements:
 - Health Check ping() implementation
 - Missed checkins reset on presence restore
  
-Changes in 1.7.1:
+Changes in 1.7.2:
 - Debug logging auto-disables after 30 minutes
 - Presence logging completely suppressed when enablePresence is off
 - Temperature log suppressed when enableTemp is off
@@ -38,7 +38,7 @@ Changes in 1.7.1:
 import hubitat.zigbee.clusters.iaszone.ZoneStatus
 import hubitat.zigbee.zcl.DataType
  
-def driverVersion() { return "1.7.1" }
+def driverVersion() { return "1.7.2" }
  
 metadata {
     definition(
