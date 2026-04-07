@@ -1,18 +1,16 @@
 {
-    "packageName": "Battery Monitor 2.0",
-    "author": "Jdthomas24",
-    "version": "2.4.1",
-    "releaseNotes": "2.3.3 WARNING: First Time install. Proceed as usual. Current user: If you have not done so already - Delete the old app from HPM first, Go back to main page of HPM > Click uninstall > Click Battery Monitor 2.0 > Click Next. After: Install fresh Battery Monitor 2.0 app via HPM using the search function. This will ensure your historical data will be accurate going forward.\n2.3.4 Fixed notification issue.\n2.3.5 Resort Summary.\n2.4.0 Full app rework and update.\n2.4.1 Added debug logging toggle with auto-disable after 30 minutes.\n",
-    "category": "Utility",
-    "description": "Advanced Hubitat battery monitoring with analytics, trends, and replacement tracking. Auto-discover devices, monitor battery health, track replacements, and receive daily reports.",
-    "dateReleased": "2026/03/16",
-    "minimumHEVersion": "2.3.0",
-    "apps": [
-        {
-            "name": "Battery Monitor 2.0",
-            "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-            "required": true,
-            "primary": true
-        }
-    ]
+  "packageName": "SmartThings Motion Sensor Driver",
+  "author": "Jdthomas24",
+  "version": "2.4.2",
+  "category": "Convenience",
+  "description": "Advanced Hubitat battery monitoring with analytics, trends and replacement tracking. Recurring scan schedule, confidence-weighted health, EWMA smoothing.",
+  "dateReleased": "4/7/26",
+  "minimumHEVersion": "2.3.0",
+  "releaseNotes": "v2.4.2\n- Fixed Battery Trends page showing 0% devices as 100% (Groovy truthy-check bug on zero value)\n- Fixed drain adjustment for locks, sensors, and smoke detectors never firing (getData().deviceType always returned empty - now uses device.name/typeName)\n- Locks, motion sensors, and smoke detectors now correctly apply 50% drain reduction before threshold comparison\n- Added Reset Drain History feature on Battery Trends page\n- Reset clears samples and drain rate for selected devices without logging a battery replacement\n- Reset never runs automatically - only on explicit user action\n- Added Reset Drain History documentation to App Guide & Reference info page\n- Updated Tips for Best Results with Reset Drain History guidance",
+  "app": {
+    "name": "Battery Monitor 2.0",
+    "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
+    "required": true,
+    "primary": true
+  }
 }
