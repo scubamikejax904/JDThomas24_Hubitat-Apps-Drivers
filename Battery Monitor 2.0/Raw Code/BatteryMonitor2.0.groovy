@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.3",
+    version: "2.4.2",
     doNotFocus: true
 )
  
@@ -484,6 +484,11 @@ def updateBattery(device, level) {
             def smoothed   = alpha * clampedDrain + (1 - alpha) * prevSmooth
             data.samples << smoothed
             if (data.samples.size() > 10) data.samples.remove(0)
+
+            // Only reset the sample window clock when a sample is actually recorded.
+            // This allows the 24-hour zero-drain rule to accumulate correctly
+            // across multiple scans without being reset by each hourly scan.
+            data.lastDate = now()
         }
  
         if (data.samples && data.samples.size() > 0) {
@@ -492,9 +497,10 @@ def updateBattery(device, level) {
             updateTrend(device, data.drain)
         }
     }
- 
+
+    // lastLevel always updates every scan — replacement detection needs
+    // to see the most recent level regardless of whether a sample was recorded.
     data.lastLevel = level
-    data.lastDate  = now()
 }
  
 // ============================================================
@@ -1591,3 +1597,4 @@ def infoPage(Map params = [:]) {
         }
     }
 }
+
