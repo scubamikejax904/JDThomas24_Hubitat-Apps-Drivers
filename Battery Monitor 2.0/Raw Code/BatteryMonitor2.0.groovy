@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.5",
+    version: "2.4.6",
     doNotFocus: true
 )
  
@@ -134,6 +134,7 @@ def mainPage() {
                         state.history[device.id] = [
                             lastLevel:    currentLevel != null ? currentLevel.toInteger() : 100,
                             lastDate:     now(),
+            lastScanDate: now(),
                             drain:        0.3,
                             samples:      [],
                             justReplaced: false
@@ -444,6 +445,7 @@ def updateBattery(device, level) {
         state.history[device.id] = [
             lastLevel:    level != null ? level : 100,
             lastDate:     now(),
+            lastScanDate: now(),
             drain:        0.3,
             samples:      [],
             justReplaced: false
@@ -498,9 +500,11 @@ def updateBattery(device, level) {
         }
     }
 
-    // lastLevel always updates every scan — replacement detection needs
-    // to see the most recent level regardless of whether a sample was recorded.
-    data.lastLevel = level
+    // lastLevel and lastScanDate always update every scan.
+    // lastLevel keeps replacement detection accurate.
+    // lastScanDate drives the Last Battery display column.
+    data.lastLevel    = level
+    data.lastScanDate = now()
 }
  
 // ============================================================
@@ -514,6 +518,7 @@ def detectReplacement(device, newLevel, oldLevel) {
         state.history[device.id] = [
             lastLevel:    oldLevel,
             lastDate:     now(),
+            lastScanDate: now(),
             drain:        0.3,
             samples:      [],
             justReplaced: false
@@ -634,6 +639,7 @@ def safeHistory(device) {
         data = [
             lastLevel:    currentLevel != null ? currentLevel.toInteger() : 100,
             lastDate:     now(),
+            lastScanDate: now(),
             drain:        0.3,
             samples:      [],
             justReplaced: false
@@ -644,7 +650,7 @@ def safeHistory(device) {
     return data
 }
  
-def getLastBatteryTime(device)  { return safeTime(state.history[device.id]?.lastDate) }
+def getLastBatteryTime(device)  { return safeTime(state.history[device.id]?.lastScanDate ?: state.history[device.id]?.lastDate) }
 def getLastActivityTime(device) { return safeTime(device.getLastActivity()) }
  
 def getCatalogBatteryInfo(device) {
@@ -719,6 +725,7 @@ def logReplacement(device, newLevel, manual = false) {
         state.history[device.id] = [
             lastLevel:    newLevel != null ? newLevel : 100,
             lastDate:     now(),
+            lastScanDate: now(),
             drain:        0.3,
             samples:      [],
             justReplaced: false
@@ -731,6 +738,7 @@ def logReplacement(device, newLevel, manual = false) {
     data.samples      = []
     data.lastLevel    = newLevel
     data.lastDate     = now()
+    data.lastScanDate = now()
     data.justReplaced = true
     data.replacedTime = now()
     state.trend[device.id]     = "Stable"
@@ -1045,13 +1053,18 @@ def resetDrainConfirmPage() {
                             state.history[device.id] = [
                                 lastLevel:    device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : 100,
                                 lastDate:     now(),
+                                lastScanDate: now(),
                                 drain:        0.3,
                                 samples:      [],
                                 justReplaced: false
                             ]
                         } else {
-                            state.history[device.id].drain   = 0.3
-                            state.history[device.id].samples = []
+                            // Reset both date fields so the sample window starts fresh
+                            // and no inflated drain spike occurs on the first new sample
+                            state.history[device.id].drain        = 0.3
+                            state.history[device.id].samples      = []
+                            state.history[device.id].lastDate     = now()
+                            state.history[device.id].lastScanDate = now()
                         }
                         state.trend[device.id] = "Stable"
                         resetNames << device.displayName
@@ -1259,6 +1272,7 @@ def manualReplacementConfirmPage() {
                         state.trend[device.id]                = "Stable"
                         state.history[device.id].lastLevel    = level
                         state.history[device.id].lastDate     = now()
+                        state.history[device.id].lastScanDate = now()
                         state.history[device.id].justReplaced = true
                         state.history[device.id].replacedTime = now()
  
@@ -1450,18 +1464,16 @@ def batteryCatalogPage() {
 def infoPage(Map params = [:]) {
     dynamicPage(name: "infoPage", title: "App Guide & Reference", install: false) {
  
-        section("<b>🔑 Color & Icon Legend</b>") {
+        section("<b>🔑 Battery Level Ranges</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Battery level colors reflect current charge percentage. " +
                       "Health ratings use the same color scheme but are based on drain rate — not battery percentage. " +
                       "A device can show 🟢 Good battery level yet 🔴 Poor health if it is draining unusually fast.<br><br>" +
                       "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'><table style='width:100%; border-collapse: collapse;'>" +
-                      "<tr style='font-weight:bold;'><td>Icon</td><td>Color</td><td>Meaning</td></tr>" +
-                      "<tr><td>🟢</td><td>Green</td><td>Good or Excellent — healthy battery or low drain</td></tr>" +
-                      "<tr><td>🟠</td><td>Orange</td><td>Fair — moderate drain, worth monitoring</td></tr>" +
-                      "<tr><td>🔴</td><td>Red</td><td>Poor or Heavy Drain — high drain or possible issue</td></tr>" +
-                      "<tr><td>⏳</td><td>—</td><td>Pending — not enough data yet to assign a health verdict</td></tr>" +
-                      "<tr><td>⚠️</td><td>—</td><td>Warning — high drain device or stale activity</td></tr>" +
-                      "<tr><td>⏱</td><td>—</td><td>Stale — device has not reported within the configured threshold</td></tr>" +
+                      "<tr style='font-weight:bold;'><td>Level</td><td>Range</td><td>Meaning</td></tr>" +
+                      "<tr><td>🟢 Excellent</td><td>100%</td><td>Fully charged</td></tr>" +
+                      "<tr><td>🟢 Good</td><td>71–99%</td><td>Healthy — no action needed</td></tr>" +
+                      "<tr><td>🟠 Fair</td><td>26–70%</td><td>Getting low — keep an eye on it</td></tr>" +
+                      "<tr><td>🔴 Poor</td><td>0–25%</td><td>Replace soon</td></tr>" +
                       "</table></div></div>"
         }
  
@@ -1476,6 +1488,13 @@ def infoPage(Map params = [:]) {
                       "<tr><td>🟢 Good</td><td>🟠 Moderate</td><td>0.3–0.8%</td><td>Normal battery usage</td></tr>" +
                       "<tr><td>🟠 Fair</td><td>🔴 Heavy Drain</td><td>0.8–1.5%</td><td>Above average — worth monitoring, no alert</td></tr>" +
                       "<tr><td>🔴 Poor</td><td>🔴 Heavy Drain</td><td>&gt; 1.5%</td><td>High drain — High Drain alert fires</td></tr>" +
+                      "</table></div><br>" +
+                      "<b>Status Icons:</b><br>" +
+                      "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'><table style='width:100%; border-collapse: collapse;'>" +
+                      "<tr style='font-weight:bold;'><td>Icon</td><td>Meaning</td></tr>" +
+                      "<tr><td>⏳</td><td>Pending — not enough data yet to assign a health verdict</td></tr>" +
+                      "<tr><td>⚠️</td><td>Warning — high drain device or stale activity</td></tr>" +
+                      "<tr><td>⏱</td><td>Stale — device has not reported within the configured threshold</td></tr>" +
                       "</table></div></div>"
         }
  
