@@ -1,6 +1,6 @@
 // ============================================================
 // Pentair IntelliCenter Body Driver
-// Version: 1.5.6
+// Version: 1.5.7
 // All files in this integration share this version number.
 // ============================================================
  
@@ -10,7 +10,7 @@ metadata {
         namespace: "intellicenter",
         author: "jdthomas24",
         description: "Pool / Spa controller — pump, temperature and heat control",
-        version: "1.5.6"
+        version: "1.5.7"
     ) {
         capability "Switch"
  
