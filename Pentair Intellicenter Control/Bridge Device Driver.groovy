@@ -1,6 +1,6 @@
 // ============================================================
 // Pentair IntelliCenter Bridge Driver
-// Version: 1.5.5
+// Version: 1.5.6
 // All files in this integration share this version number.
 // ============================================================
  
@@ -10,7 +10,7 @@ metadata {
         namespace: "intellicenter",
         author: "jdthomas24",
         description: "Bridge driver for Pentair IntelliCenter TCP connection",
-        version: "1.5.5"
+        version: "1.5.6"
     ) {
         capability "Initialize"
         capability "Refresh"
@@ -131,13 +131,13 @@ def disableDebugLogging() {
 // ============================================================
 // ===================== POLL STATE ==========================
 // Called on a schedule to re-request current state of all
-// circuits, bodies, and pumps. Keeps Hubitat in sync with
-// changes made via the Pentair app or physical panel that
+// circuits, bodies, pumps, and sensors. Keeps Hubitat in sync
+// with changes made via the Pentair app or physical panel that
 // the controller does not push via NotifyList.
 // ============================================================
 def pollState() {
     if (!state.connected) return
-    if (debugMode) log.debug "Polling state — syncing circuits, bodies, pumps"
+    if (debugMode) log.debug "Polling state — syncing circuits, bodies, pumps, sensors"
     sendCommand([
         command: "GetParamList",
         condition: "OBJTYP=CIRCUIT",
@@ -164,6 +164,17 @@ def pollPumps() {
         command: "GetParamList",
         condition: "OBJTYP=PUMP",
         objectList: [[objnam: "ALL", keys: ["OBJTYP", "SNAME", "STATUS", "RPM", "GPM", "WATTS"]]]
+    ])
+    runIn(2, pollSensors)
+}
+ 
+def pollSensors() {
+    if (!state.connected) return
+    if (debugMode) log.debug "Polling state — sensors"
+    sendCommand([
+        command: "GetParamList",
+        condition: "OBJTYP=SENSE",
+        objectList: [[objnam: "ALL", keys: ["OBJTYP", "SUBTYP", "SNAME", "SOURCE"]]]
     ])
 }
  
