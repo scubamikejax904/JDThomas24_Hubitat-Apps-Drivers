@@ -1,6 +1,6 @@
 // ============================================================
 // Pentair IntelliCenter Body Driver
-// Version: 1.5.7
+// Version: 1.5.8
 // All files in this integration share this version number.
 // ============================================================
  
@@ -10,7 +10,7 @@ metadata {
         namespace: "intellicenter",
         author: "jdthomas24",
         description: "Pool / Spa controller — pump, temperature and heat control",
-        version: "1.5.7"
+        version: "1.5.8"
     ) {
         capability "Switch"
  
@@ -43,13 +43,13 @@ metadata {
 }
  
 def installed() {
-    log.info "IntelliCenter Body v1.5.4 installed: ${device.displayName}"
+    log.info "IntelliCenter Body v1.5.8 installed: ${device.displayName}"
     sendEvent(name: "heatLock", value: "unlocked")
     renderTile()
 }
  
 def updated() {
-    log.info "IntelliCenter Body v1.5.4 updated: ${device.displayName}"
+    log.info "IntelliCenter Body v1.5.8 updated: ${device.displayName}"
     unschedule(disableDebugLogging)
     if (debugMode) {
         log.info "${device.displayName}: debug logging enabled — will auto-disable in 60 minutes"
@@ -93,8 +93,6 @@ def "⚙ Stop Heat - Keep Pump On"() {
     debounceTile()
 }
  
- 
- 
 def "🔴 Stop Heat and Pump"() {
     if (debugMode) log.debug "${device.displayName}: Stop Pump and Heat"
     sendEvent(name: "switch",     value: "off")
@@ -103,7 +101,15 @@ def "🔴 Stop Heat and Pump"() {
     debounceTile()
 }
  
-def on()  { "▶ Start Pump Only (same as Switch On)"() }
+// on() drives the body/pump on directly — no separate "Start Pump Only" command needed
+def on() {
+    if (debugMode) log.debug "${device.displayName}: on() — starting pump"
+    sendEvent(name: "switch",     value: "on")
+    sendEvent(name: "bodyStatus", value: "On")
+    parent?.setBodyStatus(device.deviceNetworkId, "ON")
+    debounceTile()
+}
+ 
 def off() { "🔴 Stop Heat and Pump"() }
  
 def setHeatingSetpoint(temp) {
@@ -136,7 +142,7 @@ def adjustSetPointDown() {
  
 def "⚙ Set Heat Source"(source) {
     if (device.currentValue("heatLock") == "locked") {
-        log.warn "${device.displayName} — Heat Lock is active. Use '⚙ Enable Heat Lock' command to restore."
+        log.warn "${device.displayName} — Heat Lock is active. Use '⚙ Disable Heat Lock' command to unlock."
         return
     }
     sendEvent(name: "heatSource", value: source)
