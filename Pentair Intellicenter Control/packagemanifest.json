@@ -14,7 +14,6 @@
       "namespace": "intellicenter",
       "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Pentair%20Intellicenter%20Control/ParentApp.groovy",
       "required": true,
-      "oauth": true,
       "primary": true,
       "version": "1.6.0"
     }
