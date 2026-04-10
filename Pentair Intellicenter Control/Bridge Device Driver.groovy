@@ -1,8 +1,14 @@
 // ============================================================
 // Pentair IntelliCenter Bridge Driver
-// Version: 1.5.8
+// Version: 1.5.9
 // All files in this integration share this version number.
 // ============================================================
+
+import groovy.transform.Field
+
+@Field static final String VERSION     = "1.5.9"
+@Field static final String COMM_LINK   = "https://community.hubitat.com/t/release-pentair-intellicenter-controller-beta/162876/31"
+@Field static final String DONATE_LINK = "https://paypal.me/jdthomas24?locale.x=en_US&country.x=US"
 
 metadata {
     definition(
@@ -10,7 +16,7 @@ metadata {
         namespace: "intellicenter",
         author: "jdthomas24",
         description: "Bridge driver for Pentair IntelliCenter TCP connection",
-        version: "1.5.8"
+        version: "1.5.9"
     ) {
         capability "Initialize"
         capability "Refresh"
@@ -29,7 +35,19 @@ metadata {
         input "pollInterval", "number", title: "State Poll Interval in seconds (default: 30) — syncs HE with changes made in the Pentair app or panel. Increase to reduce traffic.", defaultValue: 30
         input "debugMode",    "bool",   title: "Debug Logging (auto-disables after 60 min)",                                    defaultValue: false
         input "endpointBase", "text",   title: "App Endpoint Base (set automatically by app)",                                  required: false
+        input name: "helpInfo", type: "hidden", title: fmtHelpInfo()
     }
+}
+
+// ============================================================
+// ===================== HELP INFO ===========================
+// ============================================================
+String fmtHelpInfo() {
+    String info     = "Pentair IntelliCenter v${VERSION}"
+    String btnStyle = "style='font-size:14px;padding:4px 12px;border:2px solid Crimson;border-radius:6px;text-decoration:none;display:inline-block;margin:4px;'"
+    String commLink = "<a ${btnStyle} href='${COMM_LINK}' target='_blank'>💬 Community<br><div style='font-size:11px;'>${info}</div></a>"
+    String payLink  = "<a ${btnStyle} href='${DONATE_LINK}' target='_blank'>☕ Buy Me a Coffee<br><div style='font-size:11px;'>Support Development</div></a>"
+    return "<div style='text-align:center;padding:8px 0;'>${commLink}${payLink}</div>"
 }
 
 // ============================================================
@@ -51,7 +69,6 @@ def initialize() {
     state.objectMap    = [:]
     state.pendingCmds  = [:]
     state.connected    = false
-    // Initialize to now so the watchdog does not fire immediately on first boot
     state.lastPollTime = now()
 
     unschedule()
@@ -133,14 +150,11 @@ def disableDebugLogging() {
 
 // ============================================================
 // ===================== POLL WATCHDOG =======================
-// Runs every minute. If the last successful pollState fired
-// more than 2x the poll interval ago, the chain has died —
-// restart it immediately.
 // ============================================================
 def pollWatchdog() {
     if (!state.connected) return
     def interval = (pollInterval ?: 30).toInteger()
-    def elapsed  = (now() - (state.lastPollTime ?: now())) / 1000  // seconds
+    def elapsed  = (now() - (state.lastPollTime ?: now())) / 1000
 
     if (elapsed > (interval * 2)) {
         log.warn "Poll watchdog: last poll was ${elapsed.toInteger()}s ago — restarting poll chain"
@@ -150,10 +164,6 @@ def pollWatchdog() {
 
 // ============================================================
 // ===================== POLL STATE ==========================
-// Called on a schedule to re-request current state of all
-// circuits, bodies, pumps, and sensors. Keeps Hubitat in sync
-// with changes made via the Pentair app or physical panel that
-// the controller does not push via NotifyList.
 // ============================================================
 def pollState() {
     if (!state.connected) return
@@ -169,7 +179,6 @@ def pollState() {
     } catch (e) {
         log.error "pollState error: ${e.message}"
     }
-    // Reschedule next poll
     runIn((pollInterval ?: 30).toInteger(), pollState)
 }
 
@@ -241,15 +250,9 @@ def processMessage(String raw) {
     }
 
     switch (json?.command) {
-        case "SendParamList":
-            handleParamList(json)
-            break
-        case "WriteParamList":
-            handleWriteParamList(json)
-            break
-        case "NotifyList":
-            handleNotifyList(json)
-            break
+        case "SendParamList":    handleParamList(json);      break
+        case "WriteParamList":   handleWriteParamList(json); break
+        case "NotifyList":       handleNotifyList(json);     break
         case "SetParamList":
             if (debugMode) log.debug "SetParamList ack: response=${json?.response}"
             break
@@ -341,7 +344,6 @@ def subscribeToUpdates() {
         condition: "OBJTYP=CIRCUIT,BODY,PUMP,SENSE,CHEM",
         objectList: [[objnam: "ALL", keys: ["STATUS", "TEMP", "RPM", "WATTS", "GPM", "SALT", "SOURCE", "LOTMP", "HITMP", "HTMODE", "HTSRC"]]]
     ])
-    // Schedule first poll — subsequent polls are self-scheduled via runIn in pollState()
     def interval = (pollInterval ?: 30).toInteger()
     runIn(interval, pollState)
     log.info "State polling scheduled — every ${interval} seconds"
@@ -355,12 +357,10 @@ def handleParamList(json) {
         def name   = obj.objnam
         def params = obj.params
         if (!name || !params) return
-
         if (!state.objectMap) state.objectMap = [:]
         if (!state.objectMap[name]) state.objectMap[name] = [:]
         params.each { k, v -> state.objectMap[name][k] = v }
         state.objectMap[name].objnam = name
-
         routeUpdate(name, params)
     }
 }
@@ -370,17 +370,14 @@ def handleNotifyList(json) {
         def name   = obj.objnam
         def params = obj.params
         if (!name || !params) return
-
         if (!state.objectMap) state.objectMap = [:]
         if (!state.objectMap[name]) state.objectMap[name] = [:]
         params.each { k, v -> state.objectMap[name][k] = v }
-
         routeUpdate(name, params)
     }
 }
 
 // WriteParamList — full state push from controller after a SetParamList.
-// Uses "changes" array instead of "objectList" params.
 // Guard changes as a List — some IC2 firmware versions send a single object.
 def handleWriteParamList(json) {
     json?.objectList?.each { obj ->
@@ -402,7 +399,6 @@ def handleWriteParamList(json) {
 def routeUpdate(String objnam, Map params) {
     def objType = params.OBJTYP ?: state.objectMap?.get(objnam)?.OBJTYP
     if (!objType) return
-
     switch (objType) {
         case "CIRCUIT":  processCircuit(objnam, params); break
         case "CIRCGRP":  processCircuit(objnam, params); break
@@ -427,7 +423,6 @@ def processCircuit(String objnam, Map params) {
         if (debugMode) log.debug "Skipping internal circuit: ${objnam}"
         return
     }
-
     if (subtyp == "POOL" || subtyp == "SPA") {
         if (debugMode) log.debug "Skipping body circuit (subtyp): ${objnam} (${subtyp})"
         return
@@ -475,7 +470,6 @@ def processBody(String objnam, Map params) {
         return
     }
 
-    // Only write endpointBase setting if the value has actually changed
     if (endpointBase && body.getSetting("endpointBase") != endpointBase) {
         body.updateSetting("endpointBase", [value: endpointBase, type: "text"])
     }
@@ -502,17 +496,14 @@ def processBody(String objnam, Map params) {
         def staticSrcMap = ["00000":"Off","H0001":"Heater","S0001":"Solar Only",
                             "H0002":"Solar Preferred","H0003":"Heat Pump","H0004":"Heat Pump Preferred"]
         def friendlyName = staticSrcMap[htsrc] ?: htsrc
-
         if (!state.htsrcIds) state.htsrcIds = [:]
         if (!state.htsrcIds[objnam]) state.htsrcIds[objnam] = [:]
         state.htsrcIds[objnam][friendlyName] = htsrc
-
         body.sendEvent(name: "heatSource", value: friendlyName)
     }
 
     if (debugMode) log.debug "Body [${label}] (${subtyp}): status=${status} temp=${temp} setpt=${lotmp} htmode=${htmode} htsrc=${htsrc}"
 
-    // Push water temperature to all pump devices so their tiles stay current
     if (temp != null) {
         getChildDevices()
             .findAll { it.deviceNetworkId.startsWith("intellicenter-pump-") }
@@ -612,15 +603,12 @@ def setBodyHeatSource(String childDni, String source) {
         return
     }
 
-    // Priority 1: raw HTSRC ID from controller
     def htsrcId = state.htsrcIds?.get(objnam)?.get(source)
 
-    // Priority 2: heater object name lookup
     if (!htsrcId) {
         htsrcId = state.heaterNames?.find { k, v -> v?.equalsIgnoreCase(source) }?.key
     }
 
-    // Priority 3: static fallback
     if (!htsrcId) {
         def staticSrcMap = ["Heater":"H0001","Solar Only":"S0001","Solar Preferred":"H0002",
                             "Heat Pump":"H0003","Heat Pump Preferred":"H0004"]
@@ -700,8 +688,6 @@ def sendCommand(Map payload) {
 
 // ============================================================
 // ===================== COMPONENT CALLBACKS =================
-// Routes refresh requests by DNI prefix so each object type
-// gets the correct condition in the GetParamList query.
 // ============================================================
 def componentRefresh(child) {
     if (!child?.deviceNetworkId) {
@@ -746,7 +732,6 @@ def componentRefresh(child) {
             objectList: [[objnam: objnam, keys: ["OBJTYP", "SNAME", "STATUS", "SALT", "LOTMP"]]]
         ])
     } else {
-        // Generic fallback — last resort
         def objnam = objnamFromDni(dni)
         if (!objnam) return
         sendCommand([
@@ -791,5 +776,6 @@ def getOrCreateChild(String driver, String dni, String label, Boolean isComponen
     }
     return child
 }
+
 
 
