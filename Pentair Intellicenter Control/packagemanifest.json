@@ -10,16 +10,19 @@
   "releaseNotes": "v1.6.0 - Fixed HPM installation issue. All drivers and app now load correctly via HPM.",
   "apps": [
     {
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
       "name": "Pentair IntelliCenter",
       "namespace": "intellicenter",
       "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Pentair%20Intellicenter%20Control/ParentApp.groovy",
       "required": true,
+      "oauth": false,
       "primary": true,
       "version": "1.6.0"
     }
   ],
   "drivers": [
     {
+      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
       "name": "Pentair IntelliCenter Pump",
       "namespace": "intellicenter",
       "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Pentair%20Intellicenter%20Control/PumpSpeedDriver.groovy",
@@ -27,6 +30,7 @@
       "version": "1.6.0"
     },
     {
+      "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
       "name": "Pentair IntelliCenter Bridge",
       "namespace": "intellicenter",
       "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Pentair%20Intellicenter%20Control/BridgeDeviceDriver.groovy",
@@ -34,6 +38,7 @@
       "version": "1.6.0"
     },
     {
+      "id": "d4e5f6a7-b8c9-0123-defa-234567890123",
       "name": "Pentair IntelliCenter Body",
       "namespace": "intellicenter",
       "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Pentair%20Intellicenter%20Control/BodyDriver.groovy",
