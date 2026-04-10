@@ -1,12 +1,12 @@
 {
   "packageName": "SmartThings Motion Sensor Driver",
   "author": "jdthomas24",
-  "version": "1.7.3",
+  "version": "1.7.4",
   "category": "Utility",
   "description": "Custom Hubitat driver for SmartThings Zigbee motion sensors with local processing and battery reporting.",
   "dateReleased": "4-10-26",
   "minimumHEVersion": "2.3.0",
-  "releaseNotes": "v1.7.3 - Unique package ID added for HPM compatibility. Debug logging auto-disables after 30 minutes. Refined battery voltage curve. Motion reset timer fixes. State bloat prevention.",
+  "releaseNotes": "v1.7.4 - Unique package ID added for HPM compatibility. This will require you to delete you old driver, from Driver Code Section in HE, and associate this new driver with your devices manually.",
   "drivers": [
     {
       "id": "a60901b6-bed8-4d00-9c98-a12ff7fa196b",
