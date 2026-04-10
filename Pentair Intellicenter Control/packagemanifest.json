@@ -20,6 +20,13 @@
   ],
   "drivers": [
     {
+      "name": "Pentair IntelliCenter Pump",
+      "namespace": "intellicenter",
+      "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Pentair%20Intellicenter%20Control/PumpSpeedDriver.groovy",
+      "required": true,
+      "version": "1.6.0"
+    },
+    {
       "name": "Pentair IntelliCenter Bridge",
       "namespace": "intellicenter",
       "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Pentair%20Intellicenter%20Control/BridgeDeviceDriver.groovy",
@@ -32,13 +39,7 @@
       "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Pentair%20Intellicenter%20Control/BodyDriver.groovy",
       "required": true,
       "version": "1.6.0"
-    },
-    {
-      "name": "Pentair IntelliCenter Pump",
-      "namespace": "intellicenter",
-      "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Pentair%20Intellicenter%20Control/PumpSpeedDriver.groovy",
-      "required": true,
-      "version": "1.6.0"
     }
   ]
+}
 }
