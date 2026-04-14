@@ -76,15 +76,11 @@ def applyCustomLabel() {
 // ===================== HELPERS =============================
 // ============================================================
 def getAllMonitoredDevices() {
-    def all = []
-    if (sensorDevices)   all.addAll(sensorDevices)
-    if (actuatorDevices) all.addAll(actuatorDevices)
-    return all.unique { it.id }
+    return monitoredDevices ?: []
 }
 
 def getProtocol(device) {
     try {
-        // Check Controller Type via device properties
         def devData = device.properties
         if (devData?.controllerType == "ZGB") return "Zigbee"
         if (devData?.controllerType == "ZWV") return "Z-Wave"
@@ -140,28 +136,22 @@ def mainPage() {
         }
 
         // ── Device Selection ─────────────────────────────────
-        def devicesSelected = ((sensorDevices?.size() ?: 0) + (actuatorDevices?.size() ?: 0)) > 0
+        def devicesSelected = (monitoredDevices?.size() ?: 0) > 0
         section("<b>Monitored Devices</b>", hideable: true, hidden: devicesSelected) {
-            paragraph "<b>Select Zigbee, Z-Wave and LAN devices to monitor.</b> The app will automatically detect the protocol for each device."
+            paragraph "<b>Select Zigbee, Z-Wave and LAN devices to monitor.</b> Protocol is detected automatically — it does not matter which device type you select from the list."
             paragraph "<span style='color:red; font-weight:bold;'>IMPORTANT: After selecting devices, you MUST click 'Done' before viewing reports.</span>"
-            input "sensorDevices", "capability.sensor",
-                  title: "Select sensor devices (Zigbee motion, contact, smoke, temp, etc.)",
-                  multiple: true,
-                  required: false,
-                  submitOnChange: true
-            input "actuatorDevices", "capability.actuator",
-                  title: "Select actuator devices (Z-Wave switches, dimmers, locks, LAN devices, etc.)",
+            input "monitoredDevices", "capability.initialize",
+                  title: "Select devices to monitor",
                   multiple: true,
                   required: false,
                   submitOnChange: true
         }
         if (devicesSelected) {
-            def allSelected  = getAllMonitoredDevices()
-            def zigbeeCount  = allSelected.count { getProtocol(it) == "Zigbee" }
-            def zwaveCount   = allSelected.count { getProtocol(it) == "Z-Wave" }
-            def lanCount     = allSelected.count { getProtocol(it) == "LAN" }
-            def unknownCount = allSelected.count { getProtocol(it) == "Unknown" }
-            def totalCount   = allSelected.size()
+            def zigbeeCount  = monitoredDevices.count { getProtocol(it) == "Zigbee" }
+            def zwaveCount   = monitoredDevices.count { getProtocol(it) == "Z-Wave" }
+            def lanCount     = monitoredDevices.count { getProtocol(it) == "LAN" }
+            def unknownCount = monitoredDevices.count { getProtocol(it) == "Unknown" }
+            def totalCount   = monitoredDevices.size()
             section("") {
                 paragraph "<b><span style='color:blue;'>${totalCount} device(s) selected</span></b> — " +
                           "Zigbee: <b><span style='color:blue;'>${zigbeeCount}</span></b> | " +
