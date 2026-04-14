@@ -84,23 +84,30 @@ def getAllMonitoredDevices() {
 
 def getProtocol(device) {
     try {
-        // Zigbee — capital E, space
+        // Check Controller Type via device properties
+        def devData = device.properties
+        if (devData?.controllerType == "ZGB") return "Zigbee"
+        if (devData?.controllerType == "ZWV") return "Z-Wave"
+
+        // Zigbee fallbacks
         if (device.getDataValue("Endpoint Id")                != null) return "Zigbee"
         if (device.getDataValue("endpointId")                 != null) return "Zigbee"
         if (device.getDataValue("zigbeeNodeType")             != null) return "Zigbee"
         if (device.getDataValue("zigbeeId")                   != null) return "Zigbee"
-        // Z-Wave — capital I, space
+        // Z-Wave fallbacks
         if (device.getDataValue("In Clusters")                != null) return "Z-Wave"
         if (device.getDataValue("inClusters")                 != null) return "Z-Wave"
         if (device.getDataValue("zwaveSecurePairingComplete") != null) return "Z-Wave"
         if (device.getDataValue("secureInClusters")           != null) return "Z-Wave"
         if (device.getDataValue("Zw Node Info")               != null) return "Z-Wave"
+
+        // No Zigbee or Z-Wave data — treat as LAN
+        return "LAN"
     } catch (e) {
         if (debugMode) log.debug "getProtocol error for ${device.displayName}: ${e.message}"
     }
     return "Unknown"
 }
-
 // ============================================================
 // ===================== MAIN PAGE ===========================
 // ============================================================
