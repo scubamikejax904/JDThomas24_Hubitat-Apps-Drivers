@@ -76,7 +76,10 @@ def applyCustomLabel() {
 // ===================== HELPERS =============================
 // ============================================================
 def getAllMonitoredDevices() {
-    return monitoredDevices ?: []
+    def all = []
+    if (sensorDevices)   all.addAll(sensorDevices)
+    if (actuatorDevices) all.addAll(actuatorDevices)
+    return all.unique { it.id }
 }
 
 def getProtocol(device) {
@@ -136,22 +139,28 @@ def mainPage() {
         }
 
         // ── Device Selection ─────────────────────────────────
-        def devicesSelected = (monitoredDevices?.size() ?: 0) > 0
+        def devicesSelected = ((sensorDevices?.size() ?: 0) + (actuatorDevices?.size() ?: 0)) > 0
         section("<b>Monitored Devices</b>", hideable: true, hidden: devicesSelected) {
-            paragraph "<b>Select Zigbee, Z-Wave and LAN devices to monitor.</b> Protocol is detected automatically — it does not matter which device type you select from the list."
+            paragraph "<b>Select your devices across both lists below.</b> Protocol (Zigbee, Z-Wave, LAN) is detected automatically regardless of which list a device appears in — it does not matter which list you use to select it."
             paragraph "<span style='color:red; font-weight:bold;'>IMPORTANT: After selecting devices, you MUST click 'Done' before viewing reports.</span>"
-            input "monitoredDevices", "capability.initialize",
-                  title: "Select devices to monitor",
+            input "sensorDevices", "capability.sensor",
+                  title: "📡 Sensors — motion, contact, smoke, temperature, water, presence, etc.",
+                  multiple: true,
+                  required: false,
+                  submitOnChange: true
+            input "actuatorDevices", "capability.actuator",
+                  title: "⚡ Actuators — switches, dimmers, locks, valves, fans, etc.",
                   multiple: true,
                   required: false,
                   submitOnChange: true
         }
         if (devicesSelected) {
-            def zigbeeCount  = monitoredDevices.count { getProtocol(it) == "Zigbee" }
-            def zwaveCount   = monitoredDevices.count { getProtocol(it) == "Z-Wave" }
-            def lanCount     = monitoredDevices.count { getProtocol(it) == "LAN" }
-            def unknownCount = monitoredDevices.count { getProtocol(it) == "Unknown" }
-            def totalCount   = monitoredDevices.size()
+            def allSelected  = getAllMonitoredDevices()
+            def zigbeeCount  = allSelected.count { getProtocol(it) == "Zigbee" }
+            def zwaveCount   = allSelected.count { getProtocol(it) == "Z-Wave" }
+            def lanCount     = allSelected.count { getProtocol(it) == "LAN" }
+            def unknownCount = allSelected.count { getProtocol(it) == "Unknown" }
+            def totalCount   = allSelected.size()
             section("") {
                 paragraph "<b><span style='color:blue;'>${totalCount} device(s) selected</span></b> — " +
                           "Zigbee: <b><span style='color:blue;'>${zigbeeCount}</span></b> | " +
@@ -523,11 +532,9 @@ def activitySummaryPage() {
                 def rowBg    = (rowNum % 2 == 0) ? "#ffffff" : "#ebebeb"
                 rowNum++
 
-                def protocolColor = getProtocolColor(protocol)
-
                 table += "<tr style='background-color:${rowBg};'>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${device.displayName}</td>"
-                table += "<td style='padding:4px; border:1px solid #ccc;'><span style='color:${protocolColor};font-weight:bold;'>${protocol}</span></td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'><span style='color:${getProtocolColor(protocol)};font-weight:bold;'>${protocol}</span></td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${getHealthDisplay(device)}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${lastSeen}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${avgInt}</td>"
@@ -588,11 +595,9 @@ def problemDevicesPage() {
                 def rowBg    = (rowNum % 2 == 0) ? "#ffffff" : "#ebebeb"
                 rowNum++
 
-                def protocolColor = getProtocolColor(protocol)
-
                 table += "<tr style='background-color:${rowBg};'>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${device.displayName}</td>"
-                table += "<td style='padding:4px; border:1px solid #ccc;'><span style='color:${protocolColor};font-weight:bold;'>${protocol}</span></td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'><span style='color:${getProtocolColor(protocol)};font-weight:bold;'>${protocol}</span></td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${getHealthDisplay(device)}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${lastSeen}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${avgInt}</td>"
@@ -865,6 +870,16 @@ def infoPage(Map params = [:]) {
                       "the same approach used in Battery Monitor 2.0.<br><br>" +
                       "The baseline updates continuously as new check-ins arrive, so it adapts to changes in device behavior over time.<br><br>" +
                       "If the auto-learned baseline seems wrong for a specific device you can override it using Reset Device History.</div>"
+        }
+
+        section("<b>📋 Device Selection</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "Devices are selected using two lists — Sensors and Actuators. This is a Hubitat limitation, not an app limitation. " +
+                      "Protocol detection is automatic regardless of which list a device appears in.<br><br>" +
+                      "• <b>Sensors list</b> — motion, contact, smoke, temperature, water, presence sensors, etc.<br>" +
+                      "• <b>Actuators list</b> — switches, dimmers, locks, valves, fans, etc.<br><br>" +
+                      "Some devices (like smart valves) may appear in the Actuators list even though they are Zigbee — this is normal. " +
+                      "The app will correctly identify and tag them as Zigbee in the reports.</div>"
         }
 
         section("<b>🔄 Force Scan</b>") {
