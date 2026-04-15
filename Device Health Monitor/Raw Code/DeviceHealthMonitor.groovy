@@ -357,6 +357,7 @@ def mainPage() {
         }
 
         // ── Support ──────────────────────────────────────────
+        section("<b>Support & Community</b>") {
             href url: "https://community.hubitat.com/t/beta-device-health-monitor/163229",
                  style: "external",
                  title: "💬 Hubitat Community Thread",
