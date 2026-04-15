@@ -233,7 +233,7 @@ def mainPage() {
                       required: false
 
                 paragraph "<b>Report Sections:</b>"
-                input "notifyOffline",   "bool", title: "🔴 Include Offline devices",         defaultValue: true
+                input "notifyOffline",   "bool", title: "💀 Include Offline devices",         defaultValue: true
                 input "notifyPoor",      "bool", title: "🔴 Include Poor health devices",      defaultValue: true
                 input "notifyFair",      "bool", title: "🟠 Include Fair health devices",      defaultValue: true
                 input "notifyGood",      "bool", title: "🟢 Include Good health devices",      defaultValue: false
@@ -441,12 +441,12 @@ def getHealthDisplay(device) {
     }
 
     switch (h) {
-        case "Excellent": return "🟢 <span style='color:#22c55e;font-weight:bold;'>Excellent</span>"
-        case "Good":      return "🟢 <span style='color:#22c55e;font-weight:bold;'>Good</span>"
-        case "Fair":      return "🟠 <span style='color:#f97316;font-weight:bold;'>Fair</span>"
-        case "Poor":      return "🔴 <span style='color:#ef4444;font-weight:bold;'>Poor</span>"
-        case "Offline":   return "🔴 <span style='color:#991b1b;font-weight:bold;'>Offline</span>"
-        default:          return "<span style='color:#94a3b8;'>${h}</span>"
+        case "Excellent": return "🟢 Excellent"
+        case "Good":      return "🟢 Good"
+        case "Fair":      return "🟠 Fair"
+        case "Poor":      return "🔴 Poor"
+        case "Offline":   return "💀 <span style='color:#991b1b;font-weight:bold;'>Offline</span>"
+        default:          return "${h}"
     }
 }
 
@@ -456,7 +456,7 @@ def getHealthEmoji(h) {
         case "Good":      return "🟢"
         case "Fair":      return "🟠"
         case "Poor":      return "🔴"
-        case "Offline":   return "🔴"
+        case "Offline":   return "💀"
         default:          return "⏳"
     }
 }
@@ -791,7 +791,7 @@ def scheduledSummary() {
     def body = "${prefix}📡 Device Health Summary\n"
 
     def sections = [
-        "Offline":   [emoji: "🔴", enabled: settings?.notifyOffline   != false, list: []],
+        "Offline":   [emoji: "💀", enabled: settings?.notifyOffline   != false, list: []],
         "Poor":      [emoji: "🔴", enabled: settings?.notifyPoor      != false, list: []],
         "Fair":      [emoji: "🟠", enabled: settings?.notifyFair      != false, list: []],
         "Good":      [emoji: "🟢", enabled: settings?.notifyGood      ?: false, list: []],
@@ -849,11 +849,11 @@ def infoPage(Map params = [:]) {
                       "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'><table style='width:100%; border-collapse: collapse;'>" +
                       "<tr style='font-weight:bold;'><td>Health</td><td>Meaning</td></tr>" +
                       "<tr><td>⏳ Pending</td><td>Not enough check-in samples yet (need 3)</td></tr>" +
-                      "<tr><td>🟢 <span style='color:#22c55e;'>Excellent</span></td><td>Checking in within 1.2x of baseline — right on schedule</td></tr>" +
-                      "<tr><td>🟢 <span style='color:#22c55e;'>Good</span></td><td>Checking in within 2x of baseline — slightly late but normal</td></tr>" +
-                      "<tr><td>🟠 <span style='color:#f97316;'>Fair</span></td><td>Checking in within 3x of baseline — worth watching</td></tr>" +
-                      "<tr><td>🔴 <span style='color:#ef4444;'>Poor</span></td><td>Checking in within 5x of baseline — likely a problem</td></tr>" +
-                      "<tr><td>🔴 <span style='color:#991b1b;'>Offline</span></td><td>No activity for ${settings?.offlineThresholdHours ?: 24}h or beyond 5x baseline</td></tr>" +
+                      "<tr><td>🟢 Excellent</td><td>Checking in within 1.2x of baseline — right on schedule</td></tr>" +
+                      "<tr><td>🟢 Good</td><td>Checking in within 2x of baseline — slightly late but normal</td></tr>" +
+                      "<tr><td>🟠 Fair</td><td>Checking in within 3x of baseline — worth watching</td></tr>" +
+                      "<tr><td>🔴 Poor</td><td>Checking in within 5x of baseline — likely a problem</td></tr>" +
+                      "<tr><td>💀 <span style='color:#991b1b;font-weight:bold;'>Offline</span></td><td>No activity for ${settings?.offlineThresholdHours ?: 24}h or beyond 5x baseline</td></tr>" +
                       "</table></div><br>" +
                       "<b>Protocol Colors:</b><br>" +
                       "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'><table style='width:100%; border-collapse: collapse;'>" +
@@ -895,9 +895,9 @@ def infoPage(Map params = [:]) {
                       "• Let devices run for at least a day before trusting health ratings<br>" +
                       "• Set Scan Interval to Hourly to build baselines faster<br>" +
                       "• Devices that only wake on events (motion, contact) will have longer natural intervals — this is normal<br>" +
-                      "• App-created devices that haven't fired in a long time will show Offline — useful for spotting broken automations<br>" +
+                      "• App-created devices that haven't fired in a long time will show 💀 Offline — useful for spotting broken automations<br>" +
                       "• No hub event subscriptions are used — all monitoring is done via scheduled scans of Hubitat's built-in Last Activity data<br>" +
-                      "• Poor = bright red 🔴, Offline = dark red 🔴 — both use the red dot but Offline text is darker to distinguish severity</div>"
+                      "• 🔴 Poor and 💀 Offline both indicate problems — Poor means late, Offline means gone</div>"
         }
     }
 }
