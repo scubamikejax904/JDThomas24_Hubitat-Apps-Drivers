@@ -2,7 +2,7 @@ definition(
     name: "Device Health Monitor",
     namespace: "jdthomas24",
     author: "jdthomas24",
-    description: "Zigbee, Z-Wave and LAN device health monitoring with check-in tracking, baseline learning, trend analysis and notifications.",
+    description: "Zigbee, Z-Wave, LAN and Matter device health monitoring with check-in tracking, baseline learning, trend analysis and notifications.",
     category: "Convenience",
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
@@ -86,7 +86,9 @@ def getProtocol(device) {
     try {
         def devData = device.properties
         if (devData?.controllerType == "ZGB") return "Zigbee"
+        if (devData?.controllerType == "LNK") return "Zigbee"
         if (devData?.controllerType == "ZWV") return "Z-Wave"
+        if (devData?.controllerType == "MAT") return "Matter"
 
         // Zigbee fallbacks
         if (device.getDataValue("Endpoint Id")                != null) return "Zigbee"
@@ -100,7 +102,7 @@ def getProtocol(device) {
         if (device.getDataValue("secureInClusters")           != null) return "Z-Wave"
         if (device.getDataValue("Zw Node Info")               != null) return "Z-Wave"
 
-        // No Zigbee or Z-Wave data — treat as LAN
+        // No match — treat as LAN
         return "LAN"
     } catch (e) {
         if (debugMode) log.debug "getProtocol error for ${device.displayName}: ${e.message}"
@@ -112,6 +114,7 @@ def getProtocolColor(protocol) {
     switch (protocol) {
         case "Zigbee":  return "#3b82f6"
         case "Z-Wave":  return "#8b5cf6"
+        case "Matter":  return "#f97316"
         case "LAN":     return "#22c55e"
         default:        return "#94a3b8"
     }
@@ -141,7 +144,7 @@ def mainPage() {
         // ── Device Selection ─────────────────────────────────
         def devicesSelected = ((sensorDevices?.size() ?: 0) + (actuatorDevices?.size() ?: 0)) > 0
         section("<b>Monitored Devices</b>", hideable: true, hidden: devicesSelected) {
-            paragraph "<b>Select your devices across both lists below.</b> Protocol (Zigbee, Z-Wave, LAN) is detected automatically regardless of which list a device appears in — it does not matter which list you use to select it."
+            paragraph "<b>Select your devices across both lists below.</b> Protocol (Zigbee, Z-Wave, Matter, LAN) is detected automatically regardless of which list a device appears in."
             paragraph "<span style='color:red; font-weight:bold;'>IMPORTANT: After selecting devices, you MUST click 'Done' before viewing reports.</span>"
             input "sensorDevices", "capability.sensor",
                   title: "📡 Sensors — motion, contact, smoke, temperature, water, presence, etc.",
@@ -155,16 +158,18 @@ def mainPage() {
                   submitOnChange: true
         }
         if (devicesSelected) {
-            def allSelected  = getAllMonitoredDevices()
-            def zigbeeCount  = allSelected.count { getProtocol(it) == "Zigbee" }
-            def zwaveCount   = allSelected.count { getProtocol(it) == "Z-Wave" }
-            def lanCount     = allSelected.count { getProtocol(it) == "LAN" }
-            def unknownCount = allSelected.count { getProtocol(it) == "Unknown" }
-            def totalCount   = allSelected.size()
+            def allSelected   = getAllMonitoredDevices()
+            def zigbeeCount   = allSelected.count { getProtocol(it) == "Zigbee" }
+            def zwaveCount    = allSelected.count { getProtocol(it) == "Z-Wave" }
+            def matterCount   = allSelected.count { getProtocol(it) == "Matter" }
+            def lanCount      = allSelected.count { getProtocol(it) == "LAN" }
+            def unknownCount  = allSelected.count { getProtocol(it) == "Unknown" }
+            def totalCount    = allSelected.size()
             section("") {
                 paragraph "<b><span style='color:blue;'>${totalCount} device(s) selected</span></b> — " +
                           "Zigbee: <b><span style='color:blue;'>${zigbeeCount}</span></b> | " +
                           "Z-Wave: <b><span style='color:blue;'>${zwaveCount}</span></b> | " +
+                          "Matter: <b><span style='color:blue;'>${matterCount}</span></b> | " +
                           "LAN: <b><span style='color:blue;'>${lanCount}</span></b>" +
                           (unknownCount > 0 ? " | <span style='color:orange;'>Unknown: <b><span style='color:orange;'>${unknownCount}</span></b> (these will be skipped)</span>" : "") +
                           " — Tap <b>Monitored Devices</b> above to change."
@@ -837,7 +842,7 @@ def infoPage(Map params = [:]) {
 
         section("<b>📡 What This App Does</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "Device Health Monitor tracks how frequently your Zigbee, Z-Wave and LAN devices check in with the hub. " +
+                      "Device Health Monitor tracks how frequently your Zigbee, Z-Wave, Matter and LAN devices check in with the hub. " +
                       "It learns each device's normal check-in pattern and flags devices that go quiet, check in late, or stop responding entirely.<br><br>" +
                       "This is different from battery monitoring — a device can have a full battery but still have mesh or connectivity issues. " +
                       "This app catches those problems early.</div>"
@@ -859,6 +864,7 @@ def infoPage(Map params = [:]) {
                       "<tr style='font-weight:bold;'><td>Color</td><td>Protocol</td></tr>" +
                       "<tr><td><span style='color:#3b82f6;font-weight:bold;'>Blue</span></td><td>Zigbee</td></tr>" +
                       "<tr><td><span style='color:#8b5cf6;font-weight:bold;'>Purple</span></td><td>Z-Wave</td></tr>" +
+                      "<tr><td><span style='color:#f97316;font-weight:bold;'>Orange</span></td><td>Matter</td></tr>" +
                       "<tr><td><span style='color:#22c55e;font-weight:bold;'>Green</span></td><td>LAN</td></tr>" +
                       "</table></div></div>"
         }
@@ -878,8 +884,8 @@ def infoPage(Map params = [:]) {
                       "Protocol detection is automatic regardless of which list a device appears in.<br><br>" +
                       "• <b>Sensors list</b> — motion, contact, smoke, temperature, water, presence sensors, etc.<br>" +
                       "• <b>Actuators list</b> — switches, dimmers, locks, valves, fans, etc.<br><br>" +
-                      "Some devices (like smart valves) may appear in the Actuators list even though they are Zigbee — this is normal. " +
-                      "The app will correctly identify and tag them as Zigbee in the reports.</div>"
+                      "Some devices may appear in the Actuators list even though they are Zigbee or Matter — this is normal. " +
+                      "The app will correctly identify and tag them with the right protocol in the reports.</div>"
         }
 
         section("<b>🔄 Force Scan</b>") {
@@ -894,7 +900,7 @@ def infoPage(Map params = [:]) {
                       "• Let devices run for at least a day before trusting health ratings<br>" +
                       "• Set Scan Interval to Hourly to build baselines faster<br>" +
                       "• Use Reset Device History if a device shows incorrect health after a mesh change<br>" +
-                      "• Zigbee = blue, Z-Wave = purple, LAN = green in the reports<br>" +
+                      "• Zigbee = blue, Z-Wave = purple, Matter = orange, LAN = green in the reports<br>" +
                       "• Devices that only wake on events (motion, contact) will have longer natural intervals — this is normal<br>" +
                       "• No hub event subscriptions are used — all monitoring is done via scheduled scans using Hubitat's built-in Last Activity data</div>"
         }
