@@ -2,7 +2,7 @@ definition(
     name: "Device Health Monitor",
     namespace: "jdthomas24",
     author: "jdthomas24",
-    description: "Zigbee, Z-Wave, Matter, LAN and Hub Mesh device health monitoring with check-in tracking, baseline learning, trend analysis and notifications.",
+    description: "Monitor device check-in health across Zigbee, Z-Wave, Matter, Hub Mesh and LAN — learns each device's normal pattern and alerts you when something goes quiet.",
     category: "Convenience",
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
@@ -19,6 +19,7 @@ preferences {
     page(name: "forceScanPage")
     page(name: "resetHistoryPage")
     page(name: "resetHistoryConfirmPage")
+    page(name: "snoozeManagePage")
     page(name: "infoPage")
 }
 
@@ -26,37 +27,33 @@ preferences {
 // ===================== LIFECYCLE ===========================
 // ============================================================
 def installed() {
-    if (debugMode) log.debug "Device Health Monitor installed"
+    if (debugEnabled()) log.debug "Device Health Monitor installed"
     applyCustomLabel()
     initialize()
 }
 
 def updated() {
-    if (debugMode) log.debug "Device Health Monitor updated"
+    if (debugEnabled()) log.debug "Device Health Monitor updated"
     applyCustomLabel()
     unschedule()
     unsubscribe()
     initialize()
-    if (debugMode) runIn(1800, disableDebugLogging)
-
-    def allDevices = getAllMonitoredDevices()
-    def currentIds = allDevices.collect { it.id as String }
-    state.history?.keySet()?.findAll { !currentIds.contains(it) }?.each { removedId ->
-        state.history.remove(removedId)
-        state.health?.remove(removedId)
-        if (debugMode) log.debug "Cleaned up removed device: ${removedId}"
-    }
+    if (debugEnabled()) runIn(1800, disableDebugLogging)
 }
 
 def initialize() {
-    if (debugMode) log.debug "Device Health Monitor initializing"
-    if (state.history  == null) state.history  = [:]
-    if (state.health   == null) state.health   = [:]
-    if (state.snoozed  == null) state.snoozed  = [:]
+    if (debugEnabled()) log.debug "Device Health Monitor initializing"
+    if (state.history == null) state.history = [:]
+    if (state.health  == null) state.health  = [:]
+    if (state.snoozed == null) state.snoozed = [:]
     scheduleScanInterval()
     scheduleReportFrequency()
-    if (debugMode) log.debug "Monitoring ${getAllMonitoredDevices().findAll { getProtocol(it) != 'Unknown' }.size()} device(s)"
+    if (debugEnabled()) log.debug "Monitoring ${getAllMonitoredDevices().findAll { getProtocol(it) != 'Unknown' }.size()} device(s)"
     runIn(5, scanAllDevices)
+}
+
+def debugEnabled() {
+    return settings?.debugMode == true
 }
 
 def disableDebugLogging() {
@@ -68,7 +65,7 @@ def applyCustomLabel() {
     if (settings?.customAppName) {
         if (app.label != settings?.customAppName) {
             app.updateLabel(settings.customAppName)
-            if (debugMode) log.debug "App label updated to: ${settings.customAppName}"
+            if (debugEnabled()) log.debug "App label updated to: ${settings.customAppName}"
         }
     }
 }
@@ -77,16 +74,16 @@ def applyCustomLabel() {
 // ===================== SNOOZE ==============================
 // ============================================================
 def snoozeDevice(deviceId) {
-    def hours     = (settings?.snoozeDurationHours ?: 24).toInteger()
-    def until     = now() + (hours * 3600000)
+    def hours = (settings?.snoozeDurationHours ?: 24).toInteger()
+    def until = now() + (hours * 3600000)
     if (!state.snoozed) state.snoozed = [:]
     state.snoozed[deviceId] = until
-    if (debugMode) log.debug "Snoozed device ${deviceId} for ${hours}h until ${new Date(until)}"
+    if (debugEnabled()) log.debug "Snoozed device ${deviceId} for ${hours}h until ${new Date(until)}"
 }
 
 def unsnoozeDevice(deviceId) {
     state.snoozed?.remove(deviceId)
-    if (debugMode) log.debug "Unsnoozed device ${deviceId}"
+    if (debugEnabled()) log.debug "Unsnoozed device ${deviceId}"
 }
 
 def isDeviceSnoozed(deviceId) {
@@ -97,17 +94,10 @@ def isDeviceSnoozed(deviceId) {
     return false
 }
 
-// ============================================================
-// ===================== APP BUTTON HANDLER ==================
-// ============================================================
-def appButtonHandler(btn) {
-    if (btn.startsWith("snooze_")) {
-        def deviceId = btn.replace("snooze_", "")
-        snoozeDevice(deviceId)
-    } else if (btn.startsWith("unsnooze_")) {
-        def deviceId = btn.replace("unsnooze_", "")
-        unsnoozeDevice(deviceId)
-    }
+def getSnoozedHoursRemaining(deviceId) {
+    def until = state.snoozed?.get(deviceId)
+    if (!until) return 0
+    return Math.ceil((until - now()) / 3600000).toInteger()
 }
 
 // ============================================================
@@ -141,7 +131,7 @@ def getProtocol(device) {
 
         return "LAN"
     } catch (e) {
-        if (debugMode) log.debug "getProtocol error for ${device.displayName}: ${e.message}"
+        if (debugEnabled()) log.debug "getProtocol error for ${device.displayName}: ${e.message}"
     }
     return "Unknown"
 }
@@ -255,7 +245,7 @@ def mainPage() {
         // ── Snooze Duration ──────────────────────────────────
         def currentSnooze = settings?.snoozeDurationHours ?: 24
         section("<b>Snooze Duration</b>", hideable: true, hidden: true) {
-            paragraph "When a device is snoozed from the Activity Summary it will be excluded from notifications for this many hours."
+            paragraph "When a device is snoozed it will be excluded from notifications for this many hours."
             input "snoozeDurationHours", "number",
                   title: "Snooze duration (hours):",
                   defaultValue: 24,
@@ -341,6 +331,8 @@ def mainPage() {
         section("<b>Reports:</b>") {
             href "activitySummaryPage", title: "Device Activity Summary"
             href "problemDevicesPage",  title: "⚠️ Problem Devices"
+            href "snoozeManagePage",    title: "😴 Manage Snoozed Devices",
+                 description: "Snooze devices or clear active snoozes"
         }
 
         // ── Help ─────────────────────────────────────────────
@@ -391,7 +383,7 @@ def scheduleScanInterval() {
         default: cronExpr = "0 0 */3 * * ?"; break
     }
     schedule(cronExpr, scanAllDevices)
-    if (debugMode) log.debug "Device scan scheduled every ${interval}h (cron: ${cronExpr})"
+    if (debugEnabled()) log.debug "Device scan scheduled every ${interval}h (cron: ${cronExpr})"
 }
 
 def reportScheduler() {
@@ -429,7 +421,7 @@ def shouldRunWeekly() {
 def scanAllDevices() {
     def devList = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
     if (!devList) return
-    if (debugMode) log.debug "Running scheduled device scan for ${devList.size()} device(s)"
+    if (debugEnabled()) log.debug "Running scheduled device scan for ${devList.size()} device(s)"
     devList.each { device ->
         try {
             def id   = device.id
@@ -449,7 +441,7 @@ def scanAllDevices() {
                     protocol:       getProtocol(device)
                 ]
                 state.health[id] = "Pending"
-                if (debugMode) log.debug "Seeded ${device.displayName} from lastActivity: ${formatTimeAgo(lastSeen)}"
+                if (debugEnabled()) log.debug "Seeded ${device.displayName} from lastActivity: ${formatTimeAgo(lastSeen)}"
             } else {
                 def prevLastSeen = data.lastSeen ?: lastSeen
                 if (lastSeen > prevLastSeen) {
@@ -463,12 +455,12 @@ def scanAllDevices() {
                         if (data.samples.size() >= 3) {
                             data.avgInterval = data.samples.sum() / data.samples.size()
                         }
-                        if (debugMode) log.debug "${device.displayName}: new activity interval=${elapsed.toInteger()}min smoothed=${smoothed.toInteger()}min avg=${data.avgInterval?.toInteger()}min"
+                        if (debugEnabled()) log.debug "${device.displayName}: new activity interval=${elapsed.toInteger()}min smoothed=${smoothed.toInteger()}min avg=${data.avgInterval?.toInteger()}min"
                     }
                     data.lastSeen    = lastSeen
                     data.lastCheckin = lastSeen
                 } else {
-                    if (debugMode) log.debug "${device.displayName}: no new activity since last scan"
+                    if (debugEnabled()) log.debug "${device.displayName}: no new activity since last scan"
                 }
                 data.protocol = getProtocol(device)
                 updateHealth(device)
@@ -510,7 +502,7 @@ def updateHealth(device) {
     else if (ratio <= 5.0) state.health[id] = "Poor"
     else                   state.health[id] = "Offline"
 
-    if (debugMode) log.debug "${device.displayName}: health=${state.health[id]} ratio=${ratio.round(2)} baseline=${baseline.toInteger()}min lastSeen=${minutesSinceLastSeen.toInteger()}min ago"
+    if (debugEnabled()) log.debug "${device.displayName}: health=${state.health[id]} ratio=${ratio.round(2)} baseline=${baseline.toInteger()}min lastSeen=${minutesSinceLastSeen.toInteger()}min ago"
 }
 
 // ============================================================
@@ -522,8 +514,7 @@ def getHealthDisplay(device) {
     def snoozed = isDeviceSnoozed(device.id as String)
 
     if (snoozed) {
-        def until = state.snoozed?.get(device.id as String)
-        def hoursLeft = until ? Math.ceil((until - now()) / 3600000).toInteger() : 0
+        def hoursLeft = getSnoozedHoursRemaining(device.id as String)
         return "😴 <span style='color:#94a3b8;'>Snoozed (${hoursLeft}h remaining)</span>"
     }
 
@@ -589,6 +580,8 @@ def activitySummaryPage() {
         section("") {
             href "forceScanPage", title: "🔄 Force Scan Now",
                  description: "Tap to immediately check all monitored devices"
+            href "snoozeManagePage", title: "😴 Manage Snoozed Devices",
+                 description: "Snooze devices or clear active snoozes"
 
             def devList = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
             if (!devList) { paragraph "No devices found. Please select devices on the main page first."; return }
@@ -611,7 +604,6 @@ def activitySummaryPage() {
             table += "<td style='padding:4px; border:1px solid #ccc;'>Last Seen</td>"
             table += "<td style='padding:4px; border:1px solid #ccc;'>Avg Check-in</td>"
             table += "<td style='padding:4px; border:1px solid #ccc;'>Samples</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Snooze</td>"
             table += "</tr>"
 
             def rowNum = 0
@@ -626,10 +618,6 @@ def activitySummaryPage() {
                 def rowBg    = snoozed ? "#f8f8f8" : (rowNum % 2 == 0) ? "#ffffff" : "#ebebeb"
                 rowNum++
 
-                def snoozeBtn = snoozed ?
-                    "<input type='button' value='✅' onclick='buttonClick(this)' name='unsnooze_${device.id}' style='cursor:pointer;font-size:16px;border:none;background:none;' title='Click to unsnooze'>" :
-                    "<input type='button' value='😴' onclick='buttonClick(this)' name='snooze_${device.id}' style='cursor:pointer;font-size:16px;border:none;background:none;' title='Click to snooze'>"
-
                 table += "<tr style='background-color:${rowBg};${snoozed ? "opacity:0.6;" : ""}'>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${device.displayName}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'><span style='color:${getProtocolColor(protocol)};font-weight:bold;'>${protocol}</span></td>"
@@ -637,7 +625,6 @@ def activitySummaryPage() {
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${lastSeen}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${avgInt}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${samples}</td>"
-                table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;'>${snoozeBtn}</td>"
                 table += "</tr>"
             }
 
@@ -648,6 +635,107 @@ def activitySummaryPage() {
         section("<b>🔄 Reset Device History</b>", hideable: true, hidden: true) {
             paragraph "Reset check-in history for specific devices. Health returns to Pending while fresh data is collected."
             href "resetHistoryPage", title: "🔄 Reset Device History", description: "Select devices to reset"
+        }
+    }
+}
+
+// ============================================================
+// ===================== SNOOZE MANAGE PAGE ==================
+// ============================================================
+def snoozeManagePage() {
+    app.removeSetting("devicesToSnooze")
+    app.removeSetting("devicesToUnsnooze")
+
+    def devList = getAllMonitoredDevices()
+        .findAll { getProtocol(it) != "Unknown" }
+        .sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
+
+    def snoozedList  = devList.findAll { isDeviceSnoozed(it.id as String) }
+    def activelist   = devList.findAll { !isDeviceSnoozed(it.id as String) }
+
+    dynamicPage(name: "snoozeManagePage", title: "😴 Manage Snoozed Devices", install: false) {
+
+        // ── Snooze devices ───────────────────────────────────
+        section("<b>Snooze Devices</b>") {
+            paragraph "Select devices to snooze for <b>${settings?.snoozeDurationHours ?: 24} hours</b>. Snoozed devices are excluded from notifications until the snooze expires."
+            if (activelist) {
+                input "devicesToSnooze", "enum",
+                      title: "Select devices to snooze:",
+                      options: activelist.collectEntries { [(it.id): "${it.displayName} (${state.health?.get(it.id) ?: 'Pending'})"] }
+                                        .sort { a, b -> a.value <=> b.value },
+                      multiple: true,
+                      required: false,
+                      submitOnChange: false
+            } else {
+                paragraph "All devices are currently snoozed."
+            }
+        }
+        section() {
+            input "confirmSnooze", "bool",
+                  title: "Confirm — snooze selected devices",
+                  defaultValue: false,
+                  submitOnChange: true
+        }
+        if (settings?.confirmSnooze == true) {
+            section("<b>Snooze Result</b>") {
+                if (settings?.devicesToSnooze) {
+                    def count = 0
+                    settings.devicesToSnooze.each { deviceId ->
+                        snoozeDevice(deviceId)
+                        count++
+                    }
+                    app.updateSetting("confirmSnooze", [value: false, type: "bool"])
+                    paragraph "✅ Snoozed ${count} device(s) for ${settings?.snoozeDurationHours ?: 24} hours."
+                } else {
+                    app.updateSetting("confirmSnooze", [value: false, type: "bool"])
+                    paragraph "No devices selected to snooze."
+                }
+            }
+        }
+
+        // ── Currently snoozed ────────────────────────────────
+        section("<b>Currently Snoozed</b>") {
+            if (snoozedList) {
+                def snoozeInfo = snoozedList.collect { device ->
+                    def hoursLeft = getSnoozedHoursRemaining(device.id as String)
+                    "${device.displayName} — ${hoursLeft}h remaining"
+                }.join("\n")
+                paragraph snoozeInfo
+
+                input "devicesToUnsnooze", "enum",
+                      title: "Select devices to unsnooze early:",
+                      options: snoozedList.collectEntries { [(it.id): "${it.displayName} (${getSnoozedHoursRemaining(it.id as String)}h remaining)"] }
+                                         .sort { a, b -> a.value <=> b.value },
+                      multiple: true,
+                      required: false,
+                      submitOnChange: false
+            } else {
+                paragraph "No devices are currently snoozed."
+            }
+        }
+        if (snoozedList) {
+            section() {
+                input "confirmUnsnooze", "bool",
+                      title: "Confirm — unsnooze selected devices",
+                      defaultValue: false,
+                      submitOnChange: true
+            }
+            if (settings?.confirmUnsnooze == true) {
+                section("<b>Unsnooze Result</b>") {
+                    if (settings?.devicesToUnsnooze) {
+                        def count = 0
+                        settings.devicesToUnsnooze.each { deviceId ->
+                            unsnoozeDevice(deviceId)
+                            count++
+                        }
+                        app.updateSetting("confirmUnsnooze", [value: false, type: "bool"])
+                        paragraph "✅ Unsnoozed ${count} device(s)."
+                    } else {
+                        app.updateSetting("confirmUnsnooze", [value: false, type: "bool"])
+                        paragraph "No devices selected to unsnooze."
+                    }
+                }
+            }
         }
     }
 }
@@ -714,7 +802,7 @@ def problemDevicesPage() {
 // ============================================================
 def forceScanPage() {
     scanAllDevices()
-    if (debugMode) log.debug "Manual device scan triggered by user"
+    if (debugEnabled()) log.debug "Manual device scan triggered by user"
 
     dynamicPage(name: "forceScanPage", title: "Force Scan", install: false) {
         section("<b>Scan Complete</b>") {
@@ -794,7 +882,7 @@ def resetHistoryConfirmPage() {
                         state.health[device.id] = "Pending"
                         resetNames << device.displayName
                         successCount++
-                        if (debugMode) log.debug "Reset history for ${device.displayName}"
+                        if (debugEnabled()) log.debug "Reset history for ${device.displayName}"
                     }
                 }
 
@@ -822,21 +910,15 @@ def sendNotificationPage() {
         def notifyOn   = settings?.enablePush != false
 
         if (!hasDevices) {
-            section("<b>Cannot Send</b>") {
-                paragraph "⚠️ No monitored devices are selected."
-            }
+            section("<b>Cannot Send</b>") { paragraph "⚠️ No monitored devices are selected." }
             return
         }
         if (!notifyOn) {
-            section("<b>Cannot Send</b>") {
-                paragraph "⚠️ Notifications are turned off."
-            }
+            section("<b>Cannot Send</b>") { paragraph "⚠️ Notifications are turned off." }
             return
         }
         if (!hasTargets) {
-            section("<b>Cannot Send</b>") {
-                paragraph "⚠️ No notification devices configured."
-            }
+            section("<b>Cannot Send</b>") { paragraph "⚠️ No notification devices configured." }
             return
         }
 
@@ -869,7 +951,7 @@ def sendNotificationPage() {
 // ============================================================
 def scheduledSummary() {
     if (!isModeOK()) {
-        if (debugMode) log.debug "Notification skipped — hub mode not in allowed modes"
+        if (debugEnabled()) log.debug "Notification skipped — hub mode not in allowed modes"
         return
     }
 
@@ -982,10 +1064,10 @@ def infoPage(Map params = [:]) {
 
         section("<b>😴 Snooze</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "Tap 😴 next to any device in the Activity Summary to snooze it. Snoozed devices are excluded from notifications for the configured snooze duration (default 24h).<br><br>" +
-                      "Snoozed devices still appear in the Activity Summary table with a 😴 indicator and a countdown showing hours remaining. " +
-                      "Tap ✅ to unsnooze a device early. Snoozes expire automatically when the duration passes.<br><br>" +
-                      "Snoozed devices are never included in Problem Devices — use snooze for devices you are actively working on.</div>"
+                      "Use <b>Manage Snoozed Devices</b> from the main page or Activity Summary to snooze individual devices. " +
+                      "Snoozed devices are excluded from notifications and the Problem Devices page for the configured snooze duration (default 24h).<br><br>" +
+                      "Snoozed devices still appear in the Activity Summary with a 😴 indicator and a countdown showing hours remaining. " +
+                      "You can unsnooze devices early at any time. Snoozes expire automatically when the duration passes.</div>"
         }
 
         section("<b>📋 Device Selection</b>") {
@@ -1000,6 +1082,7 @@ def infoPage(Map params = [:]) {
                       "<b>Notes:</b><br>" +
                       "• Virtual switches appear as LAN — simply don't select them if you don't want them monitored<br>" +
                       "• App-created child devices appear as LAN — monitoring these is useful for detecting broken automations<br>" +
+                      "• Hub variable connector devices going stale indicate a broken Rule Machine rule<br>" +
                       "• Bluetooth devices (C-8 Pro only) will appear as LAN until a controllerType value is confirmed</div>"
         }
 
@@ -1009,7 +1092,6 @@ def infoPage(Map params = [:]) {
                       "• Set Scan Interval to Hourly to build baselines faster<br>" +
                       "• Devices that only wake on events (motion, contact) will have longer natural intervals — this is normal<br>" +
                       "• App-created devices that haven't fired in a long time will show 💀 Offline — useful for spotting broken automations<br>" +
-                      "• Hub variable connector devices going stale will show as Offline — useful for detecting broken Rule Machine rules<br>" +
                       "• No hub event subscriptions are used — all monitoring is done via scheduled scans of Hubitat's Last Activity data<br>" +
                       "• Use Mode Restriction to suppress notifications during certain hub modes (e.g. Away, Night)</div>"
         }
