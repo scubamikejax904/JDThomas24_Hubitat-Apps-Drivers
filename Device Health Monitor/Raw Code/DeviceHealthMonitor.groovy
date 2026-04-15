@@ -272,8 +272,9 @@ def mainPage() {
         }
 
         // ── Notifications ────────────────────────────────────
-        def notificationSettings = (notificationSettings != false)
-        section("<b>Notifications</b>", hideable: true, hidden: notificationSettings) {
+        def notifConfigured = settings?.enablePush != false &&
+                              (settings?.notifyDevices || settings?.pushoverDevices)
+        section("<b>Notifications</b>", hideable: true, hidden: notifConfigured) {
             paragraph "ℹ️ Enable the toggle below to configure notification settings."
             input "enablePush", "bool", title: "Enable notifications", defaultValue: true, submitOnChange: true
 
@@ -295,12 +296,15 @@ def mainPage() {
                 input "notifyDevices", "capability.notification",
                       title: "Notification devices",
                       multiple: true,
-                      required: false
+                      required: false,
+                      submitOnChange: true
 
                 input "enablePushover", "bool", title: "⚙️ Enable Pushover Markup", defaultValue: false
                 input "pushoverDevices", "capability.notification",
                       title: "Pushover notification devices <b>(receives Pushover-formatted message)</b>",
-                      multiple: true, required: false
+                      multiple: true,
+                      required: false,
+                      submitOnChange: true
                 input "pushoverPrefix", "text",
                       title: "Pushover tags <b>(Only used if Enable Pushover Markup is toggled ON)</b>",
                       description: "e.g. [H][TITLE=Device Health Report][HTML][SELFDESTRUCT=43200]",
@@ -321,9 +325,12 @@ def mainPage() {
                      description: "Tap to preview and send a device health notification"
             }
         }
-        if (notificationSettings) {
+        if (notifConfigured) {
             section("") {
-                paragraph "Notifications are <b><span style='color:blue;'>" + (settings?.enablePush != false ? "ON" : "OFF") + "</span></b> — tap <b>Notifications</b> above to expand and configure."
+                def notifyTargets = []
+                if (settings?.notifyDevices)   notifyTargets.addAll(settings.notifyDevices.collect { it.displayName })
+                if (settings?.pushoverDevices) notifyTargets.addAll(settings.pushoverDevices.collect { "${it.displayName} (Pushover)" })
+                paragraph "Notifications are <b><span style='color:blue;'>ON</span></b> — sending to: <b><span style='color:blue;'>${notifyTargets.join(', ')}</span></b> — tap <b>Notifications</b> above to change."
             }
         }
 
@@ -645,50 +652,53 @@ def activitySummaryPage() {
 def snoozeManagePage() {
     app.removeSetting("devicesToSnooze")
     app.removeSetting("devicesToUnsnooze")
+    app.updateSetting("confirmSnooze",   [value: false, type: "bool"])
+    app.updateSetting("confirmUnsnooze", [value: false, type: "bool"])
 
     def devList = getAllMonitoredDevices()
         .findAll { getProtocol(it) != "Unknown" }
         .sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
 
-    def snoozedList  = devList.findAll { isDeviceSnoozed(it.id as String) }
-    def activelist   = devList.findAll { !isDeviceSnoozed(it.id as String) }
+    def snoozedList = devList.findAll { isDeviceSnoozed(it.id as String) }
+    def activeList  = devList.findAll { !isDeviceSnoozed(it.id as String) }
 
     dynamicPage(name: "snoozeManagePage", title: "😴 Manage Snoozed Devices", install: false) {
 
         // ── Snooze devices ───────────────────────────────────
         section("<b>Snooze Devices</b>") {
-            paragraph "Select devices to snooze for <b>${settings?.snoozeDurationHours ?: 24} hours</b>. Snoozed devices are excluded from notifications until the snooze expires."
-            if (activelist) {
+            paragraph "Select devices to snooze for <b>${settings?.snoozeDurationHours ?: 24} hours</b>. Snoozed devices are excluded from notifications and the Problem Devices page until the snooze expires."
+            if (activeList) {
                 input "devicesToSnooze", "enum",
                       title: "Select devices to snooze:",
-                      options: activelist.collectEntries { [(it.id): "${it.displayName} (${state.health?.get(it.id) ?: 'Pending'})"] }
+                      options: activeList.collectEntries { [(it.id): "${it.displayName} (${state.health?.get(it.id) ?: 'Pending'})"] }
                                         .sort { a, b -> a.value <=> b.value },
                       multiple: true,
-                      required: false,
-                      submitOnChange: false
+                      required: false
             } else {
                 paragraph "All devices are currently snoozed."
             }
         }
-        section() {
-            input "confirmSnooze", "bool",
-                  title: "Confirm — snooze selected devices",
-                  defaultValue: false,
-                  submitOnChange: true
-        }
-        if (settings?.confirmSnooze == true) {
-            section("<b>Snooze Result</b>") {
-                if (settings?.devicesToSnooze) {
-                    def count = 0
-                    settings.devicesToSnooze.each { deviceId ->
-                        snoozeDevice(deviceId)
-                        count++
+        if (activeList) {
+            section() {
+                input "confirmSnooze", "bool",
+                      title: "Confirm — snooze selected devices",
+                      defaultValue: false,
+                      submitOnChange: true
+            }
+            if (settings?.confirmSnooze == true) {
+                section("<b>Snooze Result</b>") {
+                    if (settings?.devicesToSnooze) {
+                        def count = 0
+                        settings.devicesToSnooze.each { deviceId ->
+                            snoozeDevice(deviceId)
+                            count++
+                        }
+                        app.updateSetting("confirmSnooze", [value: false, type: "bool"])
+                        paragraph "✅ Snoozed ${count} device(s) for ${settings?.snoozeDurationHours ?: 24} hours."
+                    } else {
+                        app.updateSetting("confirmSnooze", [value: false, type: "bool"])
+                        paragraph "No devices selected to snooze."
                     }
-                    app.updateSetting("confirmSnooze", [value: false, type: "bool"])
-                    paragraph "✅ Snoozed ${count} device(s) for ${settings?.snoozeDurationHours ?: 24} hours."
-                } else {
-                    app.updateSetting("confirmSnooze", [value: false, type: "bool"])
-                    paragraph "No devices selected to snooze."
                 }
             }
         }
@@ -696,19 +706,16 @@ def snoozeManagePage() {
         // ── Currently snoozed ────────────────────────────────
         section("<b>Currently Snoozed</b>") {
             if (snoozedList) {
-                def snoozeInfo = snoozedList.collect { device ->
-                    def hoursLeft = getSnoozedHoursRemaining(device.id as String)
-                    "${device.displayName} — ${hoursLeft}h remaining"
+                paragraph snoozedList.collect { device ->
+                    "😴 ${device.displayName} — ${getSnoozedHoursRemaining(device.id as String)}h remaining"
                 }.join("\n")
-                paragraph snoozeInfo
 
                 input "devicesToUnsnooze", "enum",
                       title: "Select devices to unsnooze early:",
                       options: snoozedList.collectEntries { [(it.id): "${it.displayName} (${getSnoozedHoursRemaining(it.id as String)}h remaining)"] }
                                          .sort { a, b -> a.value <=> b.value },
                       multiple: true,
-                      required: false,
-                      submitOnChange: false
+                      required: false
             } else {
                 paragraph "No devices are currently snoozed."
             }
