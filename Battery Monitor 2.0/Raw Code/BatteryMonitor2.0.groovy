@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.7",
+    version: "2.4.8",
     doNotFocus: true
 )
 
@@ -44,9 +44,10 @@ def disableDebugLogging() {
 
 def initialize() {
     if (debugMode) log.debug "Initialization complete"
-    if (state.replacements == null) state.replacements = []
-    if (state.history == null) state.history = [:]
-    if (state.trend == null)   state.trend   = [:]
+    if (state.replacements      == null) state.replacements      = []
+    if (state.history           == null) state.history           = [:]
+    if (state.trend             == null) state.trend             = [:]
+    if (state.notifSnoozedUntil == null) state.notifSnoozedUntil = 0
     scheduleReportFrequency()
     scheduleScanInterval()
     def devList = autoDevices ?: []
@@ -153,6 +154,46 @@ def mainPage() {
                   submitOnChange: true
         }
 
+        // ── Notification Snooze ──────────────────────────────
+        def snoozed = state.notifSnoozedUntil && state.notifSnoozedUntil >= now()
+        def snoozeHoursLeft = snoozed ? Math.ceil((state.notifSnoozedUntil - now()) / 3600000).toInteger() : 0
+        section("<b>Notification Snooze</b>", hideable: true, hidden: !snoozed) {
+            paragraph "Silence all Battery Monitor notifications for a set duration. Useful when traveling or away from home."
+            if (snoozed) {
+                paragraph "<b><span style='color:orange;'>😴 Notifications snoozed — ${snoozeHoursLeft}h remaining</span></b>"
+                input "snoozeConfirmClear", "bool",
+                      title: "✅ Clear snooze — resume notifications now",
+                      defaultValue: false,
+                      submitOnChange: true
+                if (settings?.snoozeConfirmClear == true) {
+                    state.notifSnoozedUntil = 0
+                    app.updateSetting("snoozeConfirmClear", [value: false, type: "bool"])
+                    paragraph "✅ Snooze cleared — notifications resumed."
+                }
+            } else {
+                input "snoozeDurationDays", "number",
+                      title: "Snooze duration (days):",
+                      defaultValue: 7,
+                      required: true
+                input "snoozeConfirm", "bool",
+                      title: "😴 Confirm — snooze notifications",
+                      defaultValue: false,
+                      submitOnChange: true
+                if (settings?.snoozeConfirm == true) {
+                    def days = (settings?.snoozeDurationDays ?: 7).toInteger()
+                    state.notifSnoozedUntil = now() + (days * 86400000)
+                    app.updateSetting("snoozeConfirm", [value: false, type: "bool"])
+                    paragraph "😴 Notifications snoozed for ${days} day(s)."
+                }
+            }
+        }
+        if (snoozed) {
+            section("") {
+                paragraph "😴 <b><span style='color:orange;'>Notifications snoozed — ${snoozeHoursLeft}h remaining</span></b> — tap <b>Notification Snooze</b> above to clear."
+            }
+        }
+
+        // ── Notifications ────────────────────────────────────
         def notificationSettings = (notificationSettings != false)
         section("<b>Notifications</b>", hideable: true, hidden: notificationSettings) {
             paragraph "ℹ️ Enable the toggle below to reveal notification settings including frequency, timing, device targets, and which battery groups to include in reports."
@@ -198,7 +239,9 @@ def mainPage() {
                 input "notifyIncludeAppLink", "bool", title: "🔗 Include link to Battery Monitor app <b>(Local Only)</b>", defaultValue: false
 
                 paragraph "<b>Send notification now:</b>"
-                href "sendNotificationPage", title: "📤 Send Notification Now", description: "Tap to preview and send a battery summary notification"
+                href(name: "toSendNotification", page: "sendNotificationPage",
+                     title: "📤 Send Notification Now",
+                     description: "Tap to preview and send a battery summary notification")
             }
         }
         if (notificationSettings) {
@@ -208,25 +251,23 @@ def mainPage() {
         }
 
         section("<b>Reports:</b>") {
-            href "summaryPage",           title: "Battery Summary"
-            href "trendsPage",            title: "Battery Trends"
-            href "historyPage",           title: "Battery Replacement History"
-            href "manualReplacementPage", title: "Manual Battery Replacement"
-            href "batteryCatalogPage",    title: "🔋 Battery Catalog"
+            href(name: "toSummary",     page: "summaryPage",           title: "Battery Summary")
+            href(name: "toTrends",      page: "trendsPage",            title: "Battery Trends")
+            href(name: "toHistory",     page: "historyPage",           title: "Battery Replacement History")
+            href(name: "toManualRep",   page: "manualReplacementPage", title: "Manual Battery Replacement")
+            href(name: "toCatalog",     page: "batteryCatalogPage",    title: "🔋 Battery Catalog")
         }
 
         section("<b>Help & Info:</b>") {
-            href "infoPage", title: "App Guide & Reference",
-                 description: "Colors, drain rates, trends, confidence, and replacement detection explained"
+            href(name: "toInfo", page: "infoPage",
+                 title: "App Guide & Reference",
+                 description: "Colors, drain rates, trends, confidence, and replacement detection explained")
         }
 
         section("<b>Diagnostics</b>") {
             input "debugMode", "bool", title: "Debug Logging (auto-disables after 30 min)", defaultValue: false, submitOnChange: true
         }
 
-        // ============================================================
-        // ===================== SUPPORT & DONATE ====================
-        // ============================================================
         section("<b>Support & Community</b>") {
             href url: "https://community.hubitat.com/t/release-battery-monitor-2-0/162329/288",
                  style: "external",
@@ -313,6 +354,12 @@ def shouldRunWeekly() {
 }
 
 def scheduledSummary() {
+    // ── Global notification snooze check ──────────────────
+    if (state.notifSnoozedUntil && state.notifSnoozedUntil >= now()) {
+        if (debugMode) log.debug "Notifications snoozed until ${new Date(state.notifSnoozedUntil)} — skipping summary"
+        return
+    }
+
     def devList = (autoDevices ?: []).findAll { it?.currentValue("battery") != null }
     if (!devList) return
 
@@ -324,7 +371,7 @@ def scheduledSummary() {
     ]
 
     devList.each { device ->
-        if (isBatteryDead(device)) return  // Skip dead batteries from category counts
+        if (isBatteryDead(device)) return
         def lvl = device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : 100
         def cat = lvl >= 100 ? "🟢 Excellent" : lvl > 70 ? "🟢 Good" : lvl > 25 ? "🟠 Fair" : "🔴 Poor"
         categories[cat].list << [device: device, name: device.displayName.trim(), level: lvl]
@@ -345,13 +392,11 @@ def scheduledSummary() {
         [name: device.displayName.trim(), level: lvl, health: health(device), drain: displayDrain(device)]
     }.sort { a, b -> a.level != b.level ? a.level <=> b.level : a.name <=> b.name }
 
-    // Dead battery list for notifications
     def deadBatteryList = devList.findAll { isBatteryDead(it) }.collect { device ->
         [name: device.displayName.trim()]
     }.sort { a, b -> a.name <=> b.name }
 
     def usePushover = (settings?.enablePushover == true && settings?.pushoverPrefix?.trim())
-
     def prefix  = ""
     def postfix = ""
 
@@ -417,7 +462,6 @@ def scheduledSummary() {
         }
     }
 
-    // Always include dead batteries in notifications
     if (deadBatteryList) {
         body += "\n🪫 Dead Batteries:\n"
         deadBatteryList.each { dev ->
@@ -486,16 +530,12 @@ def updateBattery(device, level) {
         data = state.history[device.id]
     }
 
-    // ── Dead Battery Tracking ──────────────────────────────
-    // Track consecutive scans at 0% to detect dead batteries.
-    // Only flag as dead after 3+ consecutive 0% readings.
     if (level == 0) {
         data.zeroCount = (data.zeroCount ?: 0) + 1
     } else {
         data.zeroCount = 0
     }
 
-    // If confirmed dead — suppress drain/health calculations
     if (isBatteryDead(device)) {
         data.lastLevel    = level
         data.lastScanDate = now()
@@ -503,7 +543,6 @@ def updateBattery(device, level) {
         return
     }
 
-    // Legacy level==0 handling for non-dead devices (brief 0% spike)
     if (level == 0 && (data.zeroCount ?: 0) < 3) {
         data.justReplaced = false
         data.replacedTime = null
@@ -552,14 +591,11 @@ def updateBattery(device, level) {
 
 // ============================================================
 // ===================== DEAD BATTERY DETECTION ==============
-// A battery is confirmed dead when it has reported 0% for
-// 3 or more consecutive scans. This filters out brief 0%
-// spikes from devices that recover after a single bad reading.
 // ============================================================
 def isBatteryDead(device) {
     def data = state.history?.get(device.id)
     if (!data) return false
-    def level    = device.currentValue("battery")
+    def level     = device.currentValue("battery")
     def zeroCount = data.zeroCount ?: 0
     return (level != null && level.toInteger() == 0 && zeroCount >= 3)
 }
@@ -595,7 +631,6 @@ def detectReplacement(device, newLevel, oldLevel) {
     else if (newLevel >= 95 && hadDrainHistory && oldLevel <= 40)                    detected = true
 
     if (detected) {
-        // Reset zero count on replacement
         data.zeroCount = 0
         logReplacement(device, newLevel, false)
     }
@@ -642,9 +677,8 @@ def getConfidence(device) {
     return Math.min(1.0, 0.05 + 0.95 * Math.pow((samples - 1) / (minN - 1.0), 1.5))
 }
 
-// Returns a blue-colored plain-language sample quality label
 def getSampleQualityLabel(device, healthStr) {
-    if (healthStr == "Pending") return null  // Handled separately with ⏳ X/5 samples
+    if (healthStr == "Pending") return null
     def conf = getConfidence(device)
     def label = conf < 0.20 ? "Low" : conf < 0.60 ? "Medium" : conf < 1.0 ? "High" : "Full"
     return "<span style='color:#1a73e8;'>${label}</span>"
@@ -666,14 +700,6 @@ def estDays(device) {
     return Math.round(level / drain)
 }
 
-// ============================================================
-// ===================== HEALTH ==============================
-// Locks require 7 samples and use a 60% drain reduction to
-// account for motor load — higher baseline drain is expected.
-// Sensors, smoke, and CO detectors require 7 samples and use
-// a 50% drain reduction for their slow/irregular reporting.
-// All other device types require 5 samples.
-// ============================================================
 def health(device) {
     def hist    = state.history?.get(device.id)
     def samples = hist?.samples?.size() ?: 0
@@ -708,7 +734,6 @@ def health(device) {
     return "Poor"
 }
 
-// Returns color-coded health display string for tables
 def getHealthDisplay(device) {
     def h       = health(device)
     def samples = state.history?.get(device.id)?.samples?.size() ?: 0
@@ -797,7 +822,6 @@ def formatTimeAgo(ts) {
 // ===================== BATTERY DISPLAY =====================
 // ============================================================
 def getBatteryLevelDisplay(level, device = null) {
-    // Dead battery overrides everything
     if (device && isBatteryDead(device)) {
         return "<span style='color:#ef4444;'>🪫 Dead</span>"
     }
@@ -890,7 +914,9 @@ def summaryPage() {
         section("") {
             paragraph "<span style='color:red; font-weight:bold;'>⚠ Device links below are accessible only on your local network (LAN). They will not work remotely.</span>"
             paragraph "<span style='color:red; font-weight:bold;'>¹ Last Battery</span> shows when this app last received a battery reading — from a scheduled scan or device event. It is independent of Last Activity. A device can be active recently but still show an old Last Battery timestamp if its battery level has not changed or reported."
-            href "forceScanPage", title: "🔄 Force Scan Now", description: "Tap to immediately read battery levels from all monitored devices"
+            href(name: "toForceScanFromSummary", page: "forceScanPage",
+                 title: "🔄 Force Scan Now",
+                 description: "Tap to immediately read battery levels from all monitored devices")
 
             def devList = (autoDevices ?: []).findAll {
                 try { it?.currentValue("battery") != null } catch (e) {
@@ -990,7 +1016,6 @@ def summaryPage() {
             }
 
             table += "</table>"
-
             paragraph "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>"
         }
     }
@@ -1003,7 +1028,9 @@ def trendsPage() {
     dynamicPage(name: "trendsPage", title: "Battery Trends", install: false) {
 
         section("") {
-            href "forceScanPage", title: "🔄 Force Scan Now", description: "Tap to immediately read battery levels from all monitored devices"
+            href(name: "toForceScanFromTrends", page: "forceScanPage",
+                 title: "🔄 Force Scan Now",
+                 description: "Tap to immediately read battery levels from all monitored devices")
             def devList = (autoDevices ?: []).findAll { it?.currentValue("battery") != null }
 
             if (!devList) { paragraph "No battery devices found for trends."; return }
@@ -1048,8 +1075,8 @@ def trendsPage() {
                                      devType.contains("carbonmonoxide")
                 def minSamples = isHighReporter ? 7 : 5
 
-                def trendColor   = trend == "Heavy Drain" ? "🔴" : trend == "Moderate" ? "🟠" : "🟢"
-                def color        = getBatteryLevelDisplay(level, device)
+                def trendColor    = trend == "Heavy Drain" ? "🔴" : trend == "Moderate" ? "🟠" : "🟢"
+                def color         = getBatteryLevelDisplay(level, device)
                 def healthDisplay = dead ? "<span style='color:#94a3b8;'>—</span>" : getHealthDisplay(device)
 
                 def qualityLabel
@@ -1091,7 +1118,9 @@ def trendsPage() {
                       "This clears accumulated samples and resets drain to default — health returns to ⏳ Pending. " +
                       "Use when a device shows incorrect Heavy Drain due to stale or inaccurate samples. " +
                       "<b>This does not log a battery replacement.</b>"
-            href "resetDrainPage", title: "🔄 Reset Drain History", description: "Select devices to reset"
+            href(name: "toResetDrain", page: "resetDrainPage",
+                 title: "🔄 Reset Drain History",
+                 description: "Select devices to reset")
         }
     }
 }
@@ -1127,7 +1156,8 @@ def resetDrainPage() {
                   defaultValue: false
         }
         section() {
-            href "resetDrainConfirmPage", title: "Submit Reset"
+            href(name: "toResetDrainConfirm", page: "resetDrainConfirmPage",
+                 title: "Submit Reset")
         }
     }
 }
@@ -1227,13 +1257,13 @@ def historyPage() {
             }
 
             table += "</table>"
-
             paragraph "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>"
             paragraph "<b>Legend:</b> <span style='color:green;'>A</span> = Automatic, <span style='color:blue;'>M</span> = Manual"
         }
 
         section("<b>Delete an Entry</b>") {
-            href "deleteHistoryPage", title: "🗑️ Delete a History Entry"
+            href(name: "toDeleteHistory", page: "deleteHistoryPage",
+                 title: "🗑️ Delete a History Entry")
         }
     }
 }
@@ -1266,7 +1296,8 @@ def deleteHistoryPage() {
                       defaultValue: false
             }
             section() {
-                href "deleteHistoryConfirmPage", title: "Submit"
+                href(name: "toDeleteHistoryConfirm", page: "deleteHistoryConfirmPage",
+                     title: "Submit")
             }
         }
     }
@@ -1329,7 +1360,8 @@ def manualReplacementPage() {
                   required: false
         }
         section() {
-            href "manualReplacementConfirmPage", title: "Submit Replacement"
+            href(name: "toManualRepConfirm", page: "manualReplacementConfirmPage",
+                 title: "Submit Replacement")
         }
     }
 }
@@ -1408,6 +1440,7 @@ def sendNotificationPage() {
                            (settings?.pushoverDevices?.size() ?: 0) > 0 ||
                            (settings?.enablePush == true)
         def notifyOn     = settings?.enablePush != false
+        def snoozed      = state.notifSnoozedUntil && state.notifSnoozedUntil >= now()
 
         if (!hasDevices) {
             section("<b>Cannot Send</b>") {
@@ -1430,6 +1463,13 @@ def sendNotificationPage() {
             return
         }
 
+        if (snoozed) {
+            def hoursLeft = Math.ceil((state.notifSnoozedUntil - now()) / 3600000).toInteger()
+            section("<b>⚠️ Notifications Snoozed</b>") {
+                paragraph "😴 Notifications are currently snoozed for ${hoursLeft}h. This send will bypass the snooze and send immediately."
+            }
+        }
+
         section("<b>Confirm</b>") {
             paragraph "This will send a battery summary notification to all configured notification devices right now."
             input "sendNowConfirm", "bool",
@@ -1439,7 +1479,11 @@ def sendNotificationPage() {
         }
         if (settings?.sendNowConfirm) {
             section("<b>Result</b>") {
+                // Temporarily bypass snooze for manual send
+                def savedSnooze = state.notifSnoozedUntil
+                state.notifSnoozedUntil = 0
                 scheduledSummary()
+                state.notifSnoozedUntil = savedSnooze
                 app.updateSetting("sendNowConfirm", [value: false, type: "bool"])
 
                 def sentTo = []
@@ -1518,7 +1562,6 @@ def batteryCatalogPage() {
         ]
 
         def options = ["": "— Not Set —"]
-
         options["_sep1"] = "──────── Standard ────────"
         standardTypes.each { type, quantities ->
             quantities.each { qty ->
@@ -1526,7 +1569,6 @@ def batteryCatalogPage() {
                 options[key] = key
             }
         }
-
         options["_sep2"] = "──────── Rechargeable ────────"
         rechargeableTypes.each { type, quantities ->
             quantities.each { qty ->
@@ -1534,7 +1576,6 @@ def batteryCatalogPage() {
                 options[key] = key
             }
         }
-
         options["_sep3"] = "──────── Other ────────"
         otherTypes.each { type, quantities ->
             quantities.each { qty ->
@@ -1609,26 +1650,34 @@ def infoPage(Map params = [:]) {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>The app withholds a health verdict and shows <b>⏳ Pending</b> until enough data is collected. " +
                       "This prevents false Poor ratings from sparse early readings.<br><br>" +
                       "<b>Standard gate</b> — both must be met:<br>" +
-                      "• At least <b>5 samples</b> collected (7 for locks, sensors, smoke, and CO detectors — these device types report less frequently or have higher baseline drain)<br>" +
+                      "• At least <b>5 samples</b> collected (7 for locks, sensors, smoke, and CO detectors)<br>" +
                       "• At least <b>5 days</b> since the battery was replaced or first seen<br><br>" +
                       "<b>Slow reporter gate</b> — for devices like smoke detectors that rarely report:<br>" +
-                      "• After <b>14 days</b> with at least <b>2 samples</b>, Pending clears automatically<br>" +
-                      "• A stable reading held for 24+ hours counts as a valid zero-drain sample<br><br>" +
+                      "• After <b>14 days</b> with at least <b>2 samples</b>, Pending clears automatically<br><br>" +
                       "<b>Note:</b> Updating or reinstalling the app resets the sample timing gates. All devices will return to Pending temporarily while fresh data is collected.<br><br>" +
                       "<b>Confidence weighting:</b> Early readings carry less weight than established ones. " +
-                      "With 5 samples the blend is partial — by 10 samples the full measured drain is used. " +
-                      "A single unusual reading cannot spike a device straight to Poor.</div>"
+                      "With 5 samples the blend is partial — by 10 samples the full measured drain is used.</div>"
         }
 
         section("<b>🔍 Drain, Estimated Days & Last Battery</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Drain shows how fast a device uses battery (% per day). " +
-                      "Calculated using EWMA (exponential weighted moving average) across the last 10 readings — " +
-                      "recent readings matter slightly more but a single spike won't throw off the average.<br><br>" +
-                      "<b>Estimated days remaining</b> = current level ÷ average daily drain. " +
-                      "Works best after 7+ days of history. Devices showing Pending will have less reliable estimates.<br><br>" +
+                      "Calculated using EWMA (exponential weighted moving average) across the last 10 readings.<br><br>" +
+                      "<b>Estimated days remaining</b> = current level ÷ average daily drain.<br><br>" +
                       "<b>Last Battery</b> shows when the app last received a battery reading — from a scheduled scan or device event. " +
-                      "It is independent of Last Activity. A device can be recently active but show an old Last Battery timestamp " +
-                      "if its battery level has not changed or reported. This is normal.</div>"
+                      "It is independent of Last Activity.</div>"
+        }
+
+        section("<b>😴 Notification Snooze</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "The <b>Notification Snooze</b> feature on the main page silences all Battery Monitor notifications for a configurable number of days.<br><br>" +
+                      "This is useful when you are traveling, on vacation, or otherwise unavailable to act on battery alerts. " +
+                      "Snoozing does not affect scanning — the app continues to collect battery data in the background.<br><br>" +
+                      "<b>While snoozed:</b><br>" +
+                      "• All scheduled notifications are suppressed<br>" +
+                      "• Battery data continues to be collected normally<br>" +
+                      "• The main page shows a banner with time remaining<br>" +
+                      "• Manual Send Notification Now bypasses the snooze and sends immediately<br><br>" +
+                      "Snooze expires automatically when the duration passes. You can also clear it early at any time from the main page.</div>"
         }
 
         section("") {
@@ -1639,12 +1688,9 @@ def infoPage(Map params = [:]) {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'><b>Force Scan Now</b> on the Summary and Trends pages immediately reads battery levels from all devices " +
                       "instead of waiting for the next scheduled scan.<br><br>" +
                       "<b>Force Scan does NOT instantly generate drain samples.</b> A sample requires the battery level to have " +
-                      "changed since the last reading, or 24+ hours to have passed at the same level. " +
-                      "The best way to build samples faster is to set Scan Interval to Hourly.<br><br>" +
+                      "changed since the last reading, or 24+ hours to have passed at the same level.<br><br>" +
                       "<b>Replacement detection</b> fires automatically when a device jumps from ≤40% up to ≥90–95%. " +
-                      "If replaced before dropping to 40%, log it manually to keep trends accurate.<br>" +
-                      "After any replacement, drain history resets and the device returns to ⏳ Pending. " +
-                      "The Recently Replaced tag clears after 24 hours.</div>"
+                      "If replaced before dropping to 40%, log it manually to keep trends accurate.</div>"
         }
 
         section("") {
@@ -1652,28 +1698,17 @@ def infoPage(Map params = [:]) {
         }
 
         section("<b>⚠️ High Drain Alerts & ⏱ Stale Devices</b>") {
-            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'><b>High Drain alert</b> fires when a device crosses into 🔴 Poor territory — drain exceeds 1.5%/day. " +
-                      "The alert and Health column always agree: if you see the alert, the device shows Poor.<br>" +
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'><b>High Drain alert</b> fires when a device crosses into 🔴 Poor territory — drain exceeds 1.5%/day.<br>" +
                       "🟠 Fair devices (0.8–1.5%/day) are worth monitoring but do not trigger an alert.<br><br>" +
                       "<b>Stale</b> means a device has not reported any activity within the configured threshold (default 24h). " +
-                      "Stale is based on Last Activity — not Last Battery. Check stale devices for connectivity issues.</div>"
+                      "Stale is based on Last Activity — not Last Battery.</div>"
         }
 
         section("<b>🔔 Notification Schedule (2, 3, Weekly)</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "<b>Notification frequency options</b> (2, 3, Weekly) determine how often alert summaries are sent based on accumulated alert conditions.<br><br>" +
-                      "<b>2 / 3 (interval-based notifications):</b><br>" +
-                      "• Notifications are evaluated on a rolling interval (every 2 or 3 days depending on selection)<br>" +
-                      "• The first notification is sent the day after the condition is first detected<br>" +
-                      "• Subsequent notifications follow the configured interval as long as the condition persists<br><br>" +
-                      "<b>Weekly notifications:</b><br>" +
-                      "• Notifications are anchored to a weekly cycle starting on <b>Monday</b><br>" +
-                      "• The first notification is sent the day after the condition is detected<br>" +
-                      "• After the initial notification, the system aligns to the weekly schedule and continues sending on the next Monday cycle if conditions remain<br><br>" +
-                      "<b>General behavior:</b><br>" +
-                      "• Notifications are not duplicated within the same interval window<br>" +
-                      "• Clearing a condition and re-triggering it will restart the notification cycle<br>" +
-                      "• Scheduling ensures a consistent cadence while avoiding immediate repeated alerts</div>"
+                      "<b>2 / 3 (interval-based):</b> Notifications sent on a rolling interval as long as conditions persist.<br><br>" +
+                      "<b>Weekly:</b> Notifications anchored to Monday. First notification sent the day after detection, then weekly on Mondays.<br><br>" +
+                      "Notifications are not duplicated within the same interval window.</div>"
         }
 
         section("") {
@@ -1681,38 +1716,23 @@ def infoPage(Map params = [:]) {
         }
 
         section("<b>⚙️ Device Adjustments & Troubleshooting</b>") {
-            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Some device types have adjusted drain calculations to avoid overestimating their drain rate:<br><br>" +
-                      "• <b>Locks</b> — drain adjusted down by 60% to account for motor load. Higher drain thresholds apply since locks genuinely consume more power per cycle. Requires 7 samples before exiting Pending.<br>" +
-                      "• <b>Sensors, contact sensors</b> — drain adjusted down by 50%, requires 7 samples before exiting Pending<br>" +
-                      "• <b>Smoke & CO detectors</b> — drain adjusted down by 50%, requires 7 samples, slow reporter gate applied<br>" +
-                      "• <b>Motion sensors</b> — covered under sensors above<br>" +
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Some device types have adjusted drain calculations:<br><br>" +
+                      "• <b>Locks</b> — drain adjusted down by 60%, higher thresholds, requires 7 samples<br>" +
+                      "• <b>Sensors, contact sensors</b> — drain adjusted down by 50%, requires 7 samples<br>" +
+                      "• <b>Smoke & CO detectors</b> — drain adjusted down by 50%, requires 7 samples, slow reporter gate<br>" +
                       "• Other types use the standard calculation (5 samples)<br><br>" +
                       "<b>If a device shows High Drain or Poor health after Pending:</b><br>" +
                       "• Check signal strength and mesh routing<br>" +
                       "• Verify reporting frequency in the device driver<br>" +
                       "• Confirm correct battery type in the Battery Catalog<br>" +
-                      "• Consider environmental factors (temperature, distance)<br>" +
-                      "• Devices reporting every few minutes may show higher apparent drain — compare with similar devices</div>"
+                      "• Consider environmental factors (temperature, distance)</div>"
         }
 
         section("<b>🔄 Reset Drain History</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'><b>Reset Drain History</b> is available at the bottom of the Battery Trends page. " +
                       "It clears accumulated drain samples and resets a device back to ⏳ Pending without logging a battery replacement.<br><br>" +
-                      "<b>When to use it:</b><br>" +
-                      "• A device shows 🔴 Heavy Drain but you know the battery is healthy<br>" +
-                      "• A lock, sensor, or smoke detector is showing inflated drain from stale early samples<br>" +
-                      "• You updated the app and want to clear old inaccurate drain data for specific devices<br>" +
-                      "• A device was moved, repaired, or had its reporting frequency changed<br><br>" +
-                      "<b>What it resets:</b><br>" +
-                      "• Drain samples array — cleared completely<br>" +
-                      "• Drain rate — reset to 0.3%/day default<br>" +
-                      "• Trend — reset to Stable<br>" +
-                      "• Health — returns to Pending until new samples are collected<br><br>" +
-                      "<b>What it does NOT change:</b><br>" +
-                      "• Battery replacement history<br>" +
-                      "• Last battery level or last seen date<br>" +
-                      "• Any other device state<br><br>" +
-                      "This action only runs when you explicitly submit it — it never fires automatically on app save or hub restart.</div>"
+                      "<b>What it resets:</b> drain samples, drain rate, trend, health.<br>" +
+                      "<b>What it does NOT change:</b> battery replacement history, last battery level, last seen date.</div>"
         }
 
         section("<b>💡 Tips for Best Results</b>") {
@@ -1721,10 +1741,9 @@ def infoPage(Map params = [:]) {
                       "• Set Scan Interval to Hourly to build health ratings faster<br>" +
                       "• After replacing a battery use Manual Replacement to reset history immediately<br>" +
                       "• Use Reset Drain History on locks and sensors if they show Heavy Drain after first install<br>" +
-                      "• Consistent low drain over time = healthy, well-placed device<br>" +
+                      "• Use Notification Snooze when traveling so you are not notified about batteries you cannot replace<br>" +
                       "• After updating the app, switch to Hourly scan temporarily to rebuild sample data faster</div>"
         }
     }
 }
-
 
