@@ -2,12 +2,12 @@ definition(
     name: "Device Health Monitor",
     namespace: "jdthomas24",
     author: "jdthomas24",
-    description: "Monitor device check-in health across Zigbee, Z-Wave, Matter, Hub Mesh and LAN — learns each device's normal pattern and alerts you when something goes quiet.",
+    description: "Monitor device check-in health across Zigbee, Z-Wave, Matter, Hub Mesh, LAN, Virtual and Hub Variable — learns each device's normal pattern and alerts you when something goes quiet.",
     category: "Convenience",
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
-    version: "1.1.0-beta",
+    version: "1.2.0",
     doNotFocus: true
 )
 
@@ -100,8 +100,20 @@ def getSnoozedHoursRemaining(deviceId) {
     return Math.ceil((until - now()) / 3600000).toInteger()
 }
 
+def formatSnoozeRemaining(deviceId) {
+    def until   = state.snoozed?.get(deviceId)
+    if (!until) return "expired"
+    def msLeft  = until - now()
+    def days    = (msLeft / 86400000).toInteger()
+    def hours   = ((msLeft % 86400000) / 3600000).toInteger()
+    def minutes = ((msLeft % 3600000) / 60000).toInteger()
+    if (days >= 1)  return "${days}d ${hours}h remaining"
+    if (hours >= 1) return "${hours}h ${minutes}m remaining"
+    return "${minutes}m remaining"
+}
+
 // ============================================================
-// ===================== HELPERS =============================
+// ===================== PROTOCOL DETECTION ==================
 // ============================================================
 def getAllMonitoredDevices() {
     return monitoredDevices ?: []
@@ -109,6 +121,20 @@ def getAllMonitoredDevices() {
 
 def getProtocol(device) {
     try {
+        // ── Hub Variable Connector ───────────────────────────
+        def driverName = (device.typeName ?: "").toLowerCase()
+        def devName    = (device.name     ?: "").toLowerCase()
+        if (driverName.contains("hub variable") || driverName.contains("variable connector") ||
+            devName.contains("hub variable")    || devName.contains("variable connector")) {
+            return "Hub Variable"
+        }
+
+        // ── Virtual ──────────────────────────────────────────
+        if (driverName.contains("virtual") || devName.contains("virtual")) {
+            return "Virtual"
+        }
+
+        // ── Radio protocols via controllerType ───────────────
         def devData = device.properties
         if (devData?.controllerType == "ZGB") return "Zigbee"
         if (devData?.controllerType == "ZWV") return "Z-Wave"
@@ -117,12 +143,12 @@ def getProtocol(device) {
         // Bluetooth (C-8 Pro only) — controllerType value unconfirmed, placeholder for future
         // if (devData?.controllerType == "BLE") return "Bluetooth"
 
-        // Zigbee fallbacks
+        // ── Zigbee fallbacks ─────────────────────────────────
         if (device.getDataValue("Endpoint Id")                != null) return "Zigbee"
         if (device.getDataValue("endpointId")                 != null) return "Zigbee"
         if (device.getDataValue("zigbeeNodeType")             != null) return "Zigbee"
         if (device.getDataValue("zigbeeId")                   != null) return "Zigbee"
-        // Z-Wave fallbacks
+        // ── Z-Wave fallbacks ─────────────────────────────────
         if (device.getDataValue("In Clusters")                != null) return "Z-Wave"
         if (device.getDataValue("inClusters")                 != null) return "Z-Wave"
         if (device.getDataValue("zwaveSecurePairingComplete") != null) return "Z-Wave"
@@ -138,14 +164,25 @@ def getProtocol(device) {
 
 def getProtocolColor(protocol) {
     switch (protocol) {
-        case "Zigbee":    return "#3b82f6"
-        case "Z-Wave":    return "#8b5cf6"
-        case "Matter":    return "#f97316"
-        case "Hub Mesh":  return "#06b6d4"
-        case "LAN":       return "#14b8a6"
-        case "Bluetooth": return "#06b6d4"
-        default:          return "#94a3b8"
+        case "Zigbee":       return "#3b82f6"
+        case "Z-Wave":       return "#8b5cf6"
+        case "Matter":       return "#f97316"
+        case "Hub Mesh":     return "#06b6d4"
+        case "LAN":          return "#14b8a6"
+        case "Virtual":      return "#ec4899"
+        case "Hub Variable": return "#eab308"
+        case "Bluetooth":    return "#06b6d4"
+        default:             return "#94a3b8"
     }
+}
+
+// ── Filtered sampling flag ───────────────────────────────────
+// Virtual and Hub Variable devices use filtered sampling —
+// only record a check-in sample when Last Seen is within the
+// scan interval. This prevents the baseline from inflating
+// during periods when rules are not running.
+def usesFilteredSampling(protocol) {
+    return protocol in ["Virtual", "Hub Variable"]
 }
 
 def isModeOK() {
@@ -178,7 +215,7 @@ def mainPage() {
         // ── Device Selection ─────────────────────────────────
         def devicesSelected = (monitoredDevices?.size() ?: 0) > 0
         section("<b>Monitored Devices</b>", hideable: true, hidden: devicesSelected) {
-            paragraph "<b>Select the devices you want to monitor.</b> Protocol (Zigbee, Z-Wave, Matter, Hub Mesh, LAN) is detected automatically."
+            paragraph "<b>Select the devices you want to monitor.</b> Protocol (Zigbee, Z-Wave, Matter, Hub Mesh, LAN, Virtual, Hub Variable) is detected automatically."
             paragraph "<span style='color:red; font-weight:bold;'>IMPORTANT: After selecting devices, you MUST click 'Done' before viewing reports.</span>"
             input "monitoredDevices", "capability.*",
                   title: "Select devices to monitor",
@@ -187,22 +224,26 @@ def mainPage() {
                   submitOnChange: true
         }
         if (devicesSelected) {
-            def allSelected  = monitoredDevices
-            def zigbeeCount  = allSelected.count { getProtocol(it) == "Zigbee" }
-            def zwaveCount   = allSelected.count { getProtocol(it) == "Z-Wave" }
-            def matterCount  = allSelected.count { getProtocol(it) == "Matter" }
-            def hubMeshCount = allSelected.count { getProtocol(it) == "Hub Mesh" }
-            def lanCount     = allSelected.count { getProtocol(it) == "LAN" }
-            def unknownCount = allSelected.count { getProtocol(it) == "Unknown" }
-            def totalCount   = allSelected.size()
+            def allSelected      = monitoredDevices
+            def zigbeeCount      = allSelected.count { getProtocol(it) == "Zigbee" }
+            def zwaveCount       = allSelected.count { getProtocol(it) == "Z-Wave" }
+            def matterCount      = allSelected.count { getProtocol(it) == "Matter" }
+            def hubMeshCount     = allSelected.count { getProtocol(it) == "Hub Mesh" }
+            def lanCount         = allSelected.count { getProtocol(it) == "LAN" }
+            def virtualCount     = allSelected.count { getProtocol(it) == "Virtual" }
+            def hubVarCount      = allSelected.count { getProtocol(it) == "Hub Variable" }
+            def unknownCount     = allSelected.count { getProtocol(it) == "Unknown" }
+            def totalCount       = allSelected.size()
             section("") {
                 paragraph "<b><span style='color:blue;'>${totalCount} device(s) selected</span></b> — " +
                           "Zigbee: <b><span style='color:#3b82f6;'>${zigbeeCount}</span></b> | " +
                           "Z-Wave: <b><span style='color:#8b5cf6;'>${zwaveCount}</span></b> | " +
                           "Matter: <b><span style='color:#f97316;'>${matterCount}</span></b> | " +
                           "Hub Mesh: <b><span style='color:#06b6d4;'>${hubMeshCount}</span></b> | " +
-                          "LAN: <b><span style='color:#14b8a6;'>${lanCount}</span></b>" +
-                          (unknownCount > 0 ? " | <span style='color:orange;'>Unknown: <b><span style='color:orange;'>${unknownCount}</span></b> (these will be skipped)</span>" : "") +
+                          "LAN: <b><span style='color:#14b8a6;'>${lanCount}</span></b> | " +
+                          "Virtual: <b><span style='color:#ec4899;'>${virtualCount}</span></b> | " +
+                          "Hub Variable: <b><span style='color:#eab308;'>${hubVarCount}</span></b>" +
+                          (unknownCount > 0 ? " | <span style='color:orange;'>Unknown: <b>${unknownCount}</b> (skipped)</span>" : "") +
                           " — Tap <b>Monitored Devices</b> above to change."
             }
         }
@@ -214,13 +255,13 @@ def mainPage() {
         }
 
         // ── Scan Interval ────────────────────────────────────
-        def scanIntervalLabel = ["1": "Hourly", "3": "Every 3 Hours", "6": "Every 6 Hours"]
+        def scanIntervalLabel = ["0.5": "Every 30 Minutes", "1": "Hourly", "3": "Every 3 Hours", "6": "Every 6 Hours"]
         def currentScan = scanIntervalLabel[settings?.scanInterval ?: "3"] ?: "Every 3 Hours"
         section("<b>Device Scan Interval</b>", hideable: true, hidden: true) {
             paragraph "How often device activity is checked and health ratings are updated."
             input "scanInterval", "enum",
                   title: "Scan Frequency:",
-                  options: ["1": "Hourly", "3": "Every 3 Hours", "6": "Every 6 Hours"],
+                  options: ["0.5": "Every 30 Minutes", "1": "Hourly", "3": "Every 3 Hours", "6": "Every 6 Hours"],
                   defaultValue: "3",
                   submitOnChange: true
         }
@@ -388,16 +429,17 @@ def scheduleReportFrequency() {
 
 def scheduleScanInterval() {
     unschedule("scanAllDevices")
-    def interval = (settings?.scanInterval ?: "3").toInteger()
+    def intervalStr = settings?.scanInterval ?: "3"
     def cronExpr = ""
-    switch (interval) {
-        case 1:  cronExpr = "0 0 * * * ?";   break
-        case 3:  cronExpr = "0 0 */3 * * ?"; break
-        case 6:  cronExpr = "0 0 */6 * * ?"; break
-        default: cronExpr = "0 0 */3 * * ?"; break
+    switch (intervalStr) {
+        case "0.5": cronExpr = "0 */30 * * * ?"; break
+        case "1":   cronExpr = "0 0 * * * ?";    break
+        case "3":   cronExpr = "0 0 */3 * * ?";  break
+        case "6":   cronExpr = "0 0 */6 * * ?";  break
+        default:    cronExpr = "0 0 */3 * * ?";  break
     }
     schedule(cronExpr, scanAllDevices)
-    if (debugEnabled()) log.debug "Device scan scheduled every ${interval}h (cron: ${cronExpr})"
+    if (debugEnabled()) log.debug "Device scan scheduled: ${cronExpr}"
 }
 
 def reportScheduler() {
@@ -436,10 +478,17 @@ def scanAllDevices() {
     def devList = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
     if (!devList) return
     if (debugEnabled()) log.debug "Running scheduled device scan for ${devList.size()} device(s)"
+
+    // Scan interval in minutes — used for filtered sampling gate
+    def intervalStr     = settings?.scanInterval ?: "3"
+    def intervalMinutes = (intervalStr.toFloat() * 60).toInteger()
+
     devList.each { device ->
         try {
-            def id   = device.id
-            def data = state.history[id]
+            def id       = device.id
+            def data     = state.history[id]
+            def protocol = getProtocol(device)
+            def filtered = usesFilteredSampling(protocol)
 
             def lastActivity = device.getLastActivity()
             def lastSeen     = lastActivity ? safeTime(lastActivity) : now()
@@ -452,31 +501,45 @@ def scanAllDevices() {
                     avgInterval:    null,
                     userInterval:   null,
                     missedCheckins: 0,
-                    protocol:       getProtocol(device)
+                    protocol:       protocol
                 ]
                 state.health[id] = "Pending"
-                if (debugEnabled()) log.debug "Seeded ${device.displayName} from lastActivity: ${formatTimeAgo(lastSeen)}"
+                if (debugEnabled()) log.debug "Seeded ${device.displayName} (${protocol}) from lastActivity: ${formatTimeAgo(lastSeen)}"
             } else {
                 def prevLastSeen = data.lastSeen ?: lastSeen
                 if (lastSeen > prevLastSeen) {
                     def elapsed = (lastSeen - prevLastSeen) / (1000 * 60)
                     if (elapsed >= 10) {
-                        def alpha      = 0.3
-                        def prevSmooth = (data.samples && data.samples.size() > 0) ? data.samples[-1] : elapsed
-                        def smoothed   = alpha * elapsed + (1 - alpha) * prevSmooth
-                        data.samples << smoothed
-                        if (data.samples.size() > 20) data.samples.remove(0)
-                        if (data.samples.size() >= 3) {
-                            data.avgInterval = data.samples.sum() / data.samples.size()
+                        // ── Filtered sampling for Virtual & Hub Variable ──
+                        // Only record a sample if the device checked in within
+                        // the scan interval — meaning it actually fired recently.
+                        // This prevents long idle periods from inflating the baseline.
+                        def recordSample = true
+                        if (filtered) {
+                            recordSample = elapsed <= (intervalMinutes * 1.5)
+                            if (!recordSample && debugEnabled()) {
+                                log.debug "${device.displayName} (${protocol}): skipping sample — elapsed ${elapsed.toInteger()}min exceeds filter gate ${(intervalMinutes * 1.5).toInteger()}min"
+                            }
                         }
-                        if (debugEnabled()) log.debug "${device.displayName}: new activity interval=${elapsed.toInteger()}min smoothed=${smoothed.toInteger()}min avg=${data.avgInterval?.toInteger()}min"
+
+                        if (recordSample) {
+                            def alpha      = 0.3
+                            def prevSmooth = (data.samples && data.samples.size() > 0) ? data.samples[-1] : elapsed
+                            def smoothed   = alpha * elapsed + (1 - alpha) * prevSmooth
+                            data.samples << smoothed
+                            if (data.samples.size() > 20) data.samples.remove(0)
+                            if (data.samples.size() >= 3) {
+                                data.avgInterval = data.samples.sum() / data.samples.size()
+                            }
+                            if (debugEnabled()) log.debug "${device.displayName} (${protocol}): interval=${elapsed.toInteger()}min smoothed=${smoothed.toInteger()}min avg=${data.avgInterval?.toInteger()}min"
+                        }
                     }
                     data.lastSeen    = lastSeen
                     data.lastCheckin = lastSeen
                 } else {
                     if (debugEnabled()) log.debug "${device.displayName}: no new activity since last scan"
                 }
-                data.protocol = getProtocol(device)
+                data.protocol = protocol
                 updateHealth(device)
             }
         } catch (e) {
@@ -528,8 +591,8 @@ def getHealthDisplay(device) {
     def snoozed = isDeviceSnoozed(device.id as String)
 
     if (snoozed) {
-        def hoursLeft = getSnoozedHoursRemaining(device.id as String)
-        return "😴 <span style='color:#94a3b8;'>Snoozed (${hoursLeft}h remaining)</span>"
+        def remaining = formatSnoozeRemaining(device.id as String)
+        return "😴 <span style='color:#94a3b8;'>Snoozed (${remaining})</span>"
     }
 
     if (h == "Pending") {
@@ -716,12 +779,12 @@ def snoozeManagePage() {
         section("<b>Currently Snoozed</b>") {
             if (snoozedList) {
                 paragraph snoozedList.collect { device ->
-                    "😴 ${device.displayName} — ${getSnoozedHoursRemaining(device.id as String)}h remaining"
+                    "😴 ${device.displayName} — ${formatSnoozeRemaining(device.id as String)}"
                 }.join("\n")
 
                 input "devicesToUnsnooze", "enum",
                       title: "Select devices to unsnooze early:",
-                      options: snoozedList.collectEntries { [(it.id): "${it.displayName} (${getSnoozedHoursRemaining(it.id as String)}h remaining)"] }
+                      options: snoozedList.collectEntries { [(it.id): "${it.displayName} (${formatSnoozeRemaining(it.id as String)})"] }
                                          .sort { a, b -> a.value <=> b.value },
                       multiple: true,
                       required: false
@@ -1045,7 +1108,7 @@ def infoPage(Map params = [:]) {
                       "Device Health Monitor tracks how frequently your devices check in with the hub. " +
                       "It learns each device's normal check-in pattern and flags anything that goes quiet, checks in late, or drops offline.<br><br>" +
                       "This is different from battery monitoring — a device can have a full battery but still have mesh or connectivity issues. " +
-                      "It also monitors LAN, cloud, and app-created devices, making it useful for catching broken integrations and automations that have stopped firing.</div>"
+                      "It also monitors LAN, cloud, virtual devices, and hub variable connectors, making it useful for catching broken integrations and automations that have stopped firing.</div>"
         }
 
         section("<b>🔑 Health Ratings</b>") {
@@ -1067,23 +1130,40 @@ def infoPage(Map params = [:]) {
                       "<tr><td><span style='color:#8b5cf6;font-weight:bold;'>Purple</span></td><td>Z-Wave</td></tr>" +
                       "<tr><td><span style='color:#f97316;font-weight:bold;'>Orange</span></td><td>Matter</td></tr>" +
                       "<tr><td><span style='color:#06b6d4;font-weight:bold;'>Cyan</span></td><td>Hub Mesh</td></tr>" +
-                      "<tr><td><span style='color:#14b8a6;font-weight:bold;'>Teal</span></td><td>LAN / Cloud / Virtual</td></tr>" +
+                      "<tr><td><span style='color:#14b8a6;font-weight:bold;'>Teal</span></td><td>LAN / Cloud</td></tr>" +
+                      "<tr><td><span style='color:#ec4899;font-weight:bold;'>Pink</span></td><td>Virtual</td></tr>" +
+                      "<tr><td><span style='color:#eab308;font-weight:bold;'>Yellow</span></td><td>Hub Variable</td></tr>" +
                       "</table></div></div>"
         }
 
         section("<b>⏳ Baseline Learning</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
                       "Each device starts as <b>⏳ Pending</b> while the app learns its normal check-in frequency. " +
-                      "After 3 samples the app calculates a baseline using EWMA smoothing — the same approach used in Battery Monitor 2.0.<br><br>" +
+                      "After 3 samples the app calculates a baseline using EWMA smoothing.<br><br>" +
                       "The baseline adapts continuously as new check-ins arrive. " +
                       "Use Reset Device History if a device's baseline needs to be cleared after a mesh change or hardware swap.</div>"
+        }
+
+        section("<b>🔀 Virtual & Hub Variable Devices</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "Virtual devices and hub variable connectors are now detected as separate protocols and displayed in their own colors.<br><br>" +
+                      "<b><span style='color:#ec4899;'>Virtual</span> devices</b> — virtual switches, sensors, and other app-created virtual devices. " +
+                      "These fire on demand rather than on a fixed schedule.<br><br>" +
+                      "<b><span style='color:#eab308;'>Hub Variable</span> connectors</b> — devices linked to hub variables in Rule Machine. " +
+                      "These only update when a rule runs — making them excellent canaries for broken automations. " +
+                      "A hub variable connector showing Fair, Poor, or Offline is a strong signal that a Rule Machine rule has stopped running.<br><br>" +
+                      "<b>Filtered sampling:</b> Both protocols use a filtered EWMA baseline. " +
+                      "Only check-ins that occurred within the scan interval are recorded as samples. " +
+                      "This prevents the baseline from inflating during periods when rules are not running, giving a more accurate picture of whether a device is actually firing when expected.<br><br>" +
+                      "After updating to v1.2.0 these devices will be re-identified on the next scan and their baselines will begin using filtered sampling automatically. " +
+                      "Devices may briefly return to Pending while the filtered baseline rebuilds — this clears within a few scan cycles.</div>"
         }
 
         section("<b>😴 Snooze</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
                       "Use <b>Manage Snoozed Devices</b> from the main page or Activity Summary to snooze individual devices. " +
                       "Snoozed devices are excluded from notifications and the Problem Devices page for the configured snooze duration (default 24h).<br><br>" +
-                      "Snoozed devices still appear in the Activity Summary with a 😴 indicator and a countdown showing hours remaining. " +
+                      "Snoozed devices still appear in the Activity Summary with a 😴 indicator and a countdown showing time remaining. " +
                       "You can unsnooze devices early at any time. Snoozes expire automatically when the duration passes.</div>"
         }
 
@@ -1095,20 +1175,21 @@ def infoPage(Map params = [:]) {
                       "• <span style='color:#8b5cf6;font-weight:bold;'>Z-Wave</span> — directly paired Z-Wave devices<br>" +
                       "• <span style='color:#f97316;font-weight:bold;'>Matter</span> — Matter devices<br>" +
                       "• <span style='color:#06b6d4;font-weight:bold;'>Hub Mesh</span> — devices linked from another Hubitat hub<br>" +
-                      "• <span style='color:#14b8a6;font-weight:bold;'>LAN</span> — local integrations (Hue, Shelly), cloud integrations (Govee, Tesla, Ecobee), and app-created devices<br><br>" +
+                      "• <span style='color:#14b8a6;font-weight:bold;'>LAN</span> — local integrations (Hue, Shelly), cloud integrations (Govee, Tesla, Ecobee)<br>" +
+                      "• <span style='color:#ec4899;font-weight:bold;'>Virtual</span> — virtual switches, sensors, and app-created virtual devices<br>" +
+                      "• <span style='color:#eab308;font-weight:bold;'>Hub Variable</span> — hub variable connector devices<br><br>" +
                       "<b>Notes:</b><br>" +
-                      "• Virtual switches appear as LAN — simply don't select them if you don't want them monitored<br>" +
-                      "• App-created child devices appear as LAN — monitoring these is useful for detecting broken automations<br>" +
-                      "• Hub variable connector devices going stale indicate a broken Rule Machine rule<br>" +
-                      "• Bluetooth devices (C-8 Pro only) will appear as LAN until a controllerType value is confirmed</div>"
+                      "• Bluetooth devices (C-8 Pro only) will appear as LAN until a controllerType value is confirmed<br>" +
+                      "• If you do not want to monitor a virtual device, simply don't select it</div>"
         }
 
         section("<b>💡 Tips for Best Results</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
                       "• Let devices run for at least a day before trusting health ratings<br>" +
                       "• Set Scan Interval to Hourly to build baselines faster<br>" +
+                      "• Use Every 30 Minutes for virtual devices or hub variable connectors tied to frequent automations<br>" +
                       "• Devices that only wake on events (motion, contact) will have longer natural intervals — this is normal<br>" +
-                      "• App-created devices that haven't fired in a long time will show 💀 Offline — useful for spotting broken automations<br>" +
+                      "• A hub variable connector showing Offline means the Rule Machine rule tied to that variable has stopped running<br>" +
                       "• No hub event subscriptions are used — all monitoring is done via scheduled scans of Hubitat's Last Activity data<br>" +
                       "• Use Mode Restriction to suppress notifications during certain hub modes (e.g. Away, Night)</div>"
         }
