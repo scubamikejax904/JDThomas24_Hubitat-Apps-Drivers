@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
-    version: "1.2.0",
+    version: "1.2.1",
     doNotFocus: true
 )
 
@@ -20,6 +20,7 @@ preferences {
     page(name: "resetHistoryPage")
     page(name: "resetHistoryConfirmPage")
     page(name: "snoozeManagePage")
+    page(name: "protocolOverridePage")
     page(name: "infoPage")
 }
 
@@ -121,6 +122,10 @@ def getAllMonitoredDevices() {
 
 def getProtocol(device) {
     try {
+        // ── User override — always wins ──────────────────────
+        def override = settings["protocolOverride_${device.id}"]
+        if (override && override != "" && override != "Auto-detect") return override
+
         // ── Hub Variable Connector ───────────────────────────
         def driverName = (device.typeName ?: "").toLowerCase()
         def devName    = (device.name     ?: "").toLowerCase()
@@ -136,10 +141,46 @@ def getProtocol(device) {
 
         // ── Radio protocols via controllerType ───────────────
         def devData = device.properties
+
+        // ── Hub Mesh — detect underlying protocol ────────────
+        if (devData?.controllerType == "LNK") {
+            // Encoding data value (LUMI/Aqara devices carry this)
+            def encoding = device.getDataValue("Encoding")
+            if (encoding?.toLowerCase() == "zigbee")                          return "Hub Mesh (Zigbee)"
+            if (encoding?.toLowerCase() == "z-wave")                          return "Hub Mesh (Z-Wave)"
+
+            // Zigbee cluster data values preserved on linked device
+            if (device.getDataValue("In Clusters")  != null)                  return "Hub Mesh (Zigbee)"
+            if (device.getDataValue("inClusters")   != null)                  return "Hub Mesh (Zigbee)"
+            if (device.getDataValue("Out Clusters") != null)                  return "Hub Mesh (Zigbee)"
+            if (device.getDataValue("outClusters")  != null)                  return "Hub Mesh (Zigbee)"
+            if (device.getDataValue("zigbeeId")     != null)                  return "Hub Mesh (Zigbee)"
+            if (device.getDataValue("zigbeeNodeType") != null)                return "Hub Mesh (Zigbee)"
+
+            // Z-Wave data values preserved on linked device
+            if (device.getDataValue("zwaveSecurePairingComplete") != null)    return "Hub Mesh (Z-Wave)"
+            if (device.getDataValue("secureInClusters")           != null)    return "Hub Mesh (Z-Wave)"
+            if (device.getDataValue("Zw Node Info")               != null)    return "Hub Mesh (Z-Wave)"
+
+            // Driver name heuristics — last resort
+            if (driverName.contains("zigbee"))                                return "Hub Mesh (Zigbee)"
+            if (driverName.contains("z-wave") || driverName.contains("zwave")) return "Hub Mesh (Z-Wave)"
+            if (driverName.contains("matter"))                                return "Hub Mesh (Matter)"
+
+            // Manufacturer/model heuristics for known Zigbee vendors
+            def manufacturer = (device.getDataValue("Manufacturer") ?: "").toLowerCase()
+            if (manufacturer in ["centralite", "lumi", "ikea", "sengled",
+                                 "osram", "philips", "samsung", "smartthings",
+                                 "sonoff", "tuya", "third reality"]) {
+                return "Hub Mesh (Zigbee)"
+            }
+
+            return "Hub Mesh"
+        }
+
         if (devData?.controllerType == "ZGB") return "Zigbee"
         if (devData?.controllerType == "ZWV") return "Z-Wave"
         if (devData?.controllerType == "MAT") return "Matter"
-        if (devData?.controllerType == "LNK") return "Hub Mesh"
         // Bluetooth (C-8 Pro only) — controllerType value unconfirmed, placeholder for future
         // if (devData?.controllerType == "BLE") return "Bluetooth"
 
@@ -164,23 +205,25 @@ def getProtocol(device) {
 
 def getProtocolColor(protocol) {
     switch (protocol) {
-        case "Zigbee":       return "#3b82f6"
-        case "Z-Wave":       return "#8b5cf6"
-        case "Matter":       return "#f97316"
-        case "Hub Mesh":     return "#06b6d4"
-        case "LAN":          return "#14b8a6"
-        case "Virtual":      return "#ec4899"
-        case "Hub Variable": return "#eab308"
-        case "Bluetooth":    return "#06b6d4"
-        default:             return "#94a3b8"
+        case "Zigbee":             return "#3b82f6"
+        case "Hub Mesh (Zigbee)":  return "#3b82f6"
+        case "Z-Wave":             return "#8b5cf6"
+        case "Hub Mesh (Z-Wave)":  return "#8b5cf6"
+        case "Matter":             return "#f97316"
+        case "Hub Mesh (Matter)":  return "#f97316"
+        case "Hub Mesh":           return "#06b6d4"
+        case "LAN":                return "#14b8a6"
+        case "Virtual":            return "#ec4899"
+        case "Hub Variable":       return "#eab308"
+        case "Bluetooth":          return "#06b6d4"
+        default:                   return "#94a3b8"
     }
 }
 
-// ── Filtered sampling flag ───────────────────────────────────
-// Virtual and Hub Variable devices use filtered sampling —
-// only record a check-in sample when Last Seen is within the
-// scan interval. This prevents the baseline from inflating
-// during periods when rules are not running.
+def isUnresolvableProtocol(protocol) {
+    return protocol in ["Hub Mesh", "LAN"]
+}
+
 def usesFilteredSampling(protocol) {
     return protocol in ["Virtual", "Hub Variable"]
 }
@@ -215,7 +258,7 @@ def mainPage() {
         // ── Device Selection ─────────────────────────────────
         def devicesSelected = (monitoredDevices?.size() ?: 0) > 0
         section("<b>Monitored Devices</b>", hideable: true, hidden: devicesSelected) {
-            paragraph "<b>Select the devices you want to monitor.</b> Protocol (Zigbee, Z-Wave, Matter, Hub Mesh, LAN, Virtual, Hub Variable) is detected automatically."
+            paragraph "<b>Select the devices you want to monitor.</b> Protocol is detected automatically."
             paragraph "<span style='color:red; font-weight:bold;'>IMPORTANT: After selecting devices, you MUST click 'Done' before viewing reports.</span>"
             input "monitoredDevices", "capability.*",
                   title: "Select devices to monitor",
@@ -224,16 +267,17 @@ def mainPage() {
                   submitOnChange: true
         }
         if (devicesSelected) {
-            def allSelected      = monitoredDevices
-            def zigbeeCount      = allSelected.count { getProtocol(it) == "Zigbee" }
-            def zwaveCount       = allSelected.count { getProtocol(it) == "Z-Wave" }
-            def matterCount      = allSelected.count { getProtocol(it) == "Matter" }
-            def hubMeshCount     = allSelected.count { getProtocol(it) == "Hub Mesh" }
-            def lanCount         = allSelected.count { getProtocol(it) == "LAN" }
-            def virtualCount     = allSelected.count { getProtocol(it) == "Virtual" }
-            def hubVarCount      = allSelected.count { getProtocol(it) == "Hub Variable" }
-            def unknownCount     = allSelected.count { getProtocol(it) == "Unknown" }
-            def totalCount       = allSelected.size()
+            def allSelected          = monitoredDevices
+            def zigbeeCount          = allSelected.count { getProtocol(it) in ["Zigbee", "Hub Mesh (Zigbee)"] }
+            def zwaveCount           = allSelected.count { getProtocol(it) in ["Z-Wave", "Hub Mesh (Z-Wave)"] }
+            def matterCount          = allSelected.count { getProtocol(it) in ["Matter", "Hub Mesh (Matter)"] }
+            def hubMeshCount         = allSelected.count { getProtocol(it) == "Hub Mesh" }
+            def lanCount             = allSelected.count { getProtocol(it) == "LAN" }
+            def virtualCount         = allSelected.count { getProtocol(it) == "Virtual" }
+            def hubVarCount          = allSelected.count { getProtocol(it) == "Hub Variable" }
+            def unknownCount         = allSelected.count { getProtocol(it) == "Unknown" }
+            def totalCount           = allSelected.size()
+            def unresolvableCount    = allSelected.count { isUnresolvableProtocol(getProtocol(it)) }
             section("") {
                 paragraph "<b><span style='color:blue;'>${totalCount} device(s) selected</span></b> — " +
                           "Zigbee: <b><span style='color:#3b82f6;'>${zigbeeCount}</span></b> | " +
@@ -244,6 +288,7 @@ def mainPage() {
                           "Virtual: <b><span style='color:#ec4899;'>${virtualCount}</span></b> | " +
                           "Hub Variable: <b><span style='color:#eab308;'>${hubVarCount}</span></b>" +
                           (unknownCount > 0 ? " | <span style='color:orange;'>Unknown: <b>${unknownCount}</b> (skipped)</span>" : "") +
+                          (unresolvableCount > 0 ? "<br><span style='color:#94a3b8;'>⚠ ${unresolvableCount} device(s) could not be fully identified — tap <b>Protocol Overrides</b> below to set manually.</span>" : "") +
                           " — Tap <b>Monitored Devices</b> above to change."
             }
         }
@@ -387,6 +432,9 @@ def mainPage() {
             href(name: "toSnoozeManage", page: "snoozeManagePage",
                  title: "😴 Manage Snoozed Devices",
                  description: "Snooze devices or clear active snoozes")
+            href(name: "toProtocolOverride", page: "protocolOverridePage",
+                 title: "🔧 Protocol Overrides",
+                 description: "Manually set protocol for devices that could not be auto-detected")
         }
 
         // ── Help ─────────────────────────────────────────────
@@ -479,7 +527,6 @@ def scanAllDevices() {
     if (!devList) return
     if (debugEnabled()) log.debug "Running scheduled device scan for ${devList.size()} device(s)"
 
-    // Scan interval in minutes — used for filtered sampling gate
     def intervalStr     = settings?.scanInterval ?: "3"
     def intervalMinutes = (intervalStr.toFloat() * 60).toInteger()
 
@@ -510,10 +557,6 @@ def scanAllDevices() {
                 if (lastSeen > prevLastSeen) {
                     def elapsed = (lastSeen - prevLastSeen) / (1000 * 60)
                     if (elapsed >= 10) {
-                        // ── Filtered sampling for Virtual & Hub Variable ──
-                        // Only record a sample if the device checked in within
-                        // the scan interval — meaning it actually fired recently.
-                        // This prevents long idle periods from inflating the baseline.
                         def recordSample = true
                         if (filtered) {
                             recordSample = elapsed <= (intervalMinutes * 1.5)
@@ -694,12 +737,15 @@ def activitySummaryPage() {
                                data?.avgInterval  ? formatInterval(data.avgInterval) : "Learning..."
                 def samples  = data?.samples?.size() ?: 0
                 def snoozed  = isDeviceSnoozed(device.id as String)
+                def hasOverride = settings["protocolOverride_${device.id}"] &&
+                                  settings["protocolOverride_${device.id}"] != "Auto-detect"
                 def rowBg    = snoozed ? "#f8f8f8" : (rowNum % 2 == 0) ? "#ffffff" : "#ebebeb"
+                def protocolDisplay = hasOverride ? "${protocol} <span style='color:#94a3b8;font-size:10px;'>(override)</span>" : protocol
                 rowNum++
 
                 table += "<tr style='background-color:${rowBg};${snoozed ? "opacity:0.6;" : ""}'>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${device.displayName}</td>"
-                table += "<td style='padding:4px; border:1px solid #ccc;'><span style='color:${getProtocolColor(protocol)};font-weight:bold;'>${protocol}</span></td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'><span style='color:${getProtocolColor(protocol)};font-weight:bold;'>${protocolDisplay}</span></td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${getHealthDisplay(device)}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${lastSeen}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${avgInt}</td>"
@@ -716,6 +762,62 @@ def activitySummaryPage() {
             href(name: "toResetHistory", page: "resetHistoryPage",
                  title: "🔄 Reset Device History",
                  description: "Select devices to reset")
+        }
+    }
+}
+
+// ============================================================
+// ===================== PROTOCOL OVERRIDE PAGE ==============
+// ============================================================
+def protocolOverridePage() {
+    def devList = getAllMonitoredDevices()
+        .findAll { isUnresolvableProtocol(getProtocol(it)) }
+        .sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
+
+    dynamicPage(name: "protocolOverridePage", title: "🔧 Protocol Overrides", install: false) {
+        section("<b>About Protocol Overrides</b>") {
+            paragraph "Some Hub Mesh linked devices and LAN devices cannot be automatically identified. " +
+                      "Use this page to manually set the correct protocol for those devices.<br><br>" +
+                      "The override always takes priority over auto-detection. " +
+                      "If you set an override and auto-detection later improves to catch the device correctly, " +
+                      "the override will still win until you clear it back to <b>Auto-detect</b>."
+        }
+
+        if (!devList || devList.size() == 0) {
+            section("") {
+                paragraph "✅ All monitored devices have been successfully identified — no overrides needed."
+            }
+            return
+        }
+
+        section("<b>Unidentified Devices (${devList.size()})</b>") {
+            paragraph "The following devices are currently showing as <b>Hub Mesh</b> or <b>LAN</b> because their underlying protocol could not be determined automatically. Select the correct protocol for each device below."
+            devList.each { device ->
+                def currentProtocol = getProtocol(device)
+                def currentOverride = settings["protocolOverride_${device.id}"] ?: "Auto-detect"
+                input "protocolOverride_${device.id}",
+                      "enum",
+                      title: "<b>${device.displayName}</b> — currently: <span style='color:${getProtocolColor(currentProtocol)};'>${currentProtocol}</span>",
+                      options: [
+                          "Auto-detect",
+                          "Zigbee",
+                          "Z-Wave",
+                          "Matter",
+                          "Hub Mesh (Zigbee)",
+                          "Hub Mesh (Z-Wave)",
+                          "Hub Mesh (Matter)",
+                          "Hub Mesh",
+                          "LAN",
+                          "Virtual",
+                          "Hub Variable"
+                      ],
+                      defaultValue: currentOverride,
+                      required: false
+            }
+        }
+
+        section("") {
+            paragraph "Tap <b>Done</b> to save overrides. Changes take effect on the next scan."
         }
     }
 }
@@ -1126,10 +1228,10 @@ def infoPage(Map params = [:]) {
                       "<b>Protocol Colors:</b><br>" +
                       "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'><table style='width:100%; border-collapse: collapse;'>" +
                       "<tr style='font-weight:bold;'><td>Color</td><td>Protocol</td></tr>" +
-                      "<tr><td><span style='color:#3b82f6;font-weight:bold;'>Blue</span></td><td>Zigbee</td></tr>" +
-                      "<tr><td><span style='color:#8b5cf6;font-weight:bold;'>Purple</span></td><td>Z-Wave</td></tr>" +
-                      "<tr><td><span style='color:#f97316;font-weight:bold;'>Orange</span></td><td>Matter</td></tr>" +
-                      "<tr><td><span style='color:#06b6d4;font-weight:bold;'>Cyan</span></td><td>Hub Mesh</td></tr>" +
+                      "<tr><td><span style='color:#3b82f6;font-weight:bold;'>Blue</span></td><td>Zigbee / Hub Mesh (Zigbee)</td></tr>" +
+                      "<tr><td><span style='color:#8b5cf6;font-weight:bold;'>Purple</span></td><td>Z-Wave / Hub Mesh (Z-Wave)</td></tr>" +
+                      "<tr><td><span style='color:#f97316;font-weight:bold;'>Orange</span></td><td>Matter / Hub Mesh (Matter)</td></tr>" +
+                      "<tr><td><span style='color:#06b6d4;font-weight:bold;'>Cyan</span></td><td>Hub Mesh (underlying protocol unknown)</td></tr>" +
                       "<tr><td><span style='color:#14b8a6;font-weight:bold;'>Teal</span></td><td>LAN / Cloud</td></tr>" +
                       "<tr><td><span style='color:#ec4899;font-weight:bold;'>Pink</span></td><td>Virtual</td></tr>" +
                       "<tr><td><span style='color:#eab308;font-weight:bold;'>Yellow</span></td><td>Hub Variable</td></tr>" +
@@ -1146,7 +1248,7 @@ def infoPage(Map params = [:]) {
 
         section("<b>🔀 Virtual & Hub Variable Devices</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "Virtual devices and hub variable connectors are now detected as separate protocols and displayed in their own colors.<br><br>" +
+                      "Virtual devices and hub variable connectors are detected as separate protocols and displayed in their own colors.<br><br>" +
                       "<b><span style='color:#ec4899;'>Virtual</span> devices</b> — virtual switches, sensors, and other app-created virtual devices. " +
                       "These fire on demand rather than on a fixed schedule.<br><br>" +
                       "<b><span style='color:#eab308;'>Hub Variable</span> connectors</b> — devices linked to hub variables in Rule Machine. " +
@@ -1154,9 +1256,23 @@ def infoPage(Map params = [:]) {
                       "A hub variable connector showing Fair, Poor, or Offline is a strong signal that a Rule Machine rule has stopped running.<br><br>" +
                       "<b>Filtered sampling:</b> Both protocols use a filtered EWMA baseline. " +
                       "Only check-ins that occurred within the scan interval are recorded as samples. " +
-                      "This prevents the baseline from inflating during periods when rules are not running, giving a more accurate picture of whether a device is actually firing when expected.<br><br>" +
-                      "After updating to v1.2.0 these devices will be re-identified on the next scan and their baselines will begin using filtered sampling automatically. " +
-                      "Devices may briefly return to Pending while the filtered baseline rebuilds — this clears within a few scan cycles.</div>"
+                      "This prevents the baseline from inflating during periods when rules are not running.</div>"
+        }
+
+        section("<b>🔗 Hub Mesh Protocol Detection</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "Hub Mesh linked devices always show <b>LNK</b> as their controller type regardless of the underlying protocol on the source hub. " +
+                      "The app attempts to determine the real protocol using several methods in order:<br><br>" +
+                      "1. <b>Encoding data value</b> — some devices (LUMI/Aqara) carry an Encoding field<br>" +
+                      "2. <b>Cluster data values</b> — Zigbee cluster data is often preserved on linked devices<br>" +
+                      "3. <b>Driver name heuristics</b> — driver names often contain protocol keywords<br>" +
+                      "4. <b>Manufacturer heuristics</b> — known Zigbee manufacturers (CentraLite, LUMI, IKEA, etc.)<br><br>" +
+                      "When the underlying protocol is identified the device displays in that protocol's color with a sub-label (e.g. <b>Hub Mesh (Zigbee)</b>). " +
+                      "When it cannot be identified the device shows as plain <b><span style='color:#06b6d4;'>Hub Mesh</span></b> in cyan.<br><br>" +
+                      "<b>Protocol Overrides:</b> If a device cannot be auto-detected, use the <b>🔧 Protocol Overrides</b> page to set it manually. " +
+                      "The override always wins over auto-detection even if the app later becomes able to detect the device automatically. " +
+                      "To restore auto-detection, set the override back to <b>Auto-detect</b>. " +
+                      "Overridden devices show a small <i>(override)</i> label in the Activity Summary table.</div>"
         }
 
         section("<b>😴 Snooze</b>") {
@@ -1169,18 +1285,18 @@ def infoPage(Map params = [:]) {
 
         section("<b>📋 Device Selection</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "All devices are selected from a single list. Protocol is detected automatically from each device's hub properties.<br><br>" +
+                      "All devices are selected from a single list. Protocol is detected automatically.<br><br>" +
                       "<b>Protocol Detection:</b><br>" +
                       "• <span style='color:#3b82f6;font-weight:bold;'>Zigbee</span> — directly paired Zigbee devices<br>" +
                       "• <span style='color:#8b5cf6;font-weight:bold;'>Z-Wave</span> — directly paired Z-Wave devices<br>" +
                       "• <span style='color:#f97316;font-weight:bold;'>Matter</span> — Matter devices<br>" +
-                      "• <span style='color:#06b6d4;font-weight:bold;'>Hub Mesh</span> — devices linked from another Hubitat hub<br>" +
+                      "• <span style='color:#06b6d4;font-weight:bold;'>Hub Mesh</span> — linked from another Hubitat hub (sub-protocol detected where possible)<br>" +
                       "• <span style='color:#14b8a6;font-weight:bold;'>LAN</span> — local integrations (Hue, Shelly), cloud integrations (Govee, Tesla, Ecobee)<br>" +
                       "• <span style='color:#ec4899;font-weight:bold;'>Virtual</span> — virtual switches, sensors, and app-created virtual devices<br>" +
                       "• <span style='color:#eab308;font-weight:bold;'>Hub Variable</span> — hub variable connector devices<br><br>" +
                       "<b>Notes:</b><br>" +
                       "• Bluetooth devices (C-8 Pro only) will appear as LAN until a controllerType value is confirmed<br>" +
-                      "• If you do not want to monitor a virtual device, simply don't select it</div>"
+                      "• If a device shows as Hub Mesh or LAN and you know the real protocol, use Protocol Overrides to set it manually</div>"
         }
 
         section("<b>💡 Tips for Best Results</b>") {
@@ -1190,6 +1306,7 @@ def infoPage(Map params = [:]) {
                       "• Use Every 30 Minutes for virtual devices or hub variable connectors tied to frequent automations<br>" +
                       "• Devices that only wake on events (motion, contact) will have longer natural intervals — this is normal<br>" +
                       "• A hub variable connector showing Offline means the Rule Machine rule tied to that variable has stopped running<br>" +
+                      "• Hub Mesh devices showing plain cyan Hub Mesh can be identified manually via Protocol Overrides<br>" +
                       "• No hub event subscriptions are used — all monitoring is done via scheduled scans of Hubitat's Last Activity data<br>" +
                       "• Use Mode Restriction to suppress notifications during certain hub modes (e.g. Away, Night)</div>"
         }
