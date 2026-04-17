@@ -47,6 +47,10 @@ def initialize() {
     if (state.history == null) state.history = [:]
     if (state.health  == null) state.health  = [:]
     if (state.snoozed == null) state.snoozed = [:]
+    // Clear snoozed state if snooze feature is disabled
+    if (settings?.enableSnooze == false) {
+        state.snoozed = [:]
+    }
     scheduleScanInterval()
     scheduleReportFrequency()
     if (debugEnabled()) log.debug "Monitoring ${getAllMonitoredDevices().findAll { getProtocol(it) != 'Unknown' }.size()} device(s)"
@@ -88,6 +92,7 @@ def unsnoozeDevice(deviceId) {
 }
 
 def isDeviceSnoozed(deviceId) {
+    if (settings?.enableSnooze == false) return false
     def until = state.snoozed?.get(deviceId)
     if (!until) return false
     if (until >= now()) return true
@@ -307,12 +312,13 @@ def mainPage() {
         // ── Monitoring Settings ──────────────────────────────
         def scanIntervalLabel = ["0.5": "Every 30 Minutes", "1": "Hourly", "3": "Every 3 Hours", "6": "Every 6 Hours"]
         def currentScan       = scanIntervalLabel[settings?.scanInterval ?: "3"] ?: "Every 3 Hours"
-        def currentThreshold  = settings?.offlineThresholdHours ?: 24
+        def currentThreshold  = settings?.offlineThresholdHours ?: 48
         def currentSnooze     = settings?.snoozeDurationHours ?: 24
+        def snoozeEnabled     = settings?.enableSnooze != false
         def modeConfigured    = settings?.enableModeRestriction && settings?.restrictedModes
 
         section("<b>Monitoring Settings</b>", hideable: true, hidden: true) {
-            paragraph "Configure scan frequency, offline detection, snooze duration, and mode restriction."
+            paragraph "Configure scan frequency, offline detection, snooze, and mode restriction."
 
             input "scanInterval", "enum",
                   title: "Scan Frequency:",
@@ -321,16 +327,23 @@ def mainPage() {
                   submitOnChange: true
 
             input "offlineThresholdHours", "number",
-                  title: "Mark device Offline if no activity for X hours:",
-                  defaultValue: 24,
+                  title: "Offline after inactivity (hours):",
+                  defaultValue: 48,
                   required: true,
                   submitOnChange: true
 
-            input "snoozeDurationHours", "number",
-                  title: "Snooze duration (hours):",
-                  defaultValue: 24,
-                  required: true,
+            input "enableSnooze", "bool",
+                  title: "Enable per-device snooze",
+                  defaultValue: true,
                   submitOnChange: true
+
+            if (settings?.enableSnooze != false) {
+                input "snoozeDurationHours", "number",
+                      title: "Snooze duration (hours):",
+                      defaultValue: 24,
+                      required: true,
+                      submitOnChange: true
+            }
 
             input "enableModeRestriction", "bool",
                   title: "Enable mode restriction for notifications",
@@ -346,7 +359,7 @@ def mainPage() {
         section("") {
             paragraph "Scan: <b><span style='color:blue;'>${currentScan}</span></b> | " +
                       "Offline: <b><span style='color:blue;'>${currentThreshold}h</span></b> | " +
-                      "Snooze: <b><span style='color:blue;'>${currentSnooze}h</span></b> | " +
+                      "Snooze: <b><span style='color:blue;'>${snoozeEnabled ? currentSnooze + 'h' : 'OFF'}</span></b> | " +
                       "Mode Restriction: <b><span style='color:blue;'>${settings?.enableModeRestriction ? (modeConfigured ? settings.restrictedModes.join(', ') : 'ON — no modes selected') : 'OFF'}</span></b>" +
                       " — tap <b>Monitoring Settings</b> above to change."
         }
@@ -404,31 +417,21 @@ def mainPage() {
             href(name: "toProblemDevices", page: "problemDevicesPage",
                  title: "⚠️ Problem Devices",
                  description: "View devices with Fair, Poor or Offline health")
-            href(name: "toSnoozeManage", page: "snoozeManagePage",
-                 title: "😴 Manage Snoozed Devices",
-                 description: "Snooze devices or clear active snoozes")
+            if (settings?.enableSnooze != false) {
+                href(name: "toSnoozeManage", page: "snoozeManagePage",
+                     title: "😴 Manage Snoozed Devices",
+                     description: "Snooze devices or clear active snoozes")
+            }
             href(name: "toProtocolOverride", page: "protocolOverridePage",
                  title: "🔧 Protocol Overrides",
                  description: "Manually set protocol for devices that could not be auto-detected")
         }
 
-        // ── Help ─────────────────────────────────────────────
-        section("<b>Help & Info:</b>") {
+        // ── Help & Support ───────────────────────────────────
+        section("<b>Help & Support:</b>") {
             href(name: "toInfoPage", page: "infoPage",
                  title: "App Guide & Reference",
                  description: "Health scoring, check-in baselines, snooze, and troubleshooting explained")
-        }
-
-        // ── Diagnostics ──────────────────────────────────────
-        section("<b>Diagnostics</b>") {
-            input "debugMode", "bool",
-                  title: "Debug Logging (auto-disables after 30 min)",
-                  defaultValue: false,
-                  submitOnChange: true
-        }
-
-        // ── Support ──────────────────────────────────────────
-        section("<b>Support & Community</b>") {
             href url: "https://community.hubitat.com/t/beta-device-health-monitor/163229",
                  style: "external",
                  title: "💬 Hubitat Community Thread",
@@ -437,6 +440,14 @@ def mainPage() {
                  style: "external",
                  title: "☕ Buy Me a Coffee",
                  description: "Enjoying the app? Any amount is appreciated — thank you!"
+        }
+
+        // ── Diagnostics ──────────────────────────────────────
+        section("<b>Diagnostics</b>") {
+            input "debugMode", "bool",
+                  title: "Debug Logging (auto-disables after 30 min)",
+                  defaultValue: false,
+                  submitOnChange: true
         }
     }
 }
@@ -583,7 +594,7 @@ def updateHealth(device) {
         return
     }
 
-    def offlineThreshold     = ((settings?.offlineThresholdHours ?: 24) * 60).toDouble()
+    def offlineThreshold     = ((settings?.offlineThresholdHours ?: 48) * 60).toDouble()
     def minutesSinceLastSeen = (now() - (data.lastSeen ?: now())) / (1000 * 60)
 
     // Offline only from hard threshold — never from ratio
@@ -680,9 +691,11 @@ def activitySummaryPage() {
             href(name: "toForceScan", page: "forceScanPage",
                  title: "🔄 Force Scan Now",
                  description: "Tap to immediately check all monitored devices")
-            href(name: "toSnoozeFromSummary", page: "snoozeManagePage",
-                 title: "😴 Manage Snoozed Devices",
-                 description: "Snooze devices or clear active snoozes")
+            if (settings?.enableSnooze != false) {
+                href(name: "toSnoozeFromSummary", page: "snoozeManagePage",
+                     title: "😴 Manage Snoozed Devices",
+                     description: "Snooze devices or clear active snoozes")
+            }
 
             def devList = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
             if (!devList) { paragraph "No devices found. Please select devices on the main page first."; return }
@@ -1156,7 +1169,7 @@ def infoPage(Map params = [:]) {
                       "<tr><td>🟢 Good</td><td>Checking in within 2x of baseline — slightly late but normal</td></tr>" +
                       "<tr><td>🟠 Fair</td><td>Checking in within 3x of baseline — worth watching</td></tr>" +
                       "<tr><td>🔴 Poor</td><td>Late beyond 3x baseline — likely a problem</td></tr>" +
-                      "<tr><td>💀 <span style='color:#991b1b;font-weight:bold;'>Offline</span></td><td>No activity for ${settings?.offlineThresholdHours ?: 24}h — hard threshold only</td></tr>" +
+                      "<tr><td>💀 <span style='color:#991b1b;font-weight:bold;'>Offline</span></td><td>No activity for ${settings?.offlineThresholdHours ?: 48}h — hard threshold only</td></tr>" +
                       "<tr><td>😴 Snoozed</td><td>Excluded from notifications for a set duration</td></tr>" +
                       "</table></div><br>" +
                       "<b>Important:</b> Offline is triggered exclusively by the hard hour threshold — never by the ratio check. A device that is late relative to its baseline will show at most 🔴 Poor until the hard threshold is reached.<br><br>" +
@@ -1198,10 +1211,10 @@ def infoPage(Map params = [:]) {
 
         section("<b>😴 Snooze</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "Use <b>Manage Snoozed Devices</b> from the main page or Activity Summary to snooze individual devices. " +
-                      "Snoozed devices are excluded from notifications and the Problem Devices page for the configured snooze duration.<br><br>" +
-                      "Snoozed devices still appear in the Activity Summary with a 😴 indicator and a countdown. " +
-                      "You can unsnooze devices early at any time. Snoozes expire automatically.</div>"
+                      "Per-device snooze can be enabled or disabled in <b>Monitoring Settings</b>. When enabled, use <b>Manage Snoozed Devices</b> from the main page or Activity Summary to snooze individual devices.<br><br>" +
+                      "Snoozed devices are excluded from notifications and the Problem Devices page for the configured snooze duration. " +
+                      "They still appear in the Activity Summary with a 😴 indicator and a countdown. " +
+                      "Disabling snooze clears all active snoozes immediately.</div>"
         }
 
         section("<b>📋 Device Selection</b>") {
