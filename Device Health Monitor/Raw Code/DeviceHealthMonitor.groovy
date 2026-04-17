@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
-    version: "1.3.0",
+    version: "1.3.1",
     doNotFocus: true
 )
 
@@ -47,7 +47,6 @@ def initialize() {
     if (state.history == null) state.history = [:]
     if (state.health  == null) state.health  = [:]
     if (state.snoozed == null) state.snoozed = [:]
-    if (settings?.enableSnooze == false) state.snoozed = [:]
     scheduleScanInterval()
     scheduleReportFrequency()
     if (debugEnabled()) log.debug "Monitoring ${getAllMonitoredDevices().findAll { getProtocol(it) != 'Unknown' }.size()} device(s)"
@@ -89,7 +88,6 @@ def unsnoozeDevice(deviceId) {
 }
 
 def isDeviceSnoozed(deviceId) {
-    if (settings?.enableSnooze == false) return false
     def until = state.snoozed?.get(deviceId)
     if (!until) return false
     if (until >= now()) return true
@@ -124,52 +122,69 @@ def getAllMonitoredDevices() {
 
 def getProtocol(device) {
     try {
+        // ── User override — always wins ──────────────────────────
         def override = settings["protocolOverride_${device.id}"]
         if (override && override != "" && override != "Auto-detect") return override
 
+        // ── Hub Variable Connector ───────────────────────────────
         def driverName = (device.typeName ?: "").toLowerCase()
         def devName    = (device.name     ?: "").toLowerCase()
         if (driverName.contains("hub variable") || driverName.contains("variable connector") ||
             devName.contains("hub variable")    || devName.contains("variable connector")) {
             return "Hub Variable"
         }
+
+        // ── Virtual ──────────────────────────────────────────────
         if (driverName.contains("virtual") || devName.contains("virtual")) {
             return "Virtual"
         }
 
+        // ── Radio protocols via controllerType ───────────────────
         def devData = device.properties
 
+        // ── Hub Mesh — detect underlying protocol ────────────────
         if (devData?.controllerType == "LNK") {
             def encoding = device.getDataValue("Encoding")
             if (encoding?.toLowerCase() == "zigbee")                          return "Hub Mesh (Zigbee)"
             if (encoding?.toLowerCase() == "z-wave")                          return "Hub Mesh (Z-Wave)"
+
             if (device.getDataValue("In Clusters")  != null)                  return "Hub Mesh (Zigbee)"
             if (device.getDataValue("inClusters")   != null)                  return "Hub Mesh (Zigbee)"
             if (device.getDataValue("Out Clusters") != null)                  return "Hub Mesh (Zigbee)"
             if (device.getDataValue("outClusters")  != null)                  return "Hub Mesh (Zigbee)"
             if (device.getDataValue("zigbeeId")     != null)                  return "Hub Mesh (Zigbee)"
             if (device.getDataValue("zigbeeNodeType") != null)                return "Hub Mesh (Zigbee)"
+
             if (device.getDataValue("zwaveSecurePairingComplete") != null)    return "Hub Mesh (Z-Wave)"
             if (device.getDataValue("secureInClusters")           != null)    return "Hub Mesh (Z-Wave)"
             if (device.getDataValue("Zw Node Info")               != null)    return "Hub Mesh (Z-Wave)"
+
             if (driverName.contains("zigbee"))                                return "Hub Mesh (Zigbee)"
             if (driverName.contains("z-wave") || driverName.contains("zwave")) return "Hub Mesh (Z-Wave)"
             if (driverName.contains("matter"))                                return "Hub Mesh (Matter)"
+
             def manufacturer = (device.getDataValue("Manufacturer") ?: "").toLowerCase()
             if (manufacturer in ["centralite", "lumi", "ikea", "sengled",
                                  "osram", "philips", "samsung", "smartthings",
-                                 "sonoff", "tuya", "third reality"])          return "Hub Mesh (Zigbee)"
+                                 "sonoff", "tuya", "third reality"]) {
+                return "Hub Mesh (Zigbee)"
+            }
+
             return "Hub Mesh"
         }
 
         if (devData?.controllerType == "ZGB") return "Zigbee"
         if (devData?.controllerType == "ZWV") return "Z-Wave"
         if (devData?.controllerType == "MAT") return "Matter"
+        // Bluetooth (C-8 Pro only) — controllerType value unconfirmed, placeholder for future
+        // if (devData?.controllerType == "BLE") return "Bluetooth"
 
+        // ── Zigbee fallbacks ─────────────────────────────────────
         if (device.getDataValue("Endpoint Id")                != null) return "Zigbee"
         if (device.getDataValue("endpointId")                 != null) return "Zigbee"
         if (device.getDataValue("zigbeeNodeType")             != null) return "Zigbee"
         if (device.getDataValue("zigbeeId")                   != null) return "Zigbee"
+        // ── Z-Wave fallbacks ─────────────────────────────────────
         if (device.getDataValue("In Clusters")                != null) return "Z-Wave"
         if (device.getDataValue("inClusters")                 != null) return "Z-Wave"
         if (device.getDataValue("zwaveSecurePairingComplete") != null) return "Z-Wave"
@@ -208,55 +223,10 @@ def usesFilteredSampling(protocol) {
     return protocol in ["Virtual", "Hub Variable"]
 }
 
-def isLanProtocol(protocol) {
-    return protocol in ["LAN", "Hub Mesh", "Hub Mesh (Zigbee)", "Hub Mesh (Z-Wave)", "Hub Mesh (Matter)"]
-}
-
 def isModeOK() {
     if (!settings?.enableModeRestriction) return true
     if (!settings?.restrictedModes) return true
     return settings.restrictedModes.contains(location.mode)
-}
-
-def isLowActivityDevice(device) {
-    def data = state.history?.get(device.id)
-    if (!data) return false
-    def samples         = data.samples?.size() ?: 0
-    def seededAt        = data.lastCheckin ?: data.lastSeen
-    if (!seededAt) return false
-    def daysSinceSeeded = (now() - safeTime(seededAt)) / (1000 * 60 * 60 * 24)
-    return (samples < 3 && daysSinceSeeded >= 7)
-}
-
-// ============================================================
-// ===================== OFFLINE VERIFICATION ================
-// Sends refresh() to Poor/Offline devices that support it.
-// On the next scan if Last Activity has updated the health
-// improves naturally. If not the alert is confirmed real.
-// ============================================================
-def triggerOfflineVerification(device) {
-    try {
-        if (!device.hasCommand("refresh")) {
-            if (debugEnabled()) log.debug "${device.displayName}: no refresh command — skipping verification"
-            return
-        }
-        def data = state.history[device.id]
-        if (!data) return
-
-        def currentHealth = state.health[device.id]
-        def lastSentHealth = data.refreshSentForHealth
-
-        // Only send if health just changed to Poor/Offline or hasn't been sent for this health state
-        if (lastSentHealth != currentHealth) {
-            data.refreshSentForHealth = currentHealth
-            data.refreshSentAt        = now()
-            data.refreshConfirmed     = false
-            device.refresh()
-            if (debugEnabled()) log.debug "${device.displayName}: refresh sent for offline verification (health=${currentHealth})"
-        }
-    } catch (e) {
-        log.warn "Offline verification failed for ${device.displayName}: ${e.message}"
-    }
 }
 
 // ============================================================
@@ -280,7 +250,7 @@ def mainPage() {
             }
         }
 
-        // ── Device Selection ─────────────────────────────────
+        // ── Device Selection ─────────────────────────────────────
         def devicesSelected = (monitoredDevices?.size() ?: 0) > 0
         section("<b>Monitored Devices</b>", hideable: true, hidden: devicesSelected) {
             paragraph "<b>Select the devices you want to monitor.</b> Protocol is detected automatically."
@@ -292,17 +262,17 @@ def mainPage() {
                   submitOnChange: true
         }
         if (devicesSelected) {
-            def allSelected       = monitoredDevices
-            def zigbeeCount       = allSelected.count { getProtocol(it) in ["Zigbee", "Hub Mesh (Zigbee)"] }
-            def zwaveCount        = allSelected.count { getProtocol(it) in ["Z-Wave", "Hub Mesh (Z-Wave)"] }
-            def matterCount       = allSelected.count { getProtocol(it) in ["Matter", "Hub Mesh (Matter)"] }
-            def hubMeshCount      = allSelected.count { getProtocol(it) == "Hub Mesh" }
-            def lanCount          = allSelected.count { getProtocol(it) == "LAN" }
-            def virtualCount      = allSelected.count { getProtocol(it) == "Virtual" }
-            def hubVarCount       = allSelected.count { getProtocol(it) == "Hub Variable" }
-            def unknownCount      = allSelected.count { getProtocol(it) == "Unknown" }
-            def totalCount        = allSelected.size()
-            def unresolvableCount = allSelected.count { isUnresolvableProtocol(getProtocol(it)) }
+            def allSelected          = monitoredDevices
+            def zigbeeCount          = allSelected.count { getProtocol(it) in ["Zigbee", "Hub Mesh (Zigbee)"] }
+            def zwaveCount           = allSelected.count { getProtocol(it) in ["Z-Wave", "Hub Mesh (Z-Wave)"] }
+            def matterCount          = allSelected.count { getProtocol(it) in ["Matter", "Hub Mesh (Matter)"] }
+            def hubMeshCount         = allSelected.count { getProtocol(it) == "Hub Mesh" }
+            def lanCount             = allSelected.count { getProtocol(it) == "LAN" }
+            def virtualCount         = allSelected.count { getProtocol(it) == "Virtual" }
+            def hubVarCount          = allSelected.count { getProtocol(it) == "Hub Variable" }
+            def unknownCount         = allSelected.count { getProtocol(it) == "Unknown" }
+            def totalCount           = allSelected.size()
+            def unresolvableCount    = allSelected.count { isUnresolvableProtocol(getProtocol(it)) }
             section("") {
                 paragraph "<b><span style='color:blue;'>${totalCount} device(s) selected</span></b> — " +
                           "Zigbee: <b><span style='color:#3b82f6;'>${zigbeeCount}</span></b> | " +
@@ -313,52 +283,63 @@ def mainPage() {
                           "Virtual: <b><span style='color:#ec4899;'>${virtualCount}</span></b> | " +
                           "Hub Variable: <b><span style='color:#eab308;'>${hubVarCount}</span></b>" +
                           (unknownCount > 0 ? " | <span style='color:orange;'>Unknown: <b>${unknownCount}</b> (skipped)</span>" : "") +
-                          (unresolvableCount > 0 ? "<br><span style='color:#94a3b8;'>⚠ ${unresolvableCount} device(s) could not be fully identified — tap <b>Protocol Overrides</b> to set manually.</span>" : "") +
+                          (unresolvableCount > 0 ? "<br><span style='color:#94a3b8;'>⚠ ${unresolvableCount} device(s) could not be fully identified — tap <b>Protocol Overrides</b> below to set manually.</span>" : "") +
                           " — Tap <b>Monitored Devices</b> above to change."
             }
         }
+
         if (!devicesSelected) {
             section("") {
                 paragraph "<span style='color:red; font-weight:bold;'>⚠ No devices selected. Select devices above to begin monitoring.</span>"
             }
         }
 
-        // ── Monitoring Settings ──────────────────────────────
+        // ── Scan Interval ────────────────────────────────────────
         def scanIntervalLabel = ["0.5": "Every 30 Minutes", "1": "Hourly", "3": "Every 3 Hours", "6": "Every 6 Hours"]
-        def currentScan       = scanIntervalLabel[settings?.scanInterval ?: "3"] ?: "Every 3 Hours"
-        def currentThreshold  = settings?.offlineThresholdHours ?: 72
-        def currentSnooze     = settings?.snoozeDurationHours ?: 24
-        def snoozeEnabled     = settings?.enableSnooze != false
-        def modeConfigured    = settings?.enableModeRestriction && settings?.restrictedModes
-
-        section("<b>Monitoring Settings</b>", hideable: true, hidden: true) {
-            paragraph "Configure scan frequency, offline detection, snooze, and mode restriction."
-
+        def currentScan = scanIntervalLabel[settings?.scanInterval ?: "3"] ?: "Every 3 Hours"
+        section("<b>Device Scan Interval</b>", hideable: true, hidden: true) {
+            paragraph "How often device activity is checked and health ratings are updated."
             input "scanInterval", "enum",
                   title: "Scan Frequency:",
                   options: ["0.5": "Every 30 Minutes", "1": "Hourly", "3": "Every 3 Hours", "6": "Every 6 Hours"],
                   defaultValue: "3",
                   submitOnChange: true
+        }
+        section("") {
+            paragraph "Scan interval: <b><span style='color:blue;'>${currentScan}</span></b> — tap <b>Device Scan Interval</b> above to change."
+        }
 
+        // ── Offline Threshold ────────────────────────────────────
+        def currentThreshold = settings?.offlineThresholdHours ?: 72
+        section("<b>Offline after inactivity (hours)</b>", hideable: true, hidden: true) {
+            paragraph "Devices with no activity beyond this threshold will be marked Offline regardless of their baseline ratio."
             input "offlineThresholdHours", "number",
-                  title: "Offline after inactivity (hours):",
+                  title: "Mark device Offline if no activity for X hours:",
                   defaultValue: 72,
                   required: true,
                   submitOnChange: true
+        }
+        section("") {
+            paragraph "Offline threshold: <b><span style='color:blue;'>${currentThreshold}h</span></b> — tap <b>Offline after inactivity</b> above to change."
+        }
 
-            input "enableSnooze", "bool",
-                  title: "Enable per-device snooze",
-                  defaultValue: true,
+        // ── Snooze Duration ──────────────────────────────────────
+        def currentSnooze = settings?.snoozeDurationHours ?: 24
+        section("<b>Snooze Duration</b>", hideable: true, hidden: true) {
+            paragraph "When a device is snoozed it will be excluded from notifications for this many hours."
+            input "snoozeDurationHours", "number",
+                  title: "Snooze duration (hours):",
+                  defaultValue: 24,
+                  required: true,
                   submitOnChange: true
+        }
+        section("") {
+            paragraph "Snooze duration: <b><span style='color:blue;'>${currentSnooze}h</span></b> — tap <b>Snooze Duration</b> above to change."
+        }
 
-            if (settings?.enableSnooze != false) {
-                input "snoozeDurationHours", "number",
-                      title: "Snooze duration (hours):",
-                      defaultValue: 24,
-                      required: true,
-                      submitOnChange: true
-            }
-
+        // ── Mode Restriction ─────────────────────────────────────
+        section("<b>Mode Restriction</b>", hideable: true, hidden: true) {
+            paragraph "Optionally restrict notifications to specific hub modes. Scanning always runs — only notifications are affected."
             input "enableModeRestriction", "bool",
                   title: "Enable mode restriction for notifications",
                   defaultValue: false,
@@ -370,15 +351,8 @@ def mainPage() {
                       required: false
             }
         }
-        section("") {
-            paragraph "Scan: <b><span style='color:blue;'>${currentScan}</span></b> | " +
-                      "Offline: <b><span style='color:blue;'>${currentThreshold}h</span></b> | " +
-                      "Snooze: <b><span style='color:blue;'>${snoozeEnabled ? currentSnooze + 'h' : 'OFF'}</span></b> | " +
-                      "Mode Restriction: <b><span style='color:blue;'>${settings?.enableModeRestriction ? (modeConfigured ? settings.restrictedModes.join(', ') : 'ON — no modes selected') : 'OFF'}</span></b>" +
-                      " — tap <b>Monitoring Settings</b> above to change."
-        }
 
-        // ── Notifications ────────────────────────────────────
+        // ── Notifications ────────────────────────────────────────
         def notifConfigured = settings?.enablePush != false &&
                               (settings?.notifyDevices || settings?.pushoverDevices)
         section("<b>Notifications</b>", hideable: true, hidden: notifConfigured) {
@@ -388,26 +362,45 @@ def mainPage() {
             if (settings?.enablePush != false) {
                 input "reportFrequency", "enum",
                       title: "Notification Frequency:",
-                      options: ["daily": "Daily", "every2": "Every 2 Days", "every3": "Every 3 Days", "weekly": "Weekly"],
+                      options: [
+                          "daily":  "Daily",
+                          "every2": "Every 2 Days",
+                          "every3": "Every 3 Days",
+                          "weekly": "Weekly"
+                      ],
                       defaultValue: "daily"
-                input "summaryTime", "time", title: "Notification Time:", required: false
+
+                input "summaryTime", "time",
+                      title: "Notification Time:",
+                      required: false
+
                 input "notifyDevices", "capability.notification",
-                      title: "Notification devices", multiple: true, required: false, submitOnChange: true
+                      title: "Notification devices",
+                      multiple: true,
+                      required: false,
+                      submitOnChange: true
+
                 input "enablePushover", "bool", title: "⚙️ Enable Pushover Markup", defaultValue: false
                 input "pushoverDevices", "capability.notification",
                       title: "Pushover notification devices <b>(receives Pushover-formatted message)</b>",
-                      multiple: true, required: false, submitOnChange: true
+                      multiple: true,
+                      required: false,
+                      submitOnChange: true
                 input "pushoverPrefix", "text",
                       title: "Pushover tags <b>(Only used if Enable Pushover Markup is toggled ON)</b>",
                       description: "e.g. [H][TITLE=Device Health Report][HTML][SELFDESTRUCT=43200]",
                       required: false
+
                 paragraph "<b>Report Sections:</b>"
-                input "notifyOffline",       "bool", title: "💀 Include Offline devices",         defaultValue: true
-                input "notifyPoor",          "bool", title: "🔴 Include Poor health devices",      defaultValue: true
-                input "notifyFair",          "bool", title: "🟠 Include Fair health devices",      defaultValue: true
-                input "notifyGood",          "bool", title: "🟢 Include Good health devices",      defaultValue: false
-                input "notifyExcellent",     "bool", title: "🟢 Include Excellent health devices", defaultValue: false
-                input "suppressEmptyReport", "bool", title: "🔕 Don't send notification if nothing to report", defaultValue: false
+                input "notifyOffline",   "bool", title: "💀 Include Offline devices",         defaultValue: true
+                input "notifyPoor",      "bool", title: "🔴 Include Poor health devices",      defaultValue: true
+                input "notifyFair",      "bool", title: "🟠 Include Fair health devices",      defaultValue: true
+                input "notifyGood",      "bool", title: "🟢 Include Good health devices",      defaultValue: false
+                input "notifyExcellent", "bool", title: "🟢 Include Excellent health devices", defaultValue: false
+                input "suppressEmptyReport", "bool",
+                      title: "🔕 Don't send notification if nothing to report",
+                      defaultValue: false
+
                 paragraph "<b>Send notification now:</b>"
                 href(name: "toSendNotification", page: "sendNotificationPage",
                      title: "📤 Send Notification Now",
@@ -423,7 +416,7 @@ def mainPage() {
             }
         }
 
-        // ── Reports ──────────────────────────────────────────
+        // ── Reports ──────────────────────────────────────────────
         section("<b>Reports:</b>") {
             href(name: "toActivitySummary", page: "activitySummaryPage",
                  title: "Device Activity Summary",
@@ -431,21 +424,31 @@ def mainPage() {
             href(name: "toProblemDevices", page: "problemDevicesPage",
                  title: "⚠️ Problem Devices",
                  description: "View devices with Fair, Poor or Offline health")
-            if (settings?.enableSnooze != false) {
-                href(name: "toSnoozeManage", page: "snoozeManagePage",
-                     title: "😴 Manage Snoozed Devices",
-                     description: "Snooze devices or clear active snoozes")
-            }
+            href(name: "toSnoozeManage", page: "snoozeManagePage",
+                 title: "😴 Manage Snoozed Devices",
+                 description: "Snooze devices or clear active snoozes")
             href(name: "toProtocolOverride", page: "protocolOverridePage",
                  title: "🔧 Protocol Overrides",
                  description: "Manually set protocol for devices that could not be auto-detected")
         }
 
-        // ── Help & Support ───────────────────────────────────
-        section("<b>Help & Support:</b>") {
+        // ── Help ─────────────────────────────────────────────────
+        section("<b>Help & Info:</b>") {
             href(name: "toInfoPage", page: "infoPage",
                  title: "App Guide & Reference",
-                 description: "Health scoring, check-in baselines, offline verification, and troubleshooting explained")
+                 description: "Health scoring, check-in baselines, snooze, and troubleshooting explained")
+        }
+
+        // ── Diagnostics ──────────────────────────────────────────
+        section("<b>Diagnostics</b>") {
+            input "debugMode", "bool",
+                  title: "Debug Logging (auto-disables after 30 min)",
+                  defaultValue: false,
+                  submitOnChange: true
+        }
+
+        // ── Support ──────────────────────────────────────────────
+        section("<b>Support & Community</b>") {
             href url: "https://community.hubitat.com/t/beta-device-health-monitor/163229",
                  style: "external",
                  title: "💬 Hubitat Community Thread",
@@ -454,14 +457,6 @@ def mainPage() {
                  style: "external",
                  title: "☕ Buy Me a Coffee",
                  description: "Enjoying the app? Any amount is appreciated — thank you!"
-        }
-
-        // ── Diagnostics ──────────────────────────────────────
-        section("<b>Diagnostics</b>") {
-            input "debugMode", "bool",
-                  title: "Debug Logging (auto-disables after 30 min)",
-                  defaultValue: false,
-                  submitOnChange: true
         }
     }
 }
@@ -530,6 +525,11 @@ def scanAllDevices() {
     def intervalStr     = settings?.scanInterval ?: "3"
     def intervalMinutes = (intervalStr.toFloat() * 60).toInteger()
 
+    // v1.3.1: dynamic sample gate — half the scan interval, capped at 30 minutes.
+    // This prevents rapid-fire devices (switches, contact sensors) from having all
+    // their activity ignored by a hardcoded 10-minute gate.
+    def minGate = Math.min(intervalMinutes * 0.5, 30)
+
     devList.each { device ->
         try {
             def id       = device.id
@@ -541,41 +541,33 @@ def scanAllDevices() {
             def lastSeen     = lastActivity ? safeTime(lastActivity) : now()
 
             if (!data) {
+                // v1.3.1: persist the seeded entry properly
                 state.history[id] = [
-                    lastSeen:              lastSeen,
-                    lastCheckin:           lastSeen,
-                    samples:               [],
-                    avgInterval:           null,
-                    userInterval:          null,
-                    missedCheckins:        0,
-                    protocol:              protocol,
-                    refreshSentAt:         null,
-                    refreshSentForHealth:  null,
-                    refreshConfirmed:      false
+                    lastSeen:       lastSeen,
+                    lastCheckin:    lastSeen,
+                    samples:        [],
+                    avgInterval:    null,
+                    userInterval:   null,
+                    missedCheckins: 0,
+                    protocol:       protocol
                 ]
+                state.history = state.history   // force top-level persist
                 state.health[id] = "Pending"
                 if (debugEnabled()) log.debug "Seeded ${device.displayName} (${protocol}) from lastActivity: ${formatTimeAgo(lastSeen)}"
             } else {
                 def prevLastSeen = data.lastSeen ?: lastSeen
-
-                // ── Check if refresh was sent and device responded ──
-                if (data.refreshSentAt && lastSeen > safeTime(data.refreshSentAt)) {
-                    data.refreshConfirmed    = true
-                    data.refreshSentAt       = null
-                    data.refreshSentForHealth = null
-                    if (debugEnabled()) log.debug "${device.displayName}: refresh confirmed — device responded after verification"
-                }
-
                 if (lastSeen > prevLastSeen) {
                     def elapsed = (lastSeen - prevLastSeen) / (1000 * 60)
-                    if (elapsed >= 10) {
+                    if (elapsed >= minGate) {
+                        // ── Filtered sampling for Virtual & Hub Variable ──
                         def recordSample = true
                         if (filtered) {
                             recordSample = elapsed <= (intervalMinutes * 1.5)
                             if (!recordSample && debugEnabled()) {
-                                log.debug "${device.displayName} (${protocol}): skipping sample — elapsed ${elapsed.toInteger()}min exceeds filter gate"
+                                log.debug "${device.displayName} (${protocol}): skipping sample — elapsed ${elapsed.toInteger()}min exceeds filter gate ${(intervalMinutes * 1.5).toInteger()}min"
                             }
                         }
+
                         if (recordSample) {
                             def alpha      = 0.3
                             def prevSmooth = (data.samples && data.samples.size() > 0) ? data.samples[-1] : elapsed
@@ -585,27 +577,21 @@ def scanAllDevices() {
                             if (data.samples.size() >= 3) {
                                 data.avgInterval = data.samples.sum() / data.samples.size()
                             }
-                            if (debugEnabled()) log.debug "${device.displayName} (${protocol}): interval=${elapsed.toInteger()}min smoothed=${smoothed.toInteger()}min avg=${data.avgInterval?.toInteger()}min"
+                            if (debugEnabled()) log.debug "${device.displayName} (${protocol}): interval=${elapsed.toInteger()}min smoothed=${smoothed.toInteger()}min avg=${data.avgInterval?.toInteger()}min gate=${minGate.toInteger()}min"
                         }
+                    } else {
+                        if (debugEnabled()) log.debug "${device.displayName}: elapsed ${elapsed.toInteger()}min below gate ${minGate.toInteger()}min — skipping sample"
                     }
                     data.lastSeen    = lastSeen
                     data.lastCheckin = lastSeen
                 } else {
                     if (debugEnabled()) log.debug "${device.displayName}: no new activity since last scan"
                 }
-
                 data.protocol = protocol
+                // v1.3.1: force state persistence after every mutation
+                state.history[id] = data
+                state.history = state.history
                 updateHealth(device)
-
-                // ── Trigger offline verification for Poor/Offline devices ──
-                if (state.health[id] in ["Poor", "Offline"]) {
-                    triggerOfflineVerification(device)
-                } else {
-                    // Health improved — clear verification state
-                    data.refreshSentAt        = null
-                    data.refreshSentForHealth = null
-                    data.refreshConfirmed     = false
-                }
             }
         } catch (e) {
             log.warn "Scan failed for ${device.displayName}: ${e.message}"
@@ -617,16 +603,12 @@ def scanAllDevices() {
 // ===================== HEALTH SCORING ======================
 // ============================================================
 def updateHealth(device) {
-    def id         = device.id
-    def data       = state.history[id]
+    def id   = device.id
+    def data = state.history[id]
     if (!data) return
 
-    def protocol   = getProtocol(device)
-    def isLan      = isLanProtocol(protocol)
-    def minSamples = isLan ? 5 : 3
-    def samples    = data.samples?.size() ?: 0
-
-    if (samples < minSamples) {
+    def samples = data.samples?.size() ?: 0
+    if (samples < 3) {
         state.health[id] = "Pending"
         return
     }
@@ -645,7 +627,8 @@ def updateHealth(device) {
     if      (ratio <= 1.2) state.health[id] = "Excellent"
     else if (ratio <= 2.0) state.health[id] = "Good"
     else if (ratio <= 3.0) state.health[id] = "Fair"
-    else                   state.health[id] = "Poor"
+    else if (ratio <= 5.0) state.health[id] = "Poor"
+    else                   state.health[id] = "Poor"   // ratio maxes at Poor — Offline only via hard threshold
 
     if (debugEnabled()) log.debug "${device.displayName}: health=${state.health[id]} ratio=${ratio.round(2)} baseline=${baseline.toInteger()}min lastSeen=${minutesSinceLastSeen.toInteger()}min ago"
 }
@@ -657,7 +640,6 @@ def getHealthDisplay(device) {
     def h       = state.health?.get(device.id) ?: "Pending"
     def samples = state.history?.get(device.id)?.samples?.size() ?: 0
     def snoozed = isDeviceSnoozed(device.id as String)
-    def data    = state.history?.get(device.id)
 
     if (snoozed) {
         def remaining = formatSnoozeRemaining(device.id as String)
@@ -668,18 +650,12 @@ def getHealthDisplay(device) {
         return "<span style='color:#94a3b8;'>⏳ Pending (${samples}/3 samples)</span>"
     }
 
-    // Show verification indicator if refresh was sent
-    def verifyTag = ""
-    if (data?.refreshSentAt && !data?.refreshConfirmed) {
-        verifyTag = " <span style='color:#94a3b8;font-size:10px;'>🔄 verifying...</span>"
-    }
-
     switch (h) {
         case "Excellent": return "🟢 Excellent"
         case "Good":      return "🟢 Good"
         case "Fair":      return "🟠 Fair"
-        case "Poor":      return "🔴 Poor${verifyTag}"
-        case "Offline":   return "💀 <span style='color:#991b1b;font-weight:bold;'>Offline</span>${verifyTag}"
+        case "Poor":      return "🔴 Poor"
+        case "Offline":   return "💀 <span style='color:#991b1b;font-weight:bold;'>Offline</span>"
         default:          return "${h}"
     }
 }
@@ -733,11 +709,9 @@ def activitySummaryPage() {
             href(name: "toForceScan", page: "forceScanPage",
                  title: "🔄 Force Scan Now",
                  description: "Tap to immediately check all monitored devices")
-            if (settings?.enableSnooze != false) {
-                href(name: "toSnoozeFromSummary", page: "snoozeManagePage",
-                     title: "😴 Manage Snoozed Devices",
-                     description: "Snooze devices or clear active snoozes")
-            }
+            href(name: "toSnoozeFromSummary", page: "snoozeManagePage",
+                 title: "😴 Manage Snoozed Devices",
+                 description: "Snooze devices or clear active snoozes")
 
             def devList = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
             if (!devList) { paragraph "No devices found. Please select devices on the main page first."; return }
@@ -752,6 +726,9 @@ def activitySummaryPage() {
                 return a.displayName.trim() <=> b.displayName.trim()
             }
 
+            // v1.3.1: clickable device names via hub local IP (LAN only — same pattern as Battery Monitor 2.0)
+            def hubIp = location?.hub?.localIP ?: ""
+
             def table = "<table style='width:100%; border-collapse: collapse; border: 1px solid #ccc;'>"
             table += "<tr style='font-weight:bold; background-color:#f0f0f0;'>"
             table += "<td style='padding:4px; border:1px solid #ccc;'>Device</td>"
@@ -764,34 +741,40 @@ def activitySummaryPage() {
 
             def rowNum = 0
             devList.each { device ->
-                def data        = state.history?.get(device.id)
-                def protocol    = getProtocol(device)
-                def lastSeen    = data?.lastSeen ? formatTimeAgo(data.lastSeen) : "Never"
-                def avgInt      = data?.userInterval ? formatInterval(data.userInterval) + " (manual)" :
-                                  data?.avgInterval  ? formatInterval(data.avgInterval) : "Learning..."
-                def samples     = data?.samples?.size() ?: 0
-                def snoozed     = isDeviceSnoozed(device.id as String)
-                def lowActivity = isLowActivityDevice(device)
+                def data     = state.history?.get(device.id)
+                def protocol = getProtocol(device)
+                def lastSeen = data?.lastSeen ? formatTimeAgo(data.lastSeen) : "Never"
+                def avgInt   = data?.userInterval ? formatInterval(data.userInterval) + " (manual)" :
+                               data?.avgInterval  ? formatInterval(data.avgInterval) : "Learning..."
+                def samples  = data?.samples?.size() ?: 0
+                def snoozed  = isDeviceSnoozed(device.id as String)
                 def hasOverride = settings["protocolOverride_${device.id}"] &&
                                   settings["protocolOverride_${device.id}"] != "Auto-detect"
-                def rowBg       = snoozed ? "#f8f8f8" : (rowNum % 2 == 0) ? "#ffffff" : "#ebebeb"
-                def protocolDisplay = hasOverride ?
-                    "${protocol} <span style='color:#94a3b8;font-size:10px;'>(override)</span>" : protocol
-                def samplesDisplay = lowActivity ?
-                    "${samples} <span style='color:#f97316;font-size:10px;'>⚠ Low Activity</span>" : "${samples}"
+                def rowBg    = snoozed ? "#f8f8f8" : (rowNum % 2 == 0) ? "#ffffff" : "#ebebeb"
+                def protocolDisplay = hasOverride ? "${protocol} <span style='color:#94a3b8;font-size:10px;'>(override)</span>" : protocol
                 rowNum++
 
+                def deviceLink
+                if (hubIp) {
+                    deviceLink = "<a href='http://${hubIp}/device/edit/${device.id}' target='_blank'>${device.displayName}</a>"
+                } else {
+                    deviceLink = device.displayName
+                }
+
                 table += "<tr style='background-color:${rowBg};${snoozed ? "opacity:0.6;" : ""}'>"
-                table += "<td style='padding:4px; border:1px solid #ccc;'>${device.displayName}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${deviceLink}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'><span style='color:${getProtocolColor(protocol)};font-weight:bold;'>${protocolDisplay}</span></td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${getHealthDisplay(device)}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${lastSeen}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${avgInt}</td>"
-                table += "<td style='padding:4px; border:1px solid #ccc;'>${samplesDisplay}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${samples}</td>"
                 table += "</tr>"
             }
 
             table += "</table>"
+            if (hubIp) {
+                paragraph "<span style='color:#94a3b8;font-size:11px;'>⚠ Device links are accessible on your local network only.</span>"
+            }
             paragraph "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>"
         }
 
@@ -817,8 +800,7 @@ def protocolOverridePage() {
             paragraph "Some Hub Mesh linked devices and LAN devices cannot be automatically identified. " +
                       "Use this page to manually set the correct protocol for those devices.<br><br>" +
                       "The override always takes priority over auto-detection. " +
-                      "If auto-detection later improves to catch the device correctly, " +
-                      "the override still wins until you clear it back to <b>Auto-detect</b>."
+                      "To restore auto-detection, set the override back to <b>Auto-detect</b>."
         }
 
         if (!devList || devList.size() == 0) {
@@ -829,7 +811,7 @@ def protocolOverridePage() {
         }
 
         section("<b>Unidentified Devices (${devList.size()})</b>") {
-            paragraph "The following devices are showing as <b>Hub Mesh</b> or <b>LAN</b> because their underlying protocol could not be determined automatically."
+            paragraph "The following devices are currently showing as <b>Hub Mesh</b> or <b>LAN</b> because their underlying protocol could not be determined automatically."
             devList.each { device ->
                 def currentProtocol = getProtocol(device)
                 def currentOverride = settings["protocolOverride_${device.id}"] ?: "Auto-detect"
@@ -839,15 +821,16 @@ def protocolOverridePage() {
                       options: [
                           "Auto-detect",
                           "Zigbee", "Z-Wave", "Matter",
-                          "Hub Mesh (Zigbee)", "Hub Mesh (Z-Wave)", "Hub Mesh (Matter)",
-                          "Hub Mesh", "LAN", "Virtual", "Hub Variable"
+                          "Hub Mesh (Zigbee)", "Hub Mesh (Z-Wave)", "Hub Mesh (Matter)", "Hub Mesh",
+                          "LAN", "Virtual", "Hub Variable"
                       ],
                       defaultValue: currentOverride,
                       required: false
             }
         }
+
         section("") {
-            paragraph "Tap <b>Done</b> to save. Changes take effect on the next scan."
+            paragraph "Tap <b>Done</b> to save overrides. Changes take effect on the next scan."
         }
     }
 }
@@ -869,6 +852,7 @@ def snoozeManagePage() {
     def activeList  = devList.findAll { !isDeviceSnoozed(it.id as String) }
 
     dynamicPage(name: "snoozeManagePage", title: "😴 Manage Snoozed Devices", install: false) {
+
         section("<b>Snooze Devices</b>") {
             paragraph "Select devices to snooze for <b>${settings?.snoozeDurationHours ?: 24} hours</b>. Snoozed devices are excluded from notifications and the Problem Devices page until the snooze expires."
             if (activeList) {
@@ -876,21 +860,27 @@ def snoozeManagePage() {
                       title: "Select devices to snooze:",
                       options: activeList.collectEntries { [(it.id): "${it.displayName} (${state.health?.get(it.id) ?: 'Pending'})"] }
                                         .sort { a, b -> a.value <=> b.value },
-                      multiple: true, required: false
+                      multiple: true,
+                      required: false
             } else {
                 paragraph "All devices are currently snoozed."
             }
         }
         if (activeList) {
             section() {
-                input "confirmSnooze", "bool", title: "Confirm — snooze selected devices",
-                      defaultValue: false, submitOnChange: true
+                input "confirmSnooze", "bool",
+                      title: "Confirm — snooze selected devices",
+                      defaultValue: false,
+                      submitOnChange: true
             }
             if (settings?.confirmSnooze == true) {
                 section("<b>Snooze Result</b>") {
                     if (settings?.devicesToSnooze) {
                         def count = 0
-                        settings.devicesToSnooze.each { snoozeDevice(it); count++ }
+                        settings.devicesToSnooze.each { deviceId ->
+                            snoozeDevice(deviceId)
+                            count++
+                        }
                         app.updateSetting("confirmSnooze", [value: false, type: "bool"])
                         paragraph "✅ Snoozed ${count} device(s) for ${settings?.snoozeDurationHours ?: 24} hours."
                     } else {
@@ -906,25 +896,32 @@ def snoozeManagePage() {
                 paragraph snoozedList.collect { device ->
                     "😴 ${device.displayName} — ${formatSnoozeRemaining(device.id as String)}"
                 }.join("\n")
+
                 input "devicesToUnsnooze", "enum",
                       title: "Select devices to unsnooze early:",
                       options: snoozedList.collectEntries { [(it.id): "${it.displayName} (${formatSnoozeRemaining(it.id as String)})"] }
                                          .sort { a, b -> a.value <=> b.value },
-                      multiple: true, required: false
+                      multiple: true,
+                      required: false
             } else {
                 paragraph "No devices are currently snoozed."
             }
         }
         if (snoozedList) {
             section() {
-                input "confirmUnsnooze", "bool", title: "Confirm — unsnooze selected devices",
-                      defaultValue: false, submitOnChange: true
+                input "confirmUnsnooze", "bool",
+                      title: "Confirm — unsnooze selected devices",
+                      defaultValue: false,
+                      submitOnChange: true
             }
             if (settings?.confirmUnsnooze == true) {
                 section("<b>Unsnooze Result</b>") {
                     if (settings?.devicesToUnsnooze) {
                         def count = 0
-                        settings.devicesToUnsnooze.each { unsnoozeDevice(it); count++ }
+                        settings.devicesToUnsnooze.each { deviceId ->
+                            unsnoozeDevice(deviceId)
+                            count++
+                        }
                         app.updateSetting("confirmUnsnooze", [value: false, type: "bool"])
                         paragraph "✅ Unsnoozed ${count} device(s)."
                     } else {
@@ -960,6 +957,9 @@ def problemDevicesPage() {
                 (healthPriority[hA] ?: 3) <=> (healthPriority[hB] ?: 3)
             }
 
+            // v1.3.1: clickable device names
+            def hubIp = location?.hub?.localIP ?: ""
+
             def table = "<table style='width:100%; border-collapse: collapse; border: 1px solid #ccc;'>"
             table += "<tr style='font-weight:bold; background-color:#f0f0f0;'>"
             table += "<td style='padding:4px; border:1px solid #ccc;'>Device</td>"
@@ -979,8 +979,15 @@ def problemDevicesPage() {
                 def rowBg    = (rowNum % 2 == 0) ? "#ffffff" : "#ebebeb"
                 rowNum++
 
+                def deviceLink
+                if (hubIp) {
+                    deviceLink = "<a href='http://${hubIp}/device/edit/${device.id}' target='_blank'>${device.displayName}</a>"
+                } else {
+                    deviceLink = device.displayName
+                }
+
                 table += "<tr style='background-color:${rowBg};'>"
-                table += "<td style='padding:4px; border:1px solid #ccc;'>${device.displayName}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${deviceLink}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'><span style='color:${getProtocolColor(protocol)};font-weight:bold;'>${protocol}</span></td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${getHealthDisplay(device)}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${lastSeen}</td>"
@@ -989,6 +996,9 @@ def problemDevicesPage() {
             }
 
             table += "</table>"
+            if (hubIp) {
+                paragraph "<span style='color:#94a3b8;font-size:11px;'>⚠ Device links are accessible on your local network only.</span>"
+            }
             paragraph "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>"
         }
     }
@@ -1004,11 +1014,13 @@ def forceScanPage() {
     dynamicPage(name: "forceScanPage", title: "Force Scan", install: false) {
         section("<b>Scan Complete</b>") {
             def devList = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
+            def intervalStr     = settings?.scanInterval ?: "3"
+            def intervalMinutes = (intervalStr.toFloat() * 60).toInteger()
+            def minGate         = Math.min(intervalMinutes * 0.5, 30).toInteger()
             paragraph "✅ Device scan complete — ${devList.size()} device(s) checked. " +
                       "Return to Device Activity Summary to see updated values.<br><br>" +
-                      "<b>Note:</b> A new check-in sample is only recorded if at least 10 minutes " +
-                      "have passed since the last recorded activity. Poor and Offline devices with a " +
-                      "refresh command have been sent a verification ping — check back next scan."
+                      "<b>Note:</b> A new check-in sample is only recorded if at least <b>${minGate} minutes</b> " +
+                      "have passed since the last recorded activity (half the scan interval, max 30 min)."
         }
     }
 }
@@ -1034,7 +1046,8 @@ def resetHistoryPage() {
                       title: "Select devices to reset",
                       options: devList.collectEntries { [(it.id): "${it.displayName} (${state.health?.get(it.id) ?: 'Pending'})"] }
                                       .sort { a, b -> a.value <=> b.value },
-                      multiple: true, required: false
+                      multiple: true,
+                      required: false
             }
         }
         section("<b>Confirm Reset</b>") {
@@ -1043,7 +1056,8 @@ def resetHistoryPage() {
                   defaultValue: false
         }
         section() {
-            href(name: "toResetConfirm", page: "resetHistoryConfirmPage", title: "Submit Reset")
+            href(name: "toResetConfirm", page: "resetHistoryConfirmPage",
+                 title: "Submit Reset")
         }
     }
 }
@@ -1053,6 +1067,7 @@ def resetHistoryPage() {
 // ============================================================
 def resetHistoryConfirmPage() {
     def devList = getAllMonitoredDevices()
+
     dynamicPage(name: "resetHistoryConfirmPage", title: "Reset Device History", install: false) {
         section("<b>Result</b>") {
             if (!resetHistoryConfirm) {
@@ -1062,29 +1077,31 @@ def resetHistoryConfirmPage() {
             } else {
                 def successCount = 0
                 def resetNames   = []
+
                 resetHistoryDevices.each { deviceId ->
                     def device = devList.find { it.id == deviceId }
                     if (device) {
                         state.history[device.id] = [
-                            lastSeen:             now(),
-                            lastCheckin:          now(),
-                            samples:              [],
-                            avgInterval:          null,
-                            userInterval:         state.history?.get(device.id)?.userInterval,
-                            missedCheckins:       0,
-                            protocol:             getProtocol(device),
-                            refreshSentAt:        null,
-                            refreshSentForHealth: null,
-                            refreshConfirmed:     false
+                            lastSeen:       now(),
+                            lastCheckin:    now(),
+                            samples:        [],
+                            avgInterval:    null,
+                            userInterval:   state.history?.get(device.id)?.userInterval,
+                            missedCheckins: 0,
+                            protocol:       getProtocol(device)
                         ]
+                        // v1.3.1: force persist after reset
+                        state.history = state.history
                         state.health[device.id] = "Pending"
                         resetNames << device.displayName
                         successCount++
                         if (debugEnabled()) log.debug "Reset history for ${device.displayName}"
                     }
                 }
+
                 if (successCount > 0) {
-                    paragraph "✅ History reset for ${successCount} device(s): ${resetNames.join(', ')}. Health will show Pending while fresh data is collected."
+                    paragraph "✅ History reset for ${successCount} device(s): ${resetNames.join(', ')}. " +
+                              "Health will show Pending while fresh data is collected."
                 } else {
                     paragraph "No valid devices found."
                 }
@@ -1105,14 +1122,25 @@ def sendNotificationPage() {
                          (settings?.enablePush == true)
         def notifyOn   = settings?.enablePush != false
 
-        if (!hasDevices) { section("<b>Cannot Send</b>") { paragraph "⚠️ No monitored devices are selected." }; return }
-        if (!notifyOn)   { section("<b>Cannot Send</b>") { paragraph "⚠️ Notifications are turned off." }; return }
-        if (!hasTargets) { section("<b>Cannot Send</b>") { paragraph "⚠️ No notification devices configured." }; return }
+        if (!hasDevices) {
+            section("<b>Cannot Send</b>") { paragraph "⚠️ No monitored devices are selected." }
+            return
+        }
+        if (!notifyOn) {
+            section("<b>Cannot Send</b>") { paragraph "⚠️ Notifications are turned off." }
+            return
+        }
+        if (!hasTargets) {
+            section("<b>Cannot Send</b>") { paragraph "⚠️ No notification devices configured." }
+            return
+        }
 
         section("<b>Confirm</b>") {
             paragraph "This will send a device health summary notification now."
-            input "sendNowConfirm", "bool", title: "✅ Confirm — send the notification",
-                  defaultValue: false, submitOnChange: true
+            input "sendNowConfirm", "bool",
+                  title: "✅ Confirm — send the notification",
+                  defaultValue: false,
+                  submitOnChange: true
         }
         if (settings?.sendNowConfirm) {
             section("<b>Result</b>") {
@@ -1121,7 +1149,11 @@ def sendNotificationPage() {
                 def sentTo = []
                 if (settings?.notifyDevices)   sentTo.addAll(settings.notifyDevices.collect { it.displayName })
                 if (settings?.pushoverDevices) sentTo.addAll(settings.pushoverDevices.collect { "${it.displayName} (Pushover)" })
-                paragraph sentTo ? "✅ Notification sent to:\n" + sentTo.collect { "• ${it}" }.join("\n") : "✅ Notification sent via hub push."
+                if (sentTo) {
+                    paragraph "✅ Notification sent to:\n" + sentTo.collect { "• ${it}" }.join("\n")
+                } else {
+                    paragraph "✅ Notification sent via hub push."
+                }
             }
         }
     }
@@ -1167,7 +1199,9 @@ def scheduledSummary() {
     devList.each { device ->
         if (!isDeviceSnoozed(device.id as String)) {
             def h = state.health?.get(device.id) ?: "Pending"
-            if (sections.containsKey(h)) sections[h].list << device.displayName.trim()
+            if (sections.containsKey(h)) {
+                sections[h].list << device.displayName.trim()
+            }
         }
     }
 
@@ -1179,7 +1213,11 @@ def scheduledSummary() {
     sections.each { health, data ->
         if (data.enabled) {
             body += "\n${data.emoji} ${health}:\n"
-            body += data.list ? data.list.collect { "• ${it}\n" }.join() : "None\n"
+            if (data.list) {
+                data.list.each { name -> body += "• ${name}\n" }
+            } else {
+                body += "None\n"
+            }
         }
     }
 
@@ -1202,6 +1240,9 @@ def infoPage(Map params = [:]) {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
                       "Device Health Monitor tracks how frequently your devices check in with the hub. " +
                       "It learns each device's normal check-in pattern and flags anything that goes quiet, checks in late, or drops offline.<br><br>" +
+                      "All monitoring is done via scheduled scans of Hubitat's built-in Last Activity data. " +
+                      "No Maker API is required. No event subscriptions are used. " +
+                      "The app polls each device's last activity timestamp on a configurable schedule and compares it against the learned baseline.<br><br>" +
                       "This is different from battery monitoring — a device can have a full battery but still have mesh or connectivity issues. " +
                       "It also monitors LAN, cloud, virtual devices, and hub variable connectors, making it useful for catching broken integrations and automations that have stopped firing.</div>"
         }
@@ -1210,15 +1251,15 @@ def infoPage(Map params = [:]) {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
                       "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'><table style='width:100%; border-collapse: collapse;'>" +
                       "<tr style='font-weight:bold;'><td>Health</td><td>Meaning</td></tr>" +
-                      "<tr><td>⏳ Pending</td><td>Not enough check-in samples yet</td></tr>" +
+                      "<tr><td>⏳ Pending</td><td>Not enough check-in samples yet (need 3)</td></tr>" +
                       "<tr><td>🟢 Excellent</td><td>Checking in within 1.2x of baseline — right on schedule</td></tr>" +
                       "<tr><td>🟢 Good</td><td>Checking in within 2x of baseline — slightly late but normal</td></tr>" +
                       "<tr><td>🟠 Fair</td><td>Checking in within 3x of baseline — worth watching</td></tr>" +
-                      "<tr><td>🔴 Poor</td><td>Late beyond 3x baseline — likely a problem</td></tr>" +
+                      "<tr><td>🔴 Poor</td><td>Checking in beyond 3x of baseline — likely a problem</td></tr>" +
                       "<tr><td>💀 <span style='color:#991b1b;font-weight:bold;'>Offline</span></td><td>No activity for ${settings?.offlineThresholdHours ?: 72}h — hard threshold only</td></tr>" +
-                      "<tr><td>😴 Snoozed</td><td>Excluded from notifications for a set duration</td></tr>" +
+                      "<tr><td>😴 Snoozed</td><td>Excluded from notifications for a set duration — still visible in reports</td></tr>" +
                       "</table></div><br>" +
-                      "<b>Important:</b> Offline is triggered exclusively by the hard hour threshold — never by the ratio check. A device will show at most 🔴 Poor until the hard threshold is reached.<br><br>" +
+                      "<b>Note:</b> Offline is triggered <i>only</i> by the hard inactivity threshold. The ratio score maxes at Poor — it never causes Offline on its own.<br><br>" +
                       "<b>Protocol Colors:</b><br>" +
                       "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'><table style='width:100%; border-collapse: collapse;'>" +
                       "<tr style='font-weight:bold;'><td>Color</td><td>Protocol</td></tr>" +
@@ -1232,69 +1273,78 @@ def infoPage(Map params = [:]) {
                       "</table></div></div>"
         }
 
-        section("<b>🔄 Offline Verification</b>") {
+        section("<b>⏳ Baseline Learning</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "When a device reaches 🔴 Poor or 💀 Offline health, the app automatically sends a <b>refresh()</b> command to the device if it supports one. " +
-                      "This is a lightweight verification ping — it does not affect other devices and adds minimal hub load since only Poor/Offline devices are polled.<br><br>" +
-                      "<b>How it works:</b><br>" +
-                      "1. Device reaches Poor or Offline during a scan<br>" +
-                      "2. App sends refresh() to the device<br>" +
-                      "3. Activity Summary shows <b>🔄 verifying...</b> next to the health rating<br>" +
-                      "4. On the next scan — if Last Activity updated, the device responded and health will improve naturally<br>" +
-                      "5. If Last Activity did not update, the problem is confirmed real<br><br>" +
-                      "<b>Note:</b> Not all devices support refresh(). Battery-powered Z-Wave devices that are not FLiRS will not respond. Zigbee devices, mains-powered Z-Wave, LAN, and Hub Mesh devices generally will.</div>"
-        }
-
-        section("<b>⏳ Baseline Learning & Sample Requirements</b>") {
-            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "Each device starts as <b>⏳ Pending</b> while the app learns its normal check-in frequency using EWMA smoothing.<br><br>" +
-                      "<b>Minimum samples before health scoring:</b><br>" +
-                      "• <b>LAN and Hub Mesh devices</b> — 5 samples required<br>" +
-                      "• <b>All other protocols</b> — 3 samples required<br><br>" +
-                      "<b>⚠ Low Activity warning:</b> If a device has been monitored for more than 7 days with fewer than 3 samples, the Samples column shows a <span style='color:#f97316;'>⚠ Low Activity</span> warning. Normal for infrequently used lights, switches, and fans.</div>"
-        }
-
-        section("<b>⚠️ Manually Controlled Devices</b>") {
-            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "Fans, lights, and switches that are only used on demand can show 🔴 Poor when not in use — even when working perfectly. " +
-                      "This happens because the baseline learns how often the device gets used rather than how often it checks in. " +
-                      "A fan used every hour during the day builds a short baseline — then looks sick when nobody touches it overnight.<br><br>" +
-                      "The app is most valuable for sensors, integrations, and hub variable connectors that have predictable check-in patterns. " +
-                      "For manually controlled devices consider raising the <b>Offline after inactivity</b> threshold or simply not adding them to the monitored list.<br><br>" +
-                      "Offline verification (v1.3.0) helps confirm whether a Poor/Offline alert is real by sending a refresh ping before notifying. " +
-                      "Full Active/Passive device classification is planned for v2.0.</div>"
+                      "Each device starts as <b>⏳ Pending</b> while the app learns its normal check-in frequency. " +
+                      "After 3 samples the app calculates a baseline using EWMA smoothing.<br><br>" +
+                      "A sample is recorded only when the elapsed time since the last check-in is at least half the scan interval (capped at 30 minutes). " +
+                      "This prevents burst-firing devices (switches, contact sensors) from flooding the sample buffer with very short intervals, " +
+                      "while still allowing sub-hourly activity to be captured on short scan schedules.<br><br>" +
+                      "The baseline adapts continuously as new check-ins arrive. " +
+                      "Use Reset Device History if a device's baseline needs to be cleared after a mesh change or hardware swap.</div>"
         }
 
         section("<b>🔀 Virtual & Hub Variable Devices</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "<b><span style='color:#ec4899;'>Virtual</span> devices</b> — fire on demand rather than on a fixed schedule.<br><br>" +
-                      "<b><span style='color:#eab308;'>Hub Variable</span> connectors</b> — only update when a Rule Machine rule runs. A hub variable connector showing Fair, Poor, or Offline is a strong signal that a Rule Machine rule has stopped running.<br><br>" +
-                      "<b>Filtered sampling:</b> Both protocols use a filtered EWMA baseline — only check-ins within the scan interval are recorded as samples, preventing the baseline from inflating during idle periods.</div>"
+                      "Virtual devices and hub variable connectors are detected as separate protocols and displayed in their own colors.<br><br>" +
+                      "<b><span style='color:#ec4899;'>Virtual</span> devices</b> — virtual switches, sensors, and other app-created virtual devices. " +
+                      "These fire on demand rather than on a fixed schedule.<br><br>" +
+                      "<b><span style='color:#eab308;'>Hub Variable</span> connectors</b> — devices linked to hub variables in Rule Machine. " +
+                      "These only update when a rule runs — making them excellent canaries for broken automations. " +
+                      "A hub variable connector showing Fair, Poor, or Offline is a strong signal that a Rule Machine rule has stopped running.<br><br>" +
+                      "<b>Filtered sampling:</b> Both protocols use a filtered EWMA baseline. " +
+                      "Only check-ins that occurred within the scan interval are recorded as samples. " +
+                      "This prevents the baseline from inflating during periods when rules are not running.</div>"
         }
 
         section("<b>🔗 Hub Mesh Protocol Detection</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "Hub Mesh linked devices show <b>LNK</b> as their controller type regardless of the underlying protocol. The app attempts to identify the real protocol using Encoding data values, Zigbee cluster data, driver name heuristics, and known manufacturer names.<br><br>" +
-                      "When identified the device shows as <b>Hub Mesh (Zigbee)</b>, <b>Hub Mesh (Z-Wave)</b>, or <b>Hub Mesh (Matter)</b>. When it cannot be identified it shows as plain <b><span style='color:#06b6d4;'>Hub Mesh</span></b>.<br><br>" +
-                      "<b>Protocol Overrides:</b> Use the <b>🔧 Protocol Overrides</b> page to manually set the protocol for any unidentified device. The override always wins over auto-detection. Overridden devices show a small <i>(override)</i> label in the Activity Summary.</div>"
+                      "Hub Mesh linked devices always show <b>LNK</b> as their controller type regardless of the underlying protocol on the source hub. " +
+                      "The app attempts to determine the real protocol using several methods in order:<br><br>" +
+                      "1. <b>Encoding data value</b> — some devices (LUMI/Aqara) carry an Encoding field<br>" +
+                      "2. <b>Cluster data values</b> — Zigbee cluster data is often preserved on linked devices<br>" +
+                      "3. <b>Driver name heuristics</b> — driver names often contain protocol keywords<br>" +
+                      "4. <b>Manufacturer heuristics</b> — known Zigbee manufacturers (CentraLite, LUMI, IKEA, etc.)<br><br>" +
+                      "When it cannot be identified the device shows as plain <b><span style='color:#06b6d4;'>Hub Mesh</span></b> in cyan. " +
+                      "Use <b>🔧 Protocol Overrides</b> to set it manually if needed.</div>"
         }
 
         section("<b>😴 Snooze</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "Per-device snooze can be enabled or disabled in <b>Monitoring Settings</b>. When enabled, use <b>Manage Snoozed Devices</b> from the main page or Activity Summary.<br><br>" +
-                      "Snoozed devices are excluded from notifications and the Problem Devices page. They still appear in the Activity Summary with a 😴 indicator and countdown. Disabling snooze clears all active snoozes immediately.</div>"
+                      "Use <b>Manage Snoozed Devices</b> from the main page or Activity Summary to snooze individual devices. " +
+                      "Snoozed devices are excluded from notifications and the Problem Devices page for the configured snooze duration (default 24h).<br><br>" +
+                      "Snoozed devices still appear in the Activity Summary with a 😴 indicator and a countdown showing time remaining. " +
+                      "You can unsnooze devices early at any time. Snoozes expire automatically when the duration passes.</div>"
+        }
+
+        section("<b>📋 Device Selection</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "All devices are selected from a single list. Protocol is detected automatically.<br><br>" +
+                      "<b>Protocol Detection:</b><br>" +
+                      "• <span style='color:#3b82f6;font-weight:bold;'>Zigbee</span> — directly paired Zigbee devices<br>" +
+                      "• <span style='color:#8b5cf6;font-weight:bold;'>Z-Wave</span> — directly paired Z-Wave devices<br>" +
+                      "• <span style='color:#f97316;font-weight:bold;'>Matter</span> — Matter devices<br>" +
+                      "• <span style='color:#06b6d4;font-weight:bold;'>Hub Mesh</span> — linked from another Hubitat hub (sub-protocol detected where possible)<br>" +
+                      "• <span style='color:#14b8a6;font-weight:bold;'>LAN</span> — local integrations (Hue, Shelly), cloud integrations (Govee, Tesla, Ecobee)<br>" +
+                      "• <span style='color:#ec4899;font-weight:bold;'>Virtual</span> — virtual switches, sensors, and app-created virtual devices<br>" +
+                      "• <span style='color:#eab308;font-weight:bold;'>Hub Variable</span> — hub variable connector devices<br><br>" +
+                      "<b>Notes:</b><br>" +
+                      "• Manually controlled devices (fans, lights, switches you operate by hand) will show Poor when not in use — this is expected. " +
+                      "Use snooze, raise the offline threshold, or simply don't monitor those devices.<br>" +
+                      "• Bluetooth devices (C-8 Pro only) will appear as LAN until a controllerType value is confirmed<br>" +
+                      "• If a device shows as Hub Mesh or LAN and you know the real protocol, use Protocol Overrides to set it manually</div>"
         }
 
         section("<b>💡 Tips for Best Results</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "• The app works best on sensors, integrations, and automations — not manually controlled devices<br>" +
                       "• Let devices run for at least a day before trusting health ratings<br>" +
                       "• Set Scan Interval to Hourly to build baselines faster<br>" +
-                      "• Fans, lights, and switches showing Poor when idle is a known limitation — offline verification helps confirm if it's real<br>" +
+                      "• Use Every 30 Minutes for virtual devices or hub variable connectors tied to frequent automations<br>" +
+                      "• Devices that only wake on events (motion, contact) will have longer natural intervals — this is normal<br>" +
                       "• A hub variable connector showing Offline means the Rule Machine rule tied to that variable has stopped running<br>" +
-                      "• Hub Mesh devices showing plain cyan Hub Mesh can be identified manually via Protocol Overrides<br>" +
                       "• No hub event subscriptions are used — all monitoring is done via scheduled scans of Hubitat's Last Activity data<br>" +
-                      "• Use Mode Restriction in Monitoring Settings to suppress notifications during certain hub modes</div>"
+                      "• Use Mode Restriction to suppress notifications during certain hub modes (e.g. Away, Night)<br>" +
+                      "• Device names in the Activity Summary and Problem Devices pages are clickable links to the device edit page (local network only)</div>"
         }
     }
 }
