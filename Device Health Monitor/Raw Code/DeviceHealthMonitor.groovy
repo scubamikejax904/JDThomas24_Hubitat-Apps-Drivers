@@ -232,8 +232,8 @@ def isModeOK() {
 def isLowActivityDevice(device) {
     def data = state.history?.get(device.id)
     if (!data) return false
-    def samples      = data.samples?.size() ?: 0
-    def seededAt     = data.lastCheckin ?: data.lastSeen
+    def samples         = data.samples?.size() ?: 0
+    def seededAt        = data.lastCheckin ?: data.lastSeen
     if (!seededAt) return false
     def daysSinceSeeded = (now() - safeTime(seededAt)) / (1000 * 60 * 60 * 24)
     return (samples < 3 && daysSinceSeeded >= 7)
@@ -346,8 +346,8 @@ def mainPage() {
         section("") {
             paragraph "Scan: <b><span style='color:blue;'>${currentScan}</span></b> | " +
                       "Offline: <b><span style='color:blue;'>${currentThreshold}h</span></b> | " +
-                      "Snooze: <b><span style='color:blue;'>${currentSnooze}h</span></b>" +
-                      (modeConfigured ? " | Mode: <b><span style='color:blue;'>${settings.restrictedModes.join(', ')}</span></b>" : "") +
+                      "Snooze: <b><span style='color:blue;'>${currentSnooze}h</span></b> | " +
+                      "Mode Restriction: <b><span style='color:blue;'>${settings?.enableModeRestriction ? (modeConfigured ? settings.restrictedModes.join(', ') : 'ON — no modes selected') : 'OFF'}</span></b>" +
                       " — tap <b>Monitoring Settings</b> above to change."
         }
 
@@ -569,8 +569,8 @@ def scanAllDevices() {
 // ===================== HEALTH SCORING ======================
 // ============================================================
 def updateHealth(device) {
-    def id       = device.id
-    def data     = state.history[id]
+    def id         = device.id
+    def data       = state.history[id]
     if (!data) return
 
     def protocol   = getProtocol(device)
@@ -1230,7 +1230,7 @@ def infoPage(Map params = [:]) {
                       "• A hub variable connector showing Offline means the Rule Machine rule tied to that variable has stopped running<br>" +
                       "• Hub Mesh devices showing plain cyan Hub Mesh can be identified manually via Protocol Overrides<br>" +
                       "• No hub event subscriptions are used — all monitoring is done via scheduled scans of Hubitat's Last Activity data<br>" +
-                      "• Use Mode Restriction to suppress notifications during certain hub modes (e.g. Away, Night)</div>"
+                      "• Use Mode Restriction in Monitoring Settings to suppress notifications during certain hub modes (e.g. Away, Night)</div>"
         }
     }
 }
