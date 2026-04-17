@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
-    version: "1.2.2",
+    version: "1.3.0",
     doNotFocus: true
 )
 
@@ -47,10 +47,7 @@ def initialize() {
     if (state.history == null) state.history = [:]
     if (state.health  == null) state.health  = [:]
     if (state.snoozed == null) state.snoozed = [:]
-    // Clear snoozed state if snooze feature is disabled
-    if (settings?.enableSnooze == false) {
-        state.snoozed = [:]
-    }
+    if (settings?.enableSnooze == false) state.snoozed = [:]
     scheduleScanInterval()
     scheduleReportFrequency()
     if (debugEnabled()) log.debug "Monitoring ${getAllMonitoredDevices().findAll { getProtocol(it) != 'Unknown' }.size()} device(s)"
@@ -127,27 +124,21 @@ def getAllMonitoredDevices() {
 
 def getProtocol(device) {
     try {
-        // ── User override — always wins ──────────────────────
         def override = settings["protocolOverride_${device.id}"]
         if (override && override != "" && override != "Auto-detect") return override
 
-        // ── Hub Variable Connector ───────────────────────────
         def driverName = (device.typeName ?: "").toLowerCase()
         def devName    = (device.name     ?: "").toLowerCase()
         if (driverName.contains("hub variable") || driverName.contains("variable connector") ||
             devName.contains("hub variable")    || devName.contains("variable connector")) {
             return "Hub Variable"
         }
-
-        // ── Virtual ──────────────────────────────────────────
         if (driverName.contains("virtual") || devName.contains("virtual")) {
             return "Virtual"
         }
 
-        // ── Radio protocols via controllerType ───────────────
         def devData = device.properties
 
-        // ── Hub Mesh — detect underlying protocol ────────────
         if (devData?.controllerType == "LNK") {
             def encoding = device.getDataValue("Encoding")
             if (encoding?.toLowerCase() == "zigbee")                          return "Hub Mesh (Zigbee)"
@@ -174,15 +165,11 @@ def getProtocol(device) {
         if (devData?.controllerType == "ZGB") return "Zigbee"
         if (devData?.controllerType == "ZWV") return "Z-Wave"
         if (devData?.controllerType == "MAT") return "Matter"
-        // Bluetooth (C-8 Pro only) — controllerType unconfirmed, placeholder for future
-        // if (devData?.controllerType == "BLE") return "Bluetooth"
 
-        // ── Zigbee fallbacks ─────────────────────────────────
         if (device.getDataValue("Endpoint Id")                != null) return "Zigbee"
         if (device.getDataValue("endpointId")                 != null) return "Zigbee"
         if (device.getDataValue("zigbeeNodeType")             != null) return "Zigbee"
         if (device.getDataValue("zigbeeId")                   != null) return "Zigbee"
-        // ── Z-Wave fallbacks ─────────────────────────────────
         if (device.getDataValue("In Clusters")                != null) return "Z-Wave"
         if (device.getDataValue("inClusters")                 != null) return "Z-Wave"
         if (device.getDataValue("zwaveSecurePairingComplete") != null) return "Z-Wave"
@@ -231,9 +218,6 @@ def isModeOK() {
     return settings.restrictedModes.contains(location.mode)
 }
 
-// ============================================================
-// ===================== LOW ACTIVITY CHECK ==================
-// ============================================================
 def isLowActivityDevice(device) {
     def data = state.history?.get(device.id)
     if (!data) return false
@@ -245,13 +229,43 @@ def isLowActivityDevice(device) {
 }
 
 // ============================================================
+// ===================== OFFLINE VERIFICATION ================
+// Sends refresh() to Poor/Offline devices that support it.
+// On the next scan if Last Activity has updated the health
+// improves naturally. If not the alert is confirmed real.
+// ============================================================
+def triggerOfflineVerification(device) {
+    try {
+        if (!device.hasCommand("refresh")) {
+            if (debugEnabled()) log.debug "${device.displayName}: no refresh command — skipping verification"
+            return
+        }
+        def data = state.history[device.id]
+        if (!data) return
+
+        def currentHealth = state.health[device.id]
+        def lastSentHealth = data.refreshSentForHealth
+
+        // Only send if health just changed to Poor/Offline or hasn't been sent for this health state
+        if (lastSentHealth != currentHealth) {
+            data.refreshSentForHealth = currentHealth
+            data.refreshSentAt        = now()
+            data.refreshConfirmed     = false
+            device.refresh()
+            if (debugEnabled()) log.debug "${device.displayName}: refresh sent for offline verification (health=${currentHealth})"
+        }
+    } catch (e) {
+        log.warn "Offline verification failed for ${device.displayName}: ${e.message}"
+    }
+}
+
+// ============================================================
 // ===================== MAIN PAGE ===========================
 // ============================================================
 def mainPage() {
     applyCustomLabel()
     dynamicPage(name: "mainPage", title: "Device Health Monitor", install: true, uninstall: true) {
 
-        // ── App Display Name ─────────────────────────────────
         def hasCustomName = settings?.customAppName?.trim()
         section("<b>App Display Name (optional)</b>", hideable: true, hidden: hasCustomName) {
             paragraph "Enter a name to rename this app in your Hubitat app list."
@@ -312,7 +326,7 @@ def mainPage() {
         // ── Monitoring Settings ──────────────────────────────
         def scanIntervalLabel = ["0.5": "Every 30 Minutes", "1": "Hourly", "3": "Every 3 Hours", "6": "Every 6 Hours"]
         def currentScan       = scanIntervalLabel[settings?.scanInterval ?: "3"] ?: "Every 3 Hours"
-        def currentThreshold  = settings?.offlineThresholdHours ?: 48
+        def currentThreshold  = settings?.offlineThresholdHours ?: 72
         def currentSnooze     = settings?.snoozeDurationHours ?: 24
         def snoozeEnabled     = settings?.enableSnooze != false
         def modeConfigured    = settings?.enableModeRestriction && settings?.restrictedModes
@@ -328,7 +342,7 @@ def mainPage() {
 
             input "offlineThresholdHours", "number",
                   title: "Offline after inactivity (hours):",
-                  defaultValue: 48,
+                  defaultValue: 72,
                   required: true,
                   submitOnChange: true
 
@@ -431,7 +445,7 @@ def mainPage() {
         section("<b>Help & Support:</b>") {
             href(name: "toInfoPage", page: "infoPage",
                  title: "App Guide & Reference",
-                 description: "Health scoring, check-in baselines, snooze, and troubleshooting explained")
+                 description: "Health scoring, check-in baselines, offline verification, and troubleshooting explained")
             href url: "https://community.hubitat.com/t/beta-device-health-monitor/163229",
                  style: "external",
                  title: "💬 Hubitat Community Thread",
@@ -528,18 +542,30 @@ def scanAllDevices() {
 
             if (!data) {
                 state.history[id] = [
-                    lastSeen:       lastSeen,
-                    lastCheckin:    lastSeen,
-                    samples:        [],
-                    avgInterval:    null,
-                    userInterval:   null,
-                    missedCheckins: 0,
-                    protocol:       protocol
+                    lastSeen:              lastSeen,
+                    lastCheckin:           lastSeen,
+                    samples:               [],
+                    avgInterval:           null,
+                    userInterval:          null,
+                    missedCheckins:        0,
+                    protocol:              protocol,
+                    refreshSentAt:         null,
+                    refreshSentForHealth:  null,
+                    refreshConfirmed:      false
                 ]
                 state.health[id] = "Pending"
                 if (debugEnabled()) log.debug "Seeded ${device.displayName} (${protocol}) from lastActivity: ${formatTimeAgo(lastSeen)}"
             } else {
                 def prevLastSeen = data.lastSeen ?: lastSeen
+
+                // ── Check if refresh was sent and device responded ──
+                if (data.refreshSentAt && lastSeen > safeTime(data.refreshSentAt)) {
+                    data.refreshConfirmed    = true
+                    data.refreshSentAt       = null
+                    data.refreshSentForHealth = null
+                    if (debugEnabled()) log.debug "${device.displayName}: refresh confirmed — device responded after verification"
+                }
+
                 if (lastSeen > prevLastSeen) {
                     def elapsed = (lastSeen - prevLastSeen) / (1000 * 60)
                     if (elapsed >= 10) {
@@ -567,8 +593,19 @@ def scanAllDevices() {
                 } else {
                     if (debugEnabled()) log.debug "${device.displayName}: no new activity since last scan"
                 }
+
                 data.protocol = protocol
                 updateHealth(device)
+
+                // ── Trigger offline verification for Poor/Offline devices ──
+                if (state.health[id] in ["Poor", "Offline"]) {
+                    triggerOfflineVerification(device)
+                } else {
+                    // Health improved — clear verification state
+                    data.refreshSentAt        = null
+                    data.refreshSentForHealth = null
+                    data.refreshConfirmed     = false
+                }
             }
         } catch (e) {
             log.warn "Scan failed for ${device.displayName}: ${e.message}"
@@ -594,10 +631,9 @@ def updateHealth(device) {
         return
     }
 
-    def offlineThreshold     = ((settings?.offlineThresholdHours ?: 48) * 60).toDouble()
+    def offlineThreshold     = ((settings?.offlineThresholdHours ?: 72) * 60).toDouble()
     def minutesSinceLastSeen = (now() - (data.lastSeen ?: now())) / (1000 * 60)
 
-    // Offline only from hard threshold — never from ratio
     if (minutesSinceLastSeen >= offlineThreshold) {
         state.health[id] = "Offline"
         return
@@ -606,7 +642,6 @@ def updateHealth(device) {
     def baseline = (data.userInterval ?: data.avgInterval ?: 60).toDouble()
     def ratio    = minutesSinceLastSeen / baseline
 
-    // Ratio maxes out at Poor — Offline is threshold-only
     if      (ratio <= 1.2) state.health[id] = "Excellent"
     else if (ratio <= 2.0) state.health[id] = "Good"
     else if (ratio <= 3.0) state.health[id] = "Fair"
@@ -622,6 +657,7 @@ def getHealthDisplay(device) {
     def h       = state.health?.get(device.id) ?: "Pending"
     def samples = state.history?.get(device.id)?.samples?.size() ?: 0
     def snoozed = isDeviceSnoozed(device.id as String)
+    def data    = state.history?.get(device.id)
 
     if (snoozed) {
         def remaining = formatSnoozeRemaining(device.id as String)
@@ -632,12 +668,18 @@ def getHealthDisplay(device) {
         return "<span style='color:#94a3b8;'>⏳ Pending (${samples}/3 samples)</span>"
     }
 
+    // Show verification indicator if refresh was sent
+    def verifyTag = ""
+    if (data?.refreshSentAt && !data?.refreshConfirmed) {
+        verifyTag = " <span style='color:#94a3b8;font-size:10px;'>🔄 verifying...</span>"
+    }
+
     switch (h) {
         case "Excellent": return "🟢 Excellent"
         case "Good":      return "🟢 Good"
         case "Fair":      return "🟠 Fair"
-        case "Poor":      return "🔴 Poor"
-        case "Offline":   return "💀 <span style='color:#991b1b;font-weight:bold;'>Offline</span>"
+        case "Poor":      return "🔴 Poor${verifyTag}"
+        case "Offline":   return "💀 <span style='color:#991b1b;font-weight:bold;'>Offline</span>${verifyTag}"
         default:          return "${h}"
     }
 }
@@ -965,7 +1007,8 @@ def forceScanPage() {
             paragraph "✅ Device scan complete — ${devList.size()} device(s) checked. " +
                       "Return to Device Activity Summary to see updated values.<br><br>" +
                       "<b>Note:</b> A new check-in sample is only recorded if at least 10 minutes " +
-                      "have passed since the last recorded activity."
+                      "have passed since the last recorded activity. Poor and Offline devices with a " +
+                      "refresh command have been sent a verification ping — check back next scan."
         }
     }
 }
@@ -1023,13 +1066,16 @@ def resetHistoryConfirmPage() {
                     def device = devList.find { it.id == deviceId }
                     if (device) {
                         state.history[device.id] = [
-                            lastSeen:       now(),
-                            lastCheckin:    now(),
-                            samples:        [],
-                            avgInterval:    null,
-                            userInterval:   state.history?.get(device.id)?.userInterval,
-                            missedCheckins: 0,
-                            protocol:       getProtocol(device)
+                            lastSeen:             now(),
+                            lastCheckin:          now(),
+                            samples:              [],
+                            avgInterval:          null,
+                            userInterval:         state.history?.get(device.id)?.userInterval,
+                            missedCheckins:       0,
+                            protocol:             getProtocol(device),
+                            refreshSentAt:        null,
+                            refreshSentForHealth: null,
+                            refreshConfirmed:     false
                         ]
                         state.health[device.id] = "Pending"
                         resetNames << device.displayName
@@ -1169,10 +1215,10 @@ def infoPage(Map params = [:]) {
                       "<tr><td>🟢 Good</td><td>Checking in within 2x of baseline — slightly late but normal</td></tr>" +
                       "<tr><td>🟠 Fair</td><td>Checking in within 3x of baseline — worth watching</td></tr>" +
                       "<tr><td>🔴 Poor</td><td>Late beyond 3x baseline — likely a problem</td></tr>" +
-                      "<tr><td>💀 <span style='color:#991b1b;font-weight:bold;'>Offline</span></td><td>No activity for ${settings?.offlineThresholdHours ?: 48}h — hard threshold only</td></tr>" +
+                      "<tr><td>💀 <span style='color:#991b1b;font-weight:bold;'>Offline</span></td><td>No activity for ${settings?.offlineThresholdHours ?: 72}h — hard threshold only</td></tr>" +
                       "<tr><td>😴 Snoozed</td><td>Excluded from notifications for a set duration</td></tr>" +
                       "</table></div><br>" +
-                      "<b>Important:</b> Offline is triggered exclusively by the hard hour threshold — never by the ratio check. A device that is late relative to its baseline will show at most 🔴 Poor until the hard threshold is reached.<br><br>" +
+                      "<b>Important:</b> Offline is triggered exclusively by the hard hour threshold — never by the ratio check. A device will show at most 🔴 Poor until the hard threshold is reached.<br><br>" +
                       "<b>Protocol Colors:</b><br>" +
                       "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'><table style='width:100%; border-collapse: collapse;'>" +
                       "<tr style='font-weight:bold;'><td>Color</td><td>Protocol</td></tr>" +
@@ -1186,13 +1232,37 @@ def infoPage(Map params = [:]) {
                       "</table></div></div>"
         }
 
+        section("<b>🔄 Offline Verification</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "When a device reaches 🔴 Poor or 💀 Offline health, the app automatically sends a <b>refresh()</b> command to the device if it supports one. " +
+                      "This is a lightweight verification ping — it does not affect other devices and adds minimal hub load since only Poor/Offline devices are polled.<br><br>" +
+                      "<b>How it works:</b><br>" +
+                      "1. Device reaches Poor or Offline during a scan<br>" +
+                      "2. App sends refresh() to the device<br>" +
+                      "3. Activity Summary shows <b>🔄 verifying...</b> next to the health rating<br>" +
+                      "4. On the next scan — if Last Activity updated, the device responded and health will improve naturally<br>" +
+                      "5. If Last Activity did not update, the problem is confirmed real<br><br>" +
+                      "<b>Note:</b> Not all devices support refresh(). Battery-powered Z-Wave devices that are not FLiRS will not respond. Zigbee devices, mains-powered Z-Wave, LAN, and Hub Mesh devices generally will.</div>"
+        }
+
         section("<b>⏳ Baseline Learning & Sample Requirements</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
                       "Each device starts as <b>⏳ Pending</b> while the app learns its normal check-in frequency using EWMA smoothing.<br><br>" +
                       "<b>Minimum samples before health scoring:</b><br>" +
                       "• <b>LAN and Hub Mesh devices</b> — 5 samples required<br>" +
                       "• <b>All other protocols</b> — 3 samples required<br><br>" +
-                      "<b>⚠ Low Activity warning:</b> If a device has been monitored for more than 7 days with fewer than 3 samples, the Samples column shows a <span style='color:#f97316;'>⚠ Low Activity</span> warning. This means the device is not generating enough activity for the app to learn its baseline. This is normal for infrequently used lights, switches, and fans.</div>"
+                      "<b>⚠ Low Activity warning:</b> If a device has been monitored for more than 7 days with fewer than 3 samples, the Samples column shows a <span style='color:#f97316;'>⚠ Low Activity</span> warning. Normal for infrequently used lights, switches, and fans.</div>"
+        }
+
+        section("<b>⚠️ Manually Controlled Devices</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "Fans, lights, and switches that are only used on demand can show 🔴 Poor when not in use — even when working perfectly. " +
+                      "This happens because the baseline learns how often the device gets used rather than how often it checks in. " +
+                      "A fan used every hour during the day builds a short baseline — then looks sick when nobody touches it overnight.<br><br>" +
+                      "The app is most valuable for sensors, integrations, and hub variable connectors that have predictable check-in patterns. " +
+                      "For manually controlled devices consider raising the <b>Offline after inactivity</b> threshold or simply not adding them to the monitored list.<br><br>" +
+                      "Offline verification (v1.3.0) helps confirm whether a Poor/Offline alert is real by sending a refresh ping before notifying. " +
+                      "Full Active/Passive device classification is planned for v2.0.</div>"
         }
 
         section("<b>🔀 Virtual & Hub Variable Devices</b>") {
@@ -1206,44 +1276,25 @@ def infoPage(Map params = [:]) {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
                       "Hub Mesh linked devices show <b>LNK</b> as their controller type regardless of the underlying protocol. The app attempts to identify the real protocol using Encoding data values, Zigbee cluster data, driver name heuristics, and known manufacturer names.<br><br>" +
                       "When identified the device shows as <b>Hub Mesh (Zigbee)</b>, <b>Hub Mesh (Z-Wave)</b>, or <b>Hub Mesh (Matter)</b>. When it cannot be identified it shows as plain <b><span style='color:#06b6d4;'>Hub Mesh</span></b>.<br><br>" +
-                      "<b>Protocol Overrides:</b> Use the <b>🔧 Protocol Overrides</b> page to manually set the protocol for any device showing as plain Hub Mesh or LAN. The override always wins over auto-detection. Set back to <b>Auto-detect</b> to restore automatic detection. Overridden devices show a small <i>(override)</i> label in the Activity Summary.</div>"
+                      "<b>Protocol Overrides:</b> Use the <b>🔧 Protocol Overrides</b> page to manually set the protocol for any unidentified device. The override always wins over auto-detection. Overridden devices show a small <i>(override)</i> label in the Activity Summary.</div>"
         }
 
         section("<b>😴 Snooze</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "Per-device snooze can be enabled or disabled in <b>Monitoring Settings</b>. When enabled, use <b>Manage Snoozed Devices</b> from the main page or Activity Summary to snooze individual devices.<br><br>" +
-                      "Snoozed devices are excluded from notifications and the Problem Devices page for the configured snooze duration. " +
-                      "They still appear in the Activity Summary with a 😴 indicator and a countdown. " +
-                      "Disabling snooze clears all active snoozes immediately.</div>"
-        }
-
-        section("<b>📋 Device Selection</b>") {
-            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "All devices are selected from a single list. Protocol is detected automatically.<br><br>" +
-                      "<b>Protocol Detection:</b><br>" +
-                      "• <span style='color:#3b82f6;font-weight:bold;'>Zigbee</span> — directly paired Zigbee devices<br>" +
-                      "• <span style='color:#8b5cf6;font-weight:bold;'>Z-Wave</span> — directly paired Z-Wave devices<br>" +
-                      "• <span style='color:#f97316;font-weight:bold;'>Matter</span> — Matter devices<br>" +
-                      "• <span style='color:#06b6d4;font-weight:bold;'>Hub Mesh</span> — linked from another Hubitat hub (sub-protocol detected where possible)<br>" +
-                      "• <span style='color:#14b8a6;font-weight:bold;'>LAN</span> — local integrations (Hue, Shelly), cloud integrations (Govee, Tesla, Ecobee)<br>" +
-                      "• <span style='color:#ec4899;font-weight:bold;'>Virtual</span> — virtual switches, sensors, and app-created virtual devices<br>" +
-                      "• <span style='color:#eab308;font-weight:bold;'>Hub Variable</span> — hub variable connector devices<br><br>" +
-                      "<b>Notes:</b><br>" +
-                      "• Bluetooth devices (C-8 Pro only) will appear as LAN until a controllerType value is confirmed<br>" +
-                      "• If a device shows as Hub Mesh or LAN and you know the real protocol, use Protocol Overrides</div>"
+                      "Per-device snooze can be enabled or disabled in <b>Monitoring Settings</b>. When enabled, use <b>Manage Snoozed Devices</b> from the main page or Activity Summary.<br><br>" +
+                      "Snoozed devices are excluded from notifications and the Problem Devices page. They still appear in the Activity Summary with a 😴 indicator and countdown. Disabling snooze clears all active snoozes immediately.</div>"
         }
 
         section("<b>💡 Tips for Best Results</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "• The app works best on sensors, integrations, and automations — not manually controlled devices<br>" +
                       "• Let devices run for at least a day before trusting health ratings<br>" +
                       "• Set Scan Interval to Hourly to build baselines faster<br>" +
-                      "• Use Every 30 Minutes for virtual devices or hub variable connectors tied to frequent automations<br>" +
-                      "• Lights, fans, and switches that are infrequently used will show ⚠ Low Activity — this is expected, not an error<br>" +
-                      "• Devices that only wake on events (motion, contact) will have longer natural intervals — this is normal<br>" +
+                      "• Fans, lights, and switches showing Poor when idle is a known limitation — offline verification helps confirm if it's real<br>" +
                       "• A hub variable connector showing Offline means the Rule Machine rule tied to that variable has stopped running<br>" +
                       "• Hub Mesh devices showing plain cyan Hub Mesh can be identified manually via Protocol Overrides<br>" +
                       "• No hub event subscriptions are used — all monitoring is done via scheduled scans of Hubitat's Last Activity data<br>" +
-                      "• Use Mode Restriction in Monitoring Settings to suppress notifications during certain hub modes (e.g. Away, Night)</div>"
+                      "• Use Mode Restriction in Monitoring Settings to suppress notifications during certain hub modes</div>"
         }
     }
 }
