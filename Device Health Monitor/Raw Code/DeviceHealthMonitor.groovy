@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
-    version: "1.3.3",
+    version: "1.3.4",
     doNotFocus: true
 )
 
@@ -51,9 +51,10 @@ def updated() {
 
 def initialize() {
     if (debugEnabled()) log.debug "Device Health Monitor initializing"
-    if (state.history == null) state.history = [:]
-    if (state.health  == null) state.health  = [:]
-    if (state.snoozed == null) state.snoozed = [:]
+    if (state.history   == null) state.history   = [:]
+    if (state.health    == null) state.health     = [:]
+    if (state.snoozed   == null) state.snoozed    = [:]
+    if (state.verifying == null) state.verifying  = [:]
     scheduleScanInterval()
     scheduleReportFrequency()
     if (debugEnabled()) log.debug "Monitoring ${getAllMonitoredDevices().findAll { getProtocol(it) != 'Unknown' }.size()} device(s)"
@@ -634,27 +635,88 @@ def updateHealth(device) {
     def samples = data.samples?.size() ?: 0
     if (samples < 3) {
         state.health[id] = "Pending"
+        // v1.3.4: clear any stale verifying state if health improved to Pending
+        state.verifying?.remove(id)
         return
     }
 
     def offlineThreshold     = ((settings?.offlineThresholdHours ?: 72) * 60).toDouble()
     def minutesSinceLastSeen = (now() - (data.lastSeen ?: now())) / (1000 * 60)
 
+    def prevHealth = state.health[id]
+
     if (minutesSinceLastSeen >= offlineThreshold) {
         state.health[id] = "Offline"
+    } else {
+        def baseline = (data.userInterval ?: data.avgInterval ?: 60).toDouble()
+        def ratio    = minutesSinceLastSeen / baseline
+
+        if      (ratio <= 1.2) state.health[id] = "Excellent"
+        else if (ratio <= 2.0) state.health[id] = "Good"
+        else if (ratio <= 3.0) state.health[id] = "Fair"
+        else if (ratio <= 5.0) state.health[id] = "Poor"
+        else                   state.health[id] = "Poor"
+    }
+
+    if (debugEnabled()) log.debug "${device.displayName}: health=${state.health[id]} ratio=${state.health[id] in ['Poor','Offline'] ? 'n/a' : 'ok'} lastSeen=${minutesSinceLastSeen.toInteger()}min ago"
+
+    def currentHealth = state.health[id]
+
+    // v1.3.4: if health improved away from Poor/Offline, clear verifying flag
+    if (!(currentHealth in ["Poor", "Offline"])) {
+        state.verifying?.remove(id)
         return
     }
 
-    def baseline = (data.userInterval ?: data.avgInterval ?: 60).toDouble()
-    def ratio    = minutesSinceLastSeen / baseline
+    // v1.3.4: health is Poor or Offline — attempt verification if not already verifying
+    if (state.verifying == null) state.verifying = [:]
+    if (state.verifying[id]) {
+        // Already sent refresh/ping last cycle — this is now confirmed, clear verifying
+        if (debugEnabled()) log.debug "${device.displayName}: verification cycle complete — ${currentHealth} confirmed"
+        state.verifying.remove(id)
+        return
+    }
 
-    if      (ratio <= 1.2) state.health[id] = "Excellent"
-    else if (ratio <= 2.0) state.health[id] = "Good"
-    else if (ratio <= 3.0) state.health[id] = "Fair"
-    else if (ratio <= 5.0) state.health[id] = "Poor"
-    else                   state.health[id] = "Poor"
+    // Attempt refresh or ping
+    def protocol    = getProtocol(device)
+    def isVirtual   = protocol in ["Virtual", "Hub Variable"]
+    def hasRefresh  = false
+    def hasPing     = false
+    def attempted   = false
+    def verifyMethod = ""
 
-    if (debugEnabled()) log.debug "${device.displayName}: health=${state.health[id]} ratio=${ratio.round(2)} baseline=${baseline.toInteger()}min lastSeen=${minutesSinceLastSeen.toInteger()}min ago"
+    if (!isVirtual) {
+        try { hasRefresh = device.hasCapability("Refresh") } catch (e) { }
+        try { hasPing    = device.hasCapability("Ping")    } catch (e) { }
+    }
+
+    if (isVirtual) {
+        verifyMethod = "virtual"
+    } else if (hasRefresh) {
+        try {
+            device.refresh()
+            attempted    = true
+            verifyMethod = "refresh"
+            if (debugEnabled()) log.debug "${device.displayName}: sent refresh() for ${currentHealth} verification"
+        } catch (e) {
+            log.warn "${device.displayName}: refresh() failed — ${e.message}"
+            verifyMethod = "failed"
+        }
+    } else if (hasPing) {
+        try {
+            device.ping()
+            attempted    = true
+            verifyMethod = "ping"
+            if (debugEnabled()) log.debug "${device.displayName}: sent ping() for ${currentHealth} verification"
+        } catch (e) {
+            log.warn "${device.displayName}: ping() failed — ${e.message}"
+            verifyMethod = "failed"
+        }
+    } else {
+        verifyMethod = "none"
+    }
+
+    state.verifying[id] = verifyMethod
 }
 
 // ============================================================
@@ -674,12 +736,38 @@ def getHealthDisplay(device) {
         return "<span style='color:#94a3b8;'>⏳ Pending (${samples}/3 samples)</span>"
     }
 
+    // v1.3.4: append verification status for Poor and Offline
+    if (h in ["Poor", "Offline"]) {
+        def baseDisplay = h == "Poor"
+            ? "🔴 Poor"
+            : "💀 <span style='color:#991b1b;font-weight:bold;'>Offline</span>"
+
+        def verifyMethod = state.verifying?.get(device.id)
+        if (verifyMethod == null) {
+            // Not currently verifying — plain display
+            return baseDisplay
+        }
+
+        switch (verifyMethod) {
+            case "refresh":
+                return "${baseDisplay} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (refresh sent)</span>"
+            case "ping":
+                return "${baseDisplay} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (ping sent)</span>"
+            case "virtual":
+                return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — virtual device</span>"
+            case "none":
+                return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — device does not support ping or refresh</span>"
+            case "failed":
+                return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Verification attempted but command failed</span>"
+            default:
+                return baseDisplay
+        }
+    }
+
     switch (h) {
         case "Excellent": return "🟢 Excellent"
         case "Good":      return "🟢 Good"
         case "Fair":      return "🟠 Fair"
-        case "Poor":      return "🔴 Poor"
-        case "Offline":   return "💀 <span style='color:#991b1b;font-weight:bold;'>Offline</span>"
         default:          return "${h}"
     }
 }
