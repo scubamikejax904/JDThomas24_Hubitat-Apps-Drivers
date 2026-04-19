@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
-    version: "1.3.4",
+    version: "1.3.5",
     doNotFocus: true
 )
 
@@ -139,13 +139,15 @@ def getAllMonitoredDevices() {
 // Used by the override page filter so devices with an active override stay visible.
 def getRawProtocol(device) {
     try {
+        // v1.3.5: only check driverName (device.typeName) — not devName (device.name).
+        // device.name is the internal name set by the driver and can contain "virtual"
+        // for LAN/cloud devices (e.g. MyQ, SwitchBot, Ring, Tuya integrations), causing
+        // them to be misdetected as Virtual. User-assigned display names are never checked.
         def driverName = (device.typeName ?: "").toLowerCase()
-        def devName    = (device.name     ?: "").toLowerCase()
-        if (driverName.contains("hub variable") || driverName.contains("variable connector") ||
-            devName.contains("hub variable")    || devName.contains("variable connector")) {
+        if (driverName.contains("hub variable") || driverName.contains("variable connector")) {
             return "Hub Variable"
         }
-        if (driverName.contains("virtual") || devName.contains("virtual")) {
+        if (driverName.contains("virtual")) {
             return "Virtual"
         }
         def devData = device.properties
@@ -224,7 +226,9 @@ def getProtocolColor(protocol) {
 }
 
 def isUnresolvableProtocol(protocol) {
-    return protocol in ["Hub Mesh", "LAN"]
+    // v1.3.5: expanded to include Virtual and Hub Variable so all four
+    // unconfirmed protocol types appear on the Protocol Overrides page
+    return protocol in ["Hub Mesh", "LAN", "Virtual", "Hub Variable"]
 }
 
 def usesFilteredSampling(protocol) {
@@ -306,7 +310,7 @@ def mainPage() {
                           "Virtual: <b><span style='color:#ec4899;'>${virtualCount}</span></b> | " +
                           "Hub Variable: <b><span style='color:#eab308;'>${hubVarCount}</span></b>" +
                           (unknownCount > 0 ? " | <span style='color:orange;'>Unknown: <b>${unknownCount}</b> (skipped)</span>" : "") +
-                          (unresolvableCount > 0 ? "<br><span style='color:#94a3b8;'>⚠ ${unresolvableCount} device(s) could not be fully identified — tap <b>Protocol Overrides</b> below to set manually.</span>" : "") +
+                          (unresolvableCount > 0 ? "<br><span style='color:#94a3b8;'>⚠ ${unresolvableCount} device(s) showing as Hub Mesh, LAN, Virtual, or Hub Variable — tap <b>Protocol Overrides</b> to review or correct.</span>" : "") +
                           " — Tap <b>Monitored Devices</b> above to change."
             }
         }
@@ -973,14 +977,15 @@ def protocolOverridePage() {
 
         if (!devList || devList.size() == 0) {
             section("") {
-                paragraph "✅ All monitored devices have been successfully identified — no overrides needed."
+                paragraph "✅ No Hub Mesh, LAN, Virtual, or Hub Variable devices found — no overrides needed."
             }
             return
         }
 
         section("<b>Unidentified / Overridden Devices (${devList.size()})</b>") {
-            paragraph "Devices listed here are either showing as <b>Hub Mesh</b> or <b>LAN</b> (unidentified), " +
-                      "or have an active manual override set. Devices with an override remain here so you can change or clear it."
+            paragraph "Devices listed here auto-detected as <b>Hub Mesh</b>, <b>LAN</b>, <b>Virtual</b>, or <b>Hub Variable</b>, " +
+                      "or have an active manual override set. Use this page to correct any misdetected protocol. " +
+                      "Devices with an override remain here so you can change or clear it."
             devList.each { device ->
                 def currentProtocol = getProtocol(device)
                 def currentOverride = settings["protocolOverride_${device.id}"] ?: "Auto-detect"
