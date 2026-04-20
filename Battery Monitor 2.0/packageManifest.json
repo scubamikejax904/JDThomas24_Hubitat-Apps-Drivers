@@ -1,12 +1,12 @@
 {
   "packageName": "Battery Monitor 2.0",
   "author": "Jdthomas24",
-  "version": "2.4.8",
+  "version": "2.4.10",
   "category": "Convenience",
   "description": "Advanced Hubitat battery monitoring with analytics, trends and replacement tracking. Recurring scan schedule, confidence-weighted health, EWMA smoothing.",
   "dateReleased": "4/8/26",
   "minimumHEVersion": "2.3.0",
-  "releaseNotes": "v2.4.8 - Global notification snooze added. Silence all notifications for a configurable number of days — useful when traveling or away from home. Snooze status shown on main page with remaining time and one-tap clear.",
+  "releaseNotes": "v2.4.10 - Sortable Summary and Trends tables with search. Battery Catalog redesigned — type and count are now separate inputs, existing entries migrate automatically. Notification improvements: timestamp on header, empty sections collapse to one line, stale wording fixed. Pending devices now show 📈 instead of misleading default values. Est Days capped at 365. Sample Quality column removed. Battery Health column renamed for clarity.",
   "apps": [
     {
       "name": "Battery Monitor 2.0",
