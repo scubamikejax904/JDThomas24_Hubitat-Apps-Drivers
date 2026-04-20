@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.10",
+    version: "2.4.11",
     doNotFocus: true
 )
 
@@ -1045,10 +1045,8 @@ def summaryPage() {
                 def color = ""
                 try { color = getBatteryLevelDisplay(level, device) } catch (e) { color = "${level}%" }
 
-                def staleTag = ""
-                if (stale && lastActivity) {
-                    try { staleTag = " ⚠️ Stale (${formatTimeAgo(safeTime(lastActivity))})" } catch (e) { }
-                }
+                // v2.4.11: simplified staleTag — Last Activity already shows the time, no need to repeat
+                def staleTag = (stale && lastActivity) ? " ⚠️ Stale" : ""
 
                 def healthDisplay = ""
                 try { healthDisplay = getHealthDisplay(device) } catch (e) { healthDisplay = "Unknown" }
@@ -1100,8 +1098,9 @@ def summaryPage() {
 
             table += "</tbody></table>"
 
-            // v2.4.10: DataTables init — paging off, search on, default sort col 1 asc, numeric on cols 2/3/5/6
+            // v2.4.11: info bar + table rendered together so bar always appears above table
             paragraph rawHtml: true, """
+<div style='background-color:#e8f0fe; border-left:4px solid #1a73e8; border-radius:4px; padding:8px 12px; margin-bottom:8px; font-size:13px; color:#1a1a1a;'>ℹ️ Drain and Est Days show <code style='background:#d2e3fc; padding:1px 5px; border-radius:3px; font-weight:bold;'>📈</code> for <b>Pending</b> devices — the app is actively learning. Both show <code style='background:#d2e3fc; padding:1px 5px; border-radius:3px; font-weight:bold;'>—</code> for 🪫 <b>Dead</b> batteries. Data populates automatically once the Pending gate clears.</div>
 <div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>
 <script>
 \$(document).ready(function() {
@@ -1144,6 +1143,15 @@ def trendsPage() {
             def trendPriority = ["Heavy Drain": 1, "Moderate": 2, "Stable": 3]
 
             devList = devList.sort { a, b ->
+                // v2.4.11: dead first, then by trend, then battery level
+                def deadA = isBatteryDead(a)
+                def deadB = isBatteryDead(b)
+                if (deadA != deadB) return deadA ? -1 : 1
+                def hA = health(a)
+                def hB = health(b)
+                def pendingA = hA == "Pending"
+                def pendingB = hB == "Pending"
+                if (pendingA != pendingB) return pendingA ? 1 : -1
                 def trendA = state.trend[a.id] ?: "Stable"
                 def trendB = state.trend[b.id] ?: "Stable"
                 def prioA  = trendPriority[trendA] ?: 3
@@ -1868,4 +1876,3 @@ def infoPage(Map params = [:]) {
         }
     }
 }
-
