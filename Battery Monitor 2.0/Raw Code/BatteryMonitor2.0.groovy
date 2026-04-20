@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.8",
+    version: "2.4.10",
     doNotFocus: true
 )
 
@@ -258,17 +258,11 @@ def mainPage() {
             href(name: "toCatalog",     page: "batteryCatalogPage",    title: "🔋 Battery Catalog")
         }
 
-        section("<b>Help & Info:</b>") {
+        // v2.4.10: merged Help & Info + Support & Community into one section, debug at bottom
+        section("<b>Help & Support</b>") {
             href(name: "toInfo", page: "infoPage",
-                 title: "App Guide & Reference",
+                 title: "📖 App Guide & Reference",
                  description: "Colors, drain rates, trends, confidence, and replacement detection explained")
-        }
-
-        section("<b>Diagnostics</b>") {
-            input "debugMode", "bool", title: "Debug Logging (auto-disables after 30 min)", defaultValue: false, submitOnChange: true
-        }
-
-        section("<b>Support & Community</b>") {
             href url: "https://community.hubitat.com/t/release-battery-monitor-2-0/162329/288",
                  style: "external",
                  title: "💬 Hubitat Community Thread",
@@ -277,6 +271,10 @@ def mainPage() {
                  style: "external",
                  title: "☕ Buy Me a Coffee",
                  description: "Enjoying the app? Any amount is appreciated — thank you!"
+        }
+
+        section("<b>Diagnostics</b>") {
+            input "debugMode", "bool", title: "Debug Logging (auto-disables after 30 min)", defaultValue: false, submitOnChange: true
         }
     }
 }
@@ -411,18 +409,22 @@ def scheduledSummary() {
         }
     }
 
-    def body = "${prefix}🔋 Battery Summary\n"
+    // v2.4.10: timestamp on header line
+    def timestamp = new Date().format("MM/dd HH:mm", location.timeZone)
+    def body = "${prefix}🔋 Battery Summary — ${timestamp}\n"
 
+    // v2.4.10: build stale list with clean "inactive Xd/Xh" format (no redundant "ago")
     def staleDevices = devList.findAll { isStale(it) }.collect {
-        def last    = getLastActivityTime(it)
-        def timeAgo = last ? formatTimeAgo(last) : "unknown"
-        [device: it, name: it.displayName, timeAgo: timeAgo]
+        def last        = getLastActivityTime(it)
+        def inactiveStr = last ? formatInactive(last) : "unknown"
+        [device: it, name: it.displayName, inactiveStr: inactiveStr]
     }
 
     categories.each { cat, data ->
         if (data.enabled) {
-            body += "\n${cat}:\n"
             if (data.list) {
+                // v2.4.10: section header on its own line only when there are devices
+                body += "\n${cat}:\n"
                 data.list.each { dev ->
                     if (cat == "🔴 Poor") {
                         def info    = getCatalogBatteryInfo(dev.device)
@@ -433,32 +435,34 @@ def scheduledSummary() {
                     }
                 }
             } else {
-                body += "None\n"
+                // v2.4.10: empty sections collapse to one line
+                body += "\n${cat}: None\n"
             }
         }
     }
 
     if (notifyHighDrain != null ? notifyHighDrain : true) {
-        body += "\n⚠️ High Drain (Fair/Poor):\n"
         if (highDrainList) {
+            body += "\n⚠️ High Drain (Fair/Poor):\n"
             highDrainList.each { dev ->
                 body += "• ${dev.health} (${dev.drain}%) ${dev.name} (${dev.level}%)\n"
             }
         } else {
-            body += "None\n"
+            body += "\n⚠️ High Drain (Fair/Poor): None\n"
         }
     }
 
     if (notifyStale != null ? notifyStale : true) {
-        body += "\n⚠️ Stale Devices:\n"
         if (staleDevices) {
+            body += "\n⚠️ Stale Devices:\n"
             staleDevices.each { d ->
                 def info    = getCatalogBatteryInfo(d.device)
                 def infoStr = info ? " (${info})" : ""
-                body += "• ${d.name}${infoStr} — no activity for ${d.timeAgo}\n"
+                // v2.4.10: "inactive Xd" instead of "no activity for Xd ago"
+                body += "• ${d.name}${infoStr} — inactive ${d.inactiveStr}\n"
             }
         } else {
-            body += "None\n"
+            body += "\n⚠️ Stale Devices: None\n"
         }
     }
 
@@ -527,6 +531,8 @@ def updateBattery(device, level) {
             zeroCount:    0
         ]
         state.trend[device.id] = "Stable"
+        // v2.4.9: force persist on seed
+        state.history = state.history
         data = state.history[device.id]
     }
 
@@ -539,6 +545,9 @@ def updateBattery(device, level) {
     if (isBatteryDead(device)) {
         data.lastLevel    = level
         data.lastScanDate = now()
+        // v2.4.9: force persist
+        state.history[device.id] = data
+        state.history = state.history
         if (debugMode) log.debug "${device.displayName}: battery confirmed dead (${data.zeroCount} consecutive 0% readings)"
         return
     }
@@ -587,6 +596,11 @@ def updateBattery(device, level) {
 
     data.lastLevel    = level
     data.lastScanDate = now()
+
+    // v2.4.9: force persist after every mutation — fixes drain/samples not
+    // surviving between scans due to Groovy nested map mutation not auto-persisting
+    state.history[device.id] = data
+    state.history = state.history
 }
 
 // ============================================================
@@ -689,15 +703,21 @@ def getSampleQualityLabel(device, healthStr) {
 // ============================================================
 def getDrain(device) {
     def d = state.history?.get(device.id)?.drain
-    return d != null ? d : 0.3
+    // v2.4.9: treat 0 as missing — return default 0.3 rather than displaying 0.00
+    return (d != null && d > 0) ? d : 0.3
 }
 def displayDrain(device) { return String.format("%.2f", getDrain(device)) }
 
 def estDays(device) {
+    // v2.4.10: return null when health is Pending — no real drain data yet,
+    // default 0.3 fallback produces misleading estimates (e.g. 333 days at 100%)
+    if (health(device) == "Pending") return null
     def level = device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : 100
     def drain = getDrain(device)
     if (drain <= 0) drain = 0.3
-    return Math.round(level / drain)
+    def est = Math.round(level / drain)
+    // v2.4.10: cap at 365 — anything beyond a year is not a meaningful estimate
+    return Math.min(est, 365)
 }
 
 def health(device) {
@@ -789,6 +809,14 @@ def getLastActivityTime(device) { return safeTime(device.getLastActivity()) }
 
 def getCatalogBatteryInfo(device) {
     if (!device) return null
+    // v2.4.10: check new split fields first (battType_ + battCount_)
+    def battType  = settings["battType_${device.id}"]
+    def battCount = settings["battCount_${device.id}"]
+    if (battType && battType != "" && !battType.startsWith("_sep")) {
+        def count = (battCount != null && battCount.toString().trim() != "") ? battCount.toString().trim() : "1"
+        return "${battType} x${count}"
+    }
+    // v2.4.10: fall back to legacy battInfo_ field (pre-migration entries)
     def info = settings["battInfo_${device.id}"]
     if (!info || info == "" || info.startsWith("_sep")) return null
     return info
@@ -816,6 +844,24 @@ def formatTimeAgo(ts) {
     if (days   >= 1) return "${days}d ago"
     if (hours  >= 1) return "${hours}h ago"
     return "${mins}m ago"
+}
+
+// v2.4.10: compact inactive duration for notifications — no "ago" suffix
+// e.g. "1d", "3h", "45m" — used in stale device lines
+def formatInactive(ts) {
+    if (!ts) return "unknown"
+    ts = safeTime(ts)
+    def diffMs = now() - ts
+    def mins   = (diffMs / (1000 * 60)).toInteger()
+    def hours  = (diffMs / (1000 * 60 * 60)).toInteger()
+    def days   = (diffMs / (1000 * 60 * 60 * 24)).toInteger()
+    def weeks  = (days / 7).toInteger()
+    def months = (days / 30).toInteger()
+    if (months >= 1) return "${months}mo"
+    if (weeks  >= 1) return "${weeks}w"
+    if (days   >= 1) return "${days}d"
+    if (hours  >= 1) return "${hours}h"
+    return "${mins}m"
 }
 
 // ============================================================
@@ -892,11 +938,16 @@ def logReplacement(device, newLevel, manual = false) {
         type:   manual ? "manual" : "auto"
     ]
     state.replacements = state.replacements.sort { a, b -> b.date <=> a.date }
+
+    // v2.4.9: force persist after replacement
+    state.history[device.id] = data
+    state.history = state.history
 }
 
 // ============================================================
 // ===================== SUMMARY PAGE ========================
 // ============================================================
+// v2.4.10: DataTables sortable columns
 def summaryPage() {
     dynamicPage(name: "summaryPage", title: "Battery Summary", install: false) {
 
@@ -912,6 +963,11 @@ def summaryPage() {
         def hubIp = location?.hub?.localIP ?: ""
 
         section("") {
+            // v2.4.10: load DataTables CSS and JS
+            paragraph rawHtml: true, """
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+"""
             paragraph "<span style='color:red; font-weight:bold;'>⚠ Device links below are accessible only on your local network (LAN). They will not work remotely.</span>"
             paragraph "<span style='color:red; font-weight:bold;'>¹ Last Battery</span> shows when this app last received a battery reading — from a scheduled scan or device event. It is independent of Last Activity. A device can be active recently but still show an old Last Battery timestamp if its battery level has not changed or reported."
             href(name: "toForceScanFromSummary", page: "forceScanPage",
@@ -935,17 +991,18 @@ def summaryPage() {
 
             if (!devList) { paragraph "No battery devices found."; return }
 
-            def table = "<table style='width:100%; border-collapse: collapse; border: 1px solid #ccc;'>"
-            table += "<tr style='font-weight:bold; background-color:#f0f0f0;'>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Device</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Battery</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Drain %/day</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Est Days</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Health</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Last Battery¹</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Last Activity</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Battery Type</td>"
-            table += "</tr>"
+            // v2.4.10: thead/tbody required for DataTables
+            def table = "<table id='batteryTable' style='width:100%; border-collapse: collapse; border: 1px solid #ccc;'>"
+            table += "<thead><tr style='font-weight:bold; background-color:#f0f0f0;'>"
+            table += "<th style='padding:4px; border:1px solid #ccc;'>Device</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;'>Battery</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;'>Drain %/day</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;'>Est Days</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;'>Battery Health</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;'>Last Battery¹</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;'>Last Activity</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;'>Battery Type</th>"
+            table += "</tr></thead><tbody>"
             def summaryRowNum = 0
 
             devList.each { device ->
@@ -959,17 +1016,27 @@ def summaryPage() {
                 def drain = 0.3
                 try { drain = getDrain(device) } catch (e) { }
 
-                def est = 0
+                def est = null
                 try { est = estDays(device) } catch (e) { }
 
+                // v2.4.10: capture epoch ms for DataTables numeric sort on time columns
                 def lastBatteryStr = "N/A"
-                try { lastBatteryStr = formatTimeAgo(getLastBatteryTime(device)) } catch (e) { }
+                def lastBatteryMs  = 0
+                try {
+                    def lastBatteryTime = getLastBatteryTime(device)
+                    lastBatteryMs  = lastBatteryTime ?: 0
+                    lastBatteryStr = formatTimeAgo(lastBatteryTime)
+                } catch (e) { }
 
                 def lastActivityStr = "N/A"
+                def lastActivityMs  = 0
                 def lastActivity    = null
                 try { lastActivity = device.getLastActivity() } catch (e) { }
                 if (lastActivity) {
-                    try { lastActivityStr = formatTimeAgo(safeTime(lastActivity)) } catch (e) { }
+                    try {
+                        lastActivityMs  = safeTime(lastActivity) ?: 0
+                        lastActivityStr = formatTimeAgo(safeTime(lastActivity))
+                    } catch (e) { }
                 }
 
                 def stale = false
@@ -991,32 +1058,65 @@ def summaryPage() {
                 summaryRowNum++
                 table += "<tr style='background-color:${summaryRowBg};'>"
 
+                // v2.4.10: data-order for case-insensitive name sort
+                def sortName = name.toLowerCase()
                 if (hubIp) {
-                    table += "<td style='padding:4px; border:1px solid #ccc;'><a href='http://${hubIp}/device/edit/${device.id}' target='_blank'>${name}</a></td>"
+                    table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${sortName}'><a href='http://${hubIp}/device/edit/${device.id}' target='_blank'>${name}</a></td>"
                 } else {
-                    table += "<td style='padding:4px; border:1px solid #ccc;'>${name}</td>"
+                    table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${sortName}'>${name}</td>"
                 }
 
-                table += "<td style='padding:4px; border:1px solid #ccc;'>${color}</td>"
+                // v2.4.10: data-order='${level}' for numeric battery sort
+                table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${level}'>${color}</td>"
 
                 if (dead) {
-                    table += "<td style='padding:4px; border:1px solid #ccc; color:#94a3b8;'>—</td>"
-                    table += "<td style='padding:4px; border:1px solid #ccc; color:#94a3b8;'>—</td>"
-                    table += "<td style='padding:4px; border:1px solid #ccc; color:#94a3b8;'>—</td>"
+                    // v2.4.10: data-order='999' pushes dead rows to bottom on numeric columns
+                    table += "<td style='padding:4px; border:1px solid #ccc; color:#94a3b8;' data-order='999'>—</td>"
+                    table += "<td style='padding:4px; border:1px solid #ccc; color:#94a3b8;' data-order='999'>—</td>"
+                    table += "<td style='padding:4px; border:1px solid #ccc; color:#94a3b8;' data-order='999'>—</td>"
+                } else if (health(device) == "Pending") {
+                    // v2.4.10: 📈 Learning for drain and est days when Pending — actively collecting
+                    table += "<td style='padding:4px; border:1px solid #ccc; color:#94a3b8;' data-order='9999'>📈</td>"
+                    table += "<td style='padding:4px; border:1px solid #ccc; color:#94a3b8;' data-order='9999'>📈</td>"
+                    def healthOrder = 99
+                    table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${healthOrder}'>${healthDisplay}</td>"
                 } else {
-                    table += "<td style='padding:4px; border:1px solid #ccc;'>${String.format('%.2f', drain)}</td>"
-                    table += "<td style='padding:4px; border:1px solid #ccc;'>${est}</td>"
-                    table += "<td style='padding:4px; border:1px solid #ccc;'>${healthDisplay}</td>"
+                    table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${String.format('%.2f', drain)}'>${String.format('%.2f', drain)}</td>"
+                    // v2.4.10: show — when est is null (Pending health — no real drain data yet)
+                    def estDisplay  = est != null ? est.toString() : "—"
+                    def estOrder    = est != null ? est : 9999
+                    table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${estOrder}'>${estDisplay}</td>"
+                    // v2.4.10: health sort order: Poor=4, Fair=3, Good=2, Excellent=1, else=99
+                    def healthOrder = health(device) == "Poor" ? 4 : health(device) == "Fair" ? 3 : health(device) == "Good" ? 2 : health(device) == "Excellent" ? 1 : 99
+                    table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${healthOrder}'>${healthDisplay}</td>"
                 }
 
-                table += "<td style='padding:4px; border:1px solid #ccc;'>${lastBatteryStr}</td>"
-                table += "<td style='padding:4px; border:1px solid #ccc;'>${lastActivityStr}${staleTag}</td>"
+                // v2.4.10: epoch ms as data-order so time columns sort chronologically
+                table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${lastBatteryMs}'>${lastBatteryStr}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${lastActivityMs}'>${lastActivityStr}${staleTag}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${catalogInfo}</td>"
                 table += "</tr>"
             }
 
-            table += "</table>"
-            paragraph "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>"
+            table += "</tbody></table>"
+
+            // v2.4.10: DataTables init — paging off, search on, default sort col 1 asc, numeric on cols 2/3/5/6
+            paragraph rawHtml: true, """
+<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>
+<script>
+\$(document).ready(function() {
+    \$('#batteryTable').DataTable({
+        paging:     false,
+        info:       false,
+        searching:  true,
+        order:      [[1, 'asc']],
+        columnDefs: [
+            { type: 'num', targets: [1, 2, 3, 5, 6] }
+        ]
+    });
+});
+</script>
+"""
         }
     }
 }
@@ -1024,10 +1124,16 @@ def summaryPage() {
 // ============================================================
 // ===================== TRENDS PAGE =========================
 // ============================================================
+// v2.4.10: DataTables sortable columns
 def trendsPage() {
     dynamicPage(name: "trendsPage", title: "Battery Trends", install: false) {
 
         section("") {
+            // v2.4.10: load DataTables CSS and JS (shared with summaryPage — no conflict)
+            paragraph rawHtml: true, """
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+"""
             href(name: "toForceScanFromTrends", page: "forceScanPage",
                  title: "🔄 Force Scan Now",
                  description: "Tap to immediately read battery levels from all monitored devices")
@@ -1049,22 +1155,22 @@ def trendsPage() {
                 return a.displayName.trim() <=> b.displayName.trim()
             }
 
-            def table = "<table style='width:100%; border-collapse: collapse; border: 1px solid #ccc;'>"
-            table += "<tr style='font-weight:bold; background-color:#f0f0f0;'>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Device</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Battery</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Trend</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Drain %/day</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Health</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Sample Quality²</td>"
-            table += "</tr>"
+            // v2.4.10: thead/tbody required for DataTables
+            def table = "<table id='trendsTable' style='width:100%; border-collapse: collapse; border: 1px solid #ccc;'>"
+            table += "<thead><tr style='font-weight:bold; background-color:#f0f0f0;'>"
+            table += "<th style='padding:4px; border:1px solid #ccc;'>Device</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;'>Battery</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;'>Trend</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;'>Drain %/day</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;'>Battery Health</th>"
+            table += "</tr></thead><tbody>"
             def trendsRowNum = 0
 
             devList.each { device ->
                 def dead    = isBatteryDead(device)
                 def hist    = safeHistory(device)
                 def level   = device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : 100
-                def drain   = hist?.drain != null ? hist.drain : 0.3
+                def drain   = getDrain(device)  // v2.4.10: use getDrain() so 0.0 stored values fall back to 0.3 default
                 def trend   = state.trend[device.id] ?: "Unknown"
                 def h       = health(device)
                 def samples = hist?.samples?.size() ?: 0
@@ -1079,38 +1185,56 @@ def trendsPage() {
                 def color         = getBatteryLevelDisplay(level, device)
                 def healthDisplay = dead ? "<span style='color:#94a3b8;'>—</span>" : getHealthDisplay(device)
 
-                def qualityLabel
-                if (dead) {
-                    qualityLabel = "<span style='color:#94a3b8;'>—</span>"
-                } else if (h == "Pending") {
-                    qualityLabel = "⏳ ${samples}/${minSamples} samples"
-                } else {
-                    qualityLabel = getSampleQualityLabel(device, h)
-                }
-
+                // v2.4.10: sort orders
+                // v2.4.10: Trend sort order — Dead first, then worst trend, Pending last
+                // Dead=1, Heavy Drain=2, Moderate=3, Stable=4, Pending=999
+                def trendOrder = dead ? 1 : (h == "Pending" ? 999 : ((trendPriority[trend] ?: 4) + 1))
+                // Health: Poor=4, Fair=3, Good=2, Excellent=1, Pending=99, dead=999
+                def healthOrder = dead ? 999 : (h == "Poor" ? 4 : h == "Fair" ? 3 : h == "Good" ? 2 : h == "Excellent" ? 1 : 99)
                 def trendsRowBg = (trendsRowNum % 2 == 0) ? "#ffffff" : "#ebebeb"
                 trendsRowNum++
                 table += "<tr style='background-color:${trendsRowBg};'>"
-                table += "<td style='padding:4px; border:1px solid #ccc;'>${device.displayName}</td>"
-                table += "<td style='padding:4px; border:1px solid #ccc;'>${color}</td>"
+
+                // v2.4.10: data-order on every cell
+                table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${device.displayName.toLowerCase().trim()}'>${device.displayName}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${level}'>${color}</td>"
 
                 if (dead) {
-                    table += "<td style='padding:4px; border:1px solid #ccc; color:#94a3b8;'>—</td>"
-                    table += "<td style='padding:4px; border:1px solid #ccc; color:#94a3b8;'>—</td>"
+                    table += "<td style='padding:4px; border:1px solid #ccc; color:#94a3b8;' data-order='999'>—</td>"
+                    table += "<td style='padding:4px; border:1px solid #ccc; color:#94a3b8;' data-order='999'>—</td>"
+                } else if (h == "Pending") {
+                    // v2.4.10: 📈 Learning for trend and drain when Pending — actively collecting
+                    table += "<td style='padding:4px; border:1px solid #ccc; color:#94a3b8;' data-order='999'>📈</td>"
+                    table += "<td style='padding:4px; border:1px solid #ccc; color:#94a3b8;' data-order='999'>📈</td>"
                 } else {
-                    table += "<td style='padding:4px; border:1px solid #ccc;'>${trendColor} ${trend}</td>"
-                    table += "<td style='padding:4px; border:1px solid #ccc;'>${String.format('%.2f', drain)}</td>"
+                    table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${trendOrder}'>${trendColor} ${trend}</td>"
+                    table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${String.format('%.2f', drain)}'>${String.format('%.2f', drain)}</td>"
                 }
 
-                table += "<td style='padding:4px; border:1px solid #ccc;'>${healthDisplay}</td>"
-                table += "<td style='padding:4px; border:1px solid #ccc;'>${qualityLabel}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${healthOrder}'>${healthDisplay}</td>"
                 table += "</tr>"
             }
 
-            table += "</table>"
-            table += "<div style='font-size:11px; color:#64748b; margin-top:4px;'>² Sample Quality reflects how many readings have been collected. Low = just started, Full = fully established. More samples = more reliable health rating. Updating or reinstalling the app restarts the sample timing gates.</div>"
+            table += "</tbody></table>"
 
-            paragraph "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>"
+            // v2.4.10: DataTables init — paging off, search on, default sort col 2 (Trend) asc, numeric on cols 1/3/4/5
+            paragraph rawHtml: true, """
+<div style='background-color:#e8f0fe; border-left:4px solid #1a73e8; border-radius:4px; padding:8px 12px; margin-bottom:8px; font-size:13px; color:#1a1a1a;'>ℹ️ Trend and Drain show <code style='background:#d2e3fc; padding:1px 5px; border-radius:3px; font-weight:bold;'>📈</code> for <b>Pending</b> devices — the app is actively learning. Both show <code style='background:#d2e3fc; padding:1px 5px; border-radius:3px; font-weight:bold;'>—</code> for 🪫 <b>Dead</b> batteries. Data populates automatically once the Pending gate clears.</div>
+<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>
+<script>
+\$(document).ready(function() {
+    \$('#trendsTable').DataTable({
+        paging:     false,
+        info:       false,
+        searching:  true,
+        order:      [[2, 'asc'], [1, 'asc']],
+        columnDefs: [
+            { type: 'num', targets: [1, 3, 4] }
+        ]
+    });
+});
+</script>
+"""
         }
 
         section("<b>🔄 Reset Drain History</b>", hideable: true, hidden: true) {
@@ -1199,6 +1323,8 @@ def resetDrainConfirmPage() {
                             state.history[device.id].zeroCount    = 0
                         }
                         state.trend[device.id] = "Stable"
+                        // v2.4.9: force persist after reset
+                        state.history = state.history
                         resetNames << device.displayName
                         successCount++
                         if (debugMode) log.debug "Reset drain history for ${device.displayName}"
@@ -1412,6 +1538,9 @@ def manualReplacementConfirmPage() {
                         state.history[device.id].justReplaced = true
                         state.history[device.id].replacedTime = now()
 
+                        // v2.4.9: force persist after manual replacement
+                        state.history = state.history
+
                         successCount++
                     }
                 }
@@ -1479,7 +1608,6 @@ def sendNotificationPage() {
         }
         if (settings?.sendNowConfirm) {
             section("<b>Result</b>") {
-                // Temporarily bypass snooze for manual send
                 def savedSnooze = state.notifSnoozedUntil
                 state.notifSnoozedUntil = 0
                 scheduledSummary()
@@ -1533,70 +1661,61 @@ def batteryCatalogPage() {
             return
         }
 
-        def standardTypes = [
-            "AA":       ["1", "2", "3", "4", "6", "8"],
-            "AAA":      ["1", "2", "3", "4", "6", "8"],
-            "CR2":      ["1", "2"],
-            "CR1632":   ["1"],
-            "CR2016":   ["1", "2"],
-            "CR2032":   ["1", "2"],
-            "CR2430":   ["1", "2"],
-            "CR2450":   ["1", "2"],
-            "CR2477":   ["1"],
-            "CR123A":   ["1", "2"],
-            "9V":       ["1"],
-            "ER14250":  ["1", "2"],
-            "LS14250":  ["1", "2"]
-        ]
-        def rechargeableTypes = [
-            "Rechargeable AA":  ["1", "2", "3", "4", "6", "8"],
-            "Rechargeable AAA": ["1", "2", "3", "4", "6", "8"],
-            "LIR2016": ["1", "2"],
-            "LIR2032": ["1", "2"],
-            "LIR2430": ["1", "2"],
-            "LIR2450": ["1"],
-            "18650":   ["1", "2", "3", "4"]
-        ]
-        def otherTypes = [
-            "Other": ["1", "2", "3", "4", "6", "8"]
-        ]
+        // v2.4.10: type-only dropdown — count is a separate free number input
+        def typeOptions = ["": "— Not Set —"]
+        typeOptions["_sep1"] = "──────── Standard ────────"
+        ["AA", "AAA", "CR2", "CR1632", "CR2016", "CR2032", "CR2430", "CR2450", "CR2477", "CR123A", "9V", "ER14250", "LS14250"].each {
+            typeOptions[it] = it
+        }
+        typeOptions["_sep2"] = "──────── Rechargeable ────────"
+        ["Rechargeable AA", "Rechargeable AAA", "LIR2016", "LIR2032", "LIR2430", "LIR2450", "18650"].each {
+            typeOptions[it] = it
+        }
+        typeOptions["_sep3"] = "──────── Other ────────"
+        typeOptions["Other"] = "Other"
 
-        def options = ["": "— Not Set —"]
-        options["_sep1"] = "──────── Standard ────────"
-        standardTypes.each { type, quantities ->
-            quantities.each { qty ->
-                def key = "${type} x${qty}"
-                options[key] = key
-            }
-        }
-        options["_sep2"] = "──────── Rechargeable ────────"
-        rechargeableTypes.each { type, quantities ->
-            quantities.each { qty ->
-                def key = "${type} x${qty}"
-                options[key] = key
-            }
-        }
-        options["_sep3"] = "──────── Other ────────"
-        otherTypes.each { type, quantities ->
-            quantities.each { qty ->
-                def key = "${type} x${qty}"
-                options[key] = key
+        // v2.4.10: migrate legacy battInfo_ entries to new split fields on page load
+        devList.each { device ->
+            def legacyInfo = settings["battInfo_${device.id}"]
+            if (legacyInfo && legacyInfo != "" && !legacyInfo.startsWith("_sep")) {
+                if (!settings["battType_${device.id}"]) {
+                    def parts = legacyInfo.tokenize(" x")
+                    if (parts.size() >= 2) {
+                        def migratedType  = parts[0..-2].join(" ")
+                        def migratedCount = parts[-1]
+                        app.updateSetting("battType_${device.id}",  [value: migratedType,  type: "enum"])
+                        app.updateSetting("battCount_${device.id}", [value: migratedCount.toInteger(), type: "number"])
+                    } else {
+                        app.updateSetting("battType_${device.id}", [value: legacyInfo, type: "enum"])
+                        app.updateSetting("battCount_${device.id}", [value: 1, type: "number"])
+                    }
+                    app.removeSetting("battInfo_${device.id}")
+                }
             }
         }
 
         section("") {
-            paragraph "<span style='color:red; font-weight:bold;'>⚠ Select a battery type for each device below. Tap Done to save your selections — this is a one-time setup.</span>"
+            paragraph "<span style='color:red; font-weight:bold;'>⚠ Select a battery type and enter the count for each device below. Tap Done to save.</span>"
+            paragraph "ℹ️ Existing entries from previous versions are automatically migrated to the new format when you open this page."
         }
 
         section("<b>Battery Catalog</b>") {
             devList.each { device ->
                 section() {
-                    input "battInfo_${device.id}",
+                    paragraph "<b>${device.displayName.trim()}</b>"
+                    input "battType_${device.id}",
                           "enum",
-                          title: "<b>${device.displayName.trim()}</b>",
-                          options: options,
+                          title: "Battery Type:",
+                          options: typeOptions,
                           required: false,
-                          defaultValue: settings["battInfo_${device.id}"] ?: ""
+                          defaultValue: settings["battType_${device.id}"] ?: "",
+                          submitOnChange: false
+                    input "battCount_${device.id}",
+                          "number",
+                          title: "Battery Count:",
+                          defaultValue: settings["battCount_${device.id}"] ?: 1,
+                          required: false,
+                          range: "1..99"
                 }
             }
         }
@@ -1646,9 +1765,9 @@ def infoPage(Map params = [:]) {
                       "</table></div></div>"
         }
 
-        section("<b>⏳ Pending Health, Samples & Confidence</b>") {
+        section("<b>⏳ Pending Health & Samples</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>The app withholds a health verdict and shows <b>⏳ Pending</b> until enough data is collected. " +
-                      "This prevents false Poor ratings from sparse early readings.<br><br>" +
+                      "This prevents false Poor ratings from sparse early readings. While Pending, Trend and Drain show 📈 — the app is actively learning.<br><br>" +
                       "<b>Standard gate</b> — both must be met:<br>" +
                       "• At least <b>5 samples</b> collected (7 for locks, sensors, smoke, and CO detectors)<br>" +
                       "• At least <b>5 days</b> since the battery was replaced or first seen<br><br>" +
@@ -1662,7 +1781,10 @@ def infoPage(Map params = [:]) {
         section("<b>🔍 Drain, Estimated Days & Last Battery</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Drain shows how fast a device uses battery (% per day). " +
                       "Calculated using EWMA (exponential weighted moving average) across the last 10 readings.<br><br>" +
-                      "<b>Estimated days remaining</b> = current level ÷ average daily drain.<br><br>" +
+                      "<b>While health is ⏳ Pending</b> — Drain shows 📈 and Estimated Days shows 📈 — the app is actively learning. " +
+                      "Both will populate automatically once the device clears the Pending gate.<br><br>" +
+                      "<b>Estimated days remaining</b> = current level ÷ average daily drain. " +
+                      "Capped at 365 days — estimates beyond a year are not considered meaningful.<br><br>" +
                       "<b>Last Battery</b> shows when the app last received a battery reading — from a scheduled scan or device event. " +
                       "It is independent of Last Activity.</div>"
         }
