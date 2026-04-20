@@ -1208,10 +1208,11 @@ def trendsPage() {
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${level}'>${color}</td>"
 
                 if (dead) {
-                    table += "<td style='padding:4px; border:1px solid #ccc; color:#94a3b8;' data-order='999'>—</td>"
-                    table += "<td style='padding:4px; border:1px solid #ccc; color:#94a3b8;' data-order='999'>—</td>"
+                    // v2.4.11: use trendOrder=1 so Dead sorts first
+                    table += "<td style='padding:4px; border:1px solid #ccc; color:#94a3b8;' data-order='1'>—</td>"
+                    table += "<td style='padding:4px; border:1px solid #ccc; color:#94a3b8;' data-order='1'>—</td>"
                 } else if (h == "Pending") {
-                    // v2.4.10: 📈 Learning for trend and drain when Pending — actively collecting
+                    // v2.4.10: 📈 for Pending — actively collecting, sorts last
                     table += "<td style='padding:4px; border:1px solid #ccc; color:#94a3b8;' data-order='999'>📈</td>"
                     table += "<td style='padding:4px; border:1px solid #ccc; color:#94a3b8;' data-order='999'>📈</td>"
                 } else {
