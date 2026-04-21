@@ -98,6 +98,18 @@ def updated() {
     // from previous driver versions (e.g. presenceTimeoutCheck from v1.7.4)
     unschedule()
 
+    // v1.7.5: clear stale attributes from previous driver versions
+    ["presence", "lastCheckin", "checkinInterval", "presenceTimeout",
+     "missedCheckins", "zigbeeHealth"].each { attr ->
+        device.deleteCurrentState(attr)
+    }
+
+    // v1.7.5: clear stale state variables from presence logic
+    state.remove("lastCheckin")
+    state.remove("checkinHistory")
+    state.remove("avgCheckin")
+    state.remove("missed")
+
     scheduleDebugAutoOff()
     configure()
 }
