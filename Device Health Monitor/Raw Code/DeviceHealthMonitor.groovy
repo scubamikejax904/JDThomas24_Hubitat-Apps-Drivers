@@ -244,6 +244,8 @@ def isHueDevice(device) {
     if (dni.startsWith("hue/")) return true
     // CoCoHue integration — driver names always start with "cocohue"
     if (dn.startsWith("cocohue")) return true
+    // Built-in Hue fallback — driver name contains "huebridgebulb" or "huebridge"
+    if (dn.contains("huebridgebulb") || dn.contains("huebridge")) return true
     return false
 }
 
@@ -255,7 +257,8 @@ def findHueBridge() {
         def dn  = (device.typeName ?: "").toLowerCase()
         def dni = (device.deviceNetworkId ?: "").toLowerCase()
         (dni.startsWith("hue/") && dn.contains("bridge")) ||
-        dn.contains("cocohue bridge")
+        dn.contains("cocohue bridge") ||
+        (dn.contains("huebridge") && !dn.contains("bulb"))
     }
 }
 
