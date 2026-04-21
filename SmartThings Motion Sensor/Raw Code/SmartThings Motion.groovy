@@ -229,7 +229,9 @@ def processMotion(ZoneStatus status) {
         def resetTime = (motionReset ?: 60).toInteger()
         if (resetTime > 0) runIn(resetTime, motionInactive)
     } else {
-        motionInactive()
+        // v1.7.5: hardware inactive message ignored — motionReset timer controls
+        // when motion goes inactive so the user-configured hold time is respected
+        if (debugLogging) log.debug "${device.displayName}: Hardware inactive received — waiting for motionReset timer (${motionReset ?: 60}s)"
     }
 }
 
