@@ -93,15 +93,12 @@ def initialize() {
 
 def updated() {
     log.info "${device.displayName}: Updated driver v${driverVersion()}"
+
+    // v1.7.5: clear ALL scheduled jobs on update — removes any stale timers
+    // from previous driver versions (e.g. presenceTimeoutCheck from v1.7.4)
+    unschedule()
+
     scheduleDebugAutoOff()
-
-    // Clear any stale motion reset timer — prevents old timer firing if
-    // motionReset value was changed while a reset was already scheduled
-    unschedule("motionInactive")
-
-    // v1.7.5: only reconfigure Zigbee reporting when battery interval or
-    // temp reporting settings change — avoids interrupting device reporting
-    // cycle on every settings save
     configure()
 }
 
