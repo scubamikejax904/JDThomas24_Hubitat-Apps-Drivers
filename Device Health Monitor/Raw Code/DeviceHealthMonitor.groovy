@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
-    version: "1.3.5",
+    version: "1.3.6",
     doNotFocus: true
 )
 
@@ -235,6 +235,22 @@ def usesFilteredSampling(protocol) {
     return protocol in ["Virtual", "Hub Variable"]
 }
 
+// v1.3.6: Hue device detection — covers CoCoHue and built-in Hue integration
+def isHueDevice(device) {
+    def dn = (device.typeName ?: "").toLowerCase()
+    return dn.contains("cocohue") || dn.contains("advanced hue") || dn.contains("hue bulb") ||
+           dn.contains("hue light") || dn.contains("hue color") || dn.contains("hue white") ||
+           dn.contains("hue plug") || dn.contains("hue scene") || dn.contains("hue group")
+}
+
+// v1.3.6: find Hue Bridge in monitored devices list
+def findHueBridge() {
+    return getAllMonitoredDevices().find { device ->
+        def dn = (device.typeName ?: "").toLowerCase()
+        dn.contains("hue bridge") || dn.contains("cocohue bridge") || dn.contains("advanced hue bridge")
+    }
+}
+
 def isModeOK() {
     if (!settings?.enableModeRestriction) return true
     if (!settings?.restrictedModes) return true
@@ -311,6 +327,8 @@ def mainPage() {
                           "Hub Variable: <b><span style='color:#eab308;'>${hubVarCount}</span></b>" +
                           (unknownCount > 0 ? " | <span style='color:orange;'>Unknown: <b>${unknownCount}</b> (skipped)</span>" : "") +
                           (unresolvableCount > 0 ? "<br><span style='color:#94a3b8;'>⚠ ${unresolvableCount} device(s) showing as Hub Mesh, LAN, Virtual, or Hub Variable — tap <b>Protocol Overrides</b> to review or correct.</span>" : "") +
+                          // v1.3.6: hint if Hue devices selected but no bridge in monitored list
+                          (allSelected.any { isHueDevice(it) } && !findHueBridge() ? "<br><span style='color:#1a73e8;'>ℹ️ Hue devices detected — add your <b>Hue Bridge</b> to monitored devices to enable Poor/Offline verification.</span>" : "") +
                           " — Tap <b>Monitored Devices</b> above to change."
             }
         }
@@ -689,35 +707,54 @@ def updateHealth(device) {
     def attempted   = false
     def verifyMethod = ""
 
-    if (!isVirtual) {
-        try { hasRefresh = device.hasCapability("Refresh") } catch (e) { }
-        try { hasPing    = device.hasCapability("Ping")    } catch (e) { }
-    }
-
     if (isVirtual) {
         verifyMethod = "virtual"
-    } else if (hasRefresh) {
-        try {
-            device.refresh()
-            attempted    = true
-            verifyMethod = "refresh"
-            if (debugEnabled()) log.debug "${device.displayName}: sent refresh() for ${currentHealth} verification"
-        } catch (e) {
-            log.warn "${device.displayName}: refresh() failed — ${e.message}"
-            verifyMethod = "failed"
-        }
-    } else if (hasPing) {
-        try {
-            device.ping()
-            attempted    = true
-            verifyMethod = "ping"
-            if (debugEnabled()) log.debug "${device.displayName}: sent ping() for ${currentHealth} verification"
-        } catch (e) {
-            log.warn "${device.displayName}: ping() failed — ${e.message}"
-            verifyMethod = "failed"
+    } else if (isHueDevice(device)) {
+        // v1.3.6: Hue devices — refresh the bridge instead of the individual bulb
+        // to avoid "Refresh Hue Bridge device instead" log warnings
+        def bridge = findHueBridge()
+        if (bridge) {
+            try {
+                bridge.refresh()
+                attempted    = true
+                verifyMethod = "hue_bridge"
+                if (debugEnabled()) log.debug "${device.displayName}: sent refresh() to Hue Bridge (${bridge.displayName}) for ${currentHealth} verification"
+            } catch (e) {
+                log.warn "${device.displayName}: Hue Bridge refresh() failed — ${e.message}"
+                verifyMethod = "hue_bridge_failed"
+            }
+        } else {
+            verifyMethod = "hue_no_bridge"
         }
     } else {
-        verifyMethod = "none"
+        if (!isVirtual) {
+            try { hasRefresh = device.hasCapability("Refresh") } catch (e) { }
+            try { hasPing    = device.hasCapability("Ping")    } catch (e) { }
+        }
+
+        if (hasRefresh) {
+            try {
+                device.refresh()
+                attempted    = true
+                verifyMethod = "refresh"
+                if (debugEnabled()) log.debug "${device.displayName}: sent refresh() for ${currentHealth} verification"
+            } catch (e) {
+                log.warn "${device.displayName}: refresh() failed — ${e.message}"
+                verifyMethod = "failed"
+            }
+        } else if (hasPing) {
+            try {
+                device.ping()
+                attempted    = true
+                verifyMethod = "ping"
+                if (debugEnabled()) log.debug "${device.displayName}: sent ping() for ${currentHealth} verification"
+            } catch (e) {
+                log.warn "${device.displayName}: ping() failed — ${e.message}"
+                verifyMethod = "failed"
+            }
+        } else {
+            verifyMethod = "none"
+        }
     }
 
     state.verifying[id] = verifyMethod
@@ -757,6 +794,12 @@ def getHealthDisplay(device) {
                 return "${baseDisplay} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (refresh sent)</span>"
             case "ping":
                 return "${baseDisplay} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (ping sent)</span>"
+            case "hue_bridge":
+                return "${baseDisplay} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (Hue Bridge refresh sent)</span>"
+            case "hue_no_bridge":
+                return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — add Hue Bridge to monitored devices</span>"
+            case "hue_bridge_failed":
+                return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Hue Bridge refresh failed</span>"
             case "virtual":
                 return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — virtual device</span>"
             case "none":
@@ -1511,6 +1554,27 @@ def infoPage(Map params = [:]) {
                       "Use snooze, raise the offline threshold, or simply don't monitor those devices.<br>" +
                       "• Bluetooth devices (C-8 Pro only) will appear as LAN until a controllerType value is confirmed<br>" +
                       "• If a device shows as Hub Mesh or LAN and you know the real protocol, use Protocol Overrides to set it manually</div>"
+        }
+
+        section("<b>📡 Last Activity & Command Events</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "This app monitors Hubitat's built-in <b>Last Activity</b> timestamp for each device. " +
+                      "It is important to understand what updates this timestamp and what does not.<br><br>" +
+                      "<b>What DOES update Last Activity:</b><br>" +
+                      "• Device reports a state change back to the hub (e.g. switch turns on, motion detected, temperature changes)<br>" +
+                      "• These are <b>digital</b> or <b>physical</b> events originating from the device itself<br><br>" +
+                      "<b>What does NOT update Last Activity:</b><br>" +
+                      "• Commands sent <i>to</i> the device (e.g. turn on, set level) — these are outgoing, not incoming<br>" +
+                      "• These appear in the event log as <b>command</b> type events<br><br>" +
+                      "<b>What this means for DHM:</b><br>" +
+                      "If a device shows Poor or Pending in DHM but you can see commands firing in the event log, " +
+                      "the device has likely stopped reporting state changes back to the hub. " +
+                      "Commands getting through does not mean the device is healthy — it means it is receiving but not responding.<br><br>" +
+                      "<b>What to do:</b><br>" +
+                      "• Check Z-Wave mesh routing or Zigbee signal strength<br>" +
+                      "• Try a different driver — some drivers report state better than others<br>" +
+                      "• Check the device event log for the last <b>digital</b> or <b>physical</b> event<br>" +
+                      "• Consider Z-Wave repair or Zigbee re-pairing if the issue persists</div>"
         }
 
         section("<b>💡 Tips for Best Results</b>") {
