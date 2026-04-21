@@ -145,6 +145,13 @@ def disableDebugLogging() {
 // ============================================================
 // ===================== HEALTH CHECK ========================
 // ============================================================
+
+// v1.7.5: stub to silently absorb stale scheduled calls from v1.7.4
+// Safe to remove in a future version once all devices have saved preferences
+def presenceTimeoutCheck() {
+    if (debugLogging) log.debug "${device.displayName}: presenceTimeoutCheck() — stale timer from v1.7.4, ignoring"
+}
+
 def ping() {
     if (debugLogging) log.debug "${device.displayName}: ping() — refreshing device state"
     refresh()
