@@ -64,7 +64,7 @@ metadata {
     }
 
     preferences {
-        input name: "motionReset",          type: "number",  title: "Motion Reset Time (seconds)",         defaultValue: 60
+        input name: "motionReset",          type: "number",  title: "Motion Reset Time (seconds)",         defaultValue: 30
         input name: "enableTemp",           type: "bool",    title: "Enable Temperature Reporting",        defaultValue: true
         input name: "tempAdj",              type: "decimal", title: "Temperature Offset",                  defaultValue: 0
         input name: "batteryReportMinutes", type: "enum",
@@ -226,12 +226,12 @@ def processMotion(ZoneStatus status) {
         if (infoLogging) log.info "${device.displayName}: Motion active"
 
         // Guard against 0 or negative motionReset values
-        def resetTime = (motionReset ?: 60).toInteger()
+        def resetTime = (motionReset ?: 30).toInteger()
         if (resetTime > 0) runIn(resetTime, motionInactive)
     } else {
         // v1.7.5: hardware inactive message ignored — motionReset timer controls
         // when motion goes inactive so the user-configured hold time is respected
-        if (debugLogging) log.debug "${device.displayName}: Hardware inactive received — waiting for motionReset timer (${motionReset ?: 60}s)"
+        if (debugLogging) log.debug "${device.displayName}: Hardware inactive received — waiting for motionReset timer (${motionReset ?: 30}s)"
     }
 }
 
