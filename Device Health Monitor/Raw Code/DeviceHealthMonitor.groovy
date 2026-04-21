@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
-    version: "1.3.6",
+    version: "1.3.7",
     doNotFocus: true
 )
 
@@ -235,19 +235,27 @@ def usesFilteredSampling(protocol) {
     return protocol in ["Virtual", "Hub Variable"]
 }
 
-// v1.3.6: Hue device detection — covers CoCoHue and built-in Hue integration
+// v1.3.7: Hue device detection — DNI-based for built-in integration (always starts with "Hue/"),
+// driver name-based for CoCoHue. DNI approach is immune to driver name changes.
 def isHueDevice(device) {
-    def dn = (device.typeName ?: "").toLowerCase()
-    return dn.contains("cocohue") || dn.contains("advanced hue") || dn.contains("hue bulb") ||
-           dn.contains("hue light") || dn.contains("hue color") || dn.contains("hue white") ||
-           dn.contains("hue plug") || dn.contains("hue scene") || dn.contains("hue group")
+    def dn  = (device.typeName ?: "").toLowerCase()
+    def dni = (device.deviceNetworkId ?: "").toLowerCase()
+    // Built-in Hue integration — DNI always starts with "hue/"
+    if (dni.startsWith("hue/")) return true
+    // CoCoHue integration — driver names always start with "cocohue"
+    if (dn.startsWith("cocohue")) return true
+    return false
 }
 
-// v1.3.6: find Hue Bridge in monitored devices list
+// v1.3.7: find Hue Bridge in monitored devices list
+// Built-in bridge: DNI starts with "hue/" AND driver contains "bridge"
+// CoCoHue bridge: driver name contains "cocohue bridge"
 def findHueBridge() {
     return getAllMonitoredDevices().find { device ->
-        def dn = (device.typeName ?: "").toLowerCase()
-        dn.contains("hue bridge") || dn.contains("cocohue bridge") || dn.contains("advanced hue bridge")
+        def dn  = (device.typeName ?: "").toLowerCase()
+        def dni = (device.deviceNetworkId ?: "").toLowerCase()
+        (dni.startsWith("hue/") && dn.contains("bridge")) ||
+        dn.contains("cocohue bridge")
     }
 }
 
@@ -1536,6 +1544,31 @@ def infoPage(Map params = [:]) {
                       "Snoozed devices still appear in the Activity Summary with a 😴 indicator and a countdown showing time remaining. " +
                       "You can unsnooze devices early at any time. Snoozes expire automatically when the duration passes.<br><br>" +
                       "Snooze can be disabled entirely from <b>Monitoring Settings</b>. When disabled, all active snoozes are cleared and the Manage Snoozed Devices link is hidden.</div>"
+        }
+
+        section("<b>🔄 Poor & Offline Verification</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "When a device is flagged as Poor or Offline, the app automatically attempts to verify whether the problem is real " +
+                      "by sending a <b>refresh()</b> or <b>ping()</b> command and waiting one scan cycle before treating the alert as confirmed.<br><br>" +
+                      "<b>What you'll see in the Activity Summary:</b><br>" +
+                      "• <span style='color:#1a73e8;'>🔄 Verifying... (refresh sent)</span> — refresh command sent, waiting on response<br>" +
+                      "• <span style='color:#1a73e8;'>🔄 Verifying... (ping sent)</span> — ping command sent, waiting on response<br>" +
+                      "• <span style='color:#1a73e8;'>🔄 Verifying... (Hue Bridge refresh sent)</span> — Hue Bridge refreshed on behalf of bulb<br>" +
+                      "• ⚠ Cannot verify — virtual device<br>" +
+                      "• ⚠ Cannot verify — device does not support ping or refresh<br>" +
+                      "• ⚠ Cannot verify — add Hue Bridge to monitored devices<br><br>" +
+                      "<b>Next scan after verification:</b><br>" +
+                      "• Device responded → health improves naturally, alert clears<br>" +
+                      "• Device did not respond → Poor or Offline confirmed real<br><br>" +
+                      "<b>Hue Devices (Built-in &amp; CoCoHue):</b><br>" +
+                      "Hue bulbs and groups do not support individual refresh — the Hue Bridge must be refreshed instead. " +
+                      "The app detects Hue devices automatically using the device network ID and driver name. " +
+                      "Add your <b>Hue Bridge</b> device to your monitored devices list to enable verification. " +
+                      "A blue hint will appear in the device summary if Hue bulbs are selected but no bridge is found.<br><br>" +
+                      "<b>Devices that cannot be verified:</b><br>" +
+                      "• Virtual and Hub Variable devices — no physical device to poll<br>" +
+                      "• Battery-powered Z-Wave and Zigbee sensors — sleeping devices will not respond to refresh, " +
+                      "but will self-correct when they next wake and report in naturally</div>"
         }
 
         section("<b>📋 Device Selection</b>") {
