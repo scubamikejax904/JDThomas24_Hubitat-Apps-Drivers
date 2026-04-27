@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.12",
+    version: "2.4.13",
     doNotFocus: true
 )
 
@@ -35,6 +35,19 @@ def updated() {
         state.trend?.remove(removedId)
         if (debugMode) log.debug "Cleaned up removed device: ${removedId}"
     }
+
+    // v2.4.13: one-time migration — seed firstSeenDate for existing devices
+    // Uses replacedTime if available, otherwise lastDate as best approximation.
+    // This ensures the 5-day gate uses a stable anchor going forward rather than
+    // lastDate which advances on every drain sample and kept devices in Pending indefinitely.
+    state.history?.each { id, data ->
+        if (data && !data.firstSeenDate) {
+            data.firstSeenDate = data.replacedTime ?: data.lastDate ?: now()
+            state.history[id] = data
+            if (debugMode) log.debug "Migrated firstSeenDate for device ${id}: ${new Date(data.firstSeenDate as long)}"
+        }
+    }
+    state.history = state.history
 }
 
 def disableDebugLogging() {
@@ -518,13 +531,14 @@ def updateBattery(device, level) {
 
     if (!data) {
         state.history[device.id] = [
-            lastLevel:    level != null ? level : 100,
-            lastDate:     now(),
-            lastScanDate: now(),
-            drain:        0.3,
-            samples:      [],
-            justReplaced: false,
-            zeroCount:    0
+            lastLevel:     level != null ? level : 100,
+            lastDate:      now(),
+            lastScanDate:  now(),
+            firstSeenDate: now(),  // v2.4.13: stable anchor for days gate — never overwritten except on replacement
+            drain:         0.3,
+            samples:       [],
+            justReplaced:  false,
+            zeroCount:     0
         ]
         state.trend[device.id] = "Stable"
         // v2.4.9: force persist on seed
@@ -731,7 +745,11 @@ def health(device) {
     def daysSinceReplaced = 999
     if (hist?.replacedTime) {
         daysSinceReplaced = (now() - safeTime(hist.replacedTime)) / (1000 * 60 * 60 * 24)
+    } else if (hist?.firstSeenDate) {
+        // v2.4.13: use stable firstSeenDate anchor instead of lastDate which advances on every sample
+        daysSinceReplaced = (now() - safeTime(hist.firstSeenDate)) / (1000 * 60 * 60 * 24)
     } else if (hist?.lastDate) {
+        // legacy fallback for devices seeded before 2.4.13
         daysSinceReplaced = (now() - safeTime(hist.lastDate)) / (1000 * 60 * 60 * 24)
     }
 
@@ -766,11 +784,14 @@ def getHealthDisplay(device) {
     def minSamples = (isLock || isSlowSensor) ? 7 : 5
 
     if (h == "Pending") {
-        // v2.4.12: calculate days progress toward the gate
+        // v2.4.13: use firstSeenDate as stable anchor for days progress bar
         def daysSinceReplaced = 0
         if (hist?.replacedTime) {
             daysSinceReplaced = ((now() - safeTime(hist.replacedTime)) / (1000 * 60 * 60 * 24)).toInteger()
+        } else if (hist?.firstSeenDate) {
+            daysSinceReplaced = ((now() - safeTime(hist.firstSeenDate)) / (1000 * 60 * 60 * 24)).toInteger()
         } else if (hist?.lastDate) {
+            // legacy fallback for devices seeded before 2.4.13
             daysSinceReplaced = ((now() - safeTime(hist.lastDate)) / (1000 * 60 * 60 * 24)).toInteger()
         }
 
@@ -944,6 +965,7 @@ def logReplacement(device, newLevel, manual = false) {
     data.lastLevel    = newLevel
     data.lastDate     = now()
     data.lastScanDate = now()
+    data.firstSeenDate = now()  // v2.4.13: reset anchor on replacement — new battery = fresh gate
     data.justReplaced = true
     data.replacedTime = now()
     data.zeroCount    = 0
@@ -1531,15 +1553,16 @@ def manualReplacementConfirmPage() {
                         ]
                         state.replacements = state.replacements.sort { a, b -> b.date <=> a.date }
 
-                        state.history[device.id].drain        = 0.3
-                        state.history[device.id].samples      = []
-                        state.history[device.id].zeroCount    = 0
-                        state.trend[device.id]                = "Stable"
-                        state.history[device.id].lastLevel    = level
-                        state.history[device.id].lastDate     = now()
-                        state.history[device.id].lastScanDate = now()
-                        state.history[device.id].justReplaced = true
-                        state.history[device.id].replacedTime = now()
+                        state.history[device.id].drain         = 0.3
+                        state.history[device.id].samples       = []
+                        state.history[device.id].zeroCount     = 0
+                        state.trend[device.id]                 = "Stable"
+                        state.history[device.id].lastLevel     = level
+                        state.history[device.id].lastDate      = now()
+                        state.history[device.id].lastScanDate  = now()
+                        state.history[device.id].firstSeenDate = now()  // v2.4.13: reset anchor on manual replacement
+                        state.history[device.id].justReplaced  = true
+                        state.history[device.id].replacedTime  = now()
 
                         state.history = state.history
                         successCount++
