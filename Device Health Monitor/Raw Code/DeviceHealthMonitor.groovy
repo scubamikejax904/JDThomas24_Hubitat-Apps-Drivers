@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
-    version: "1.3.7",
+    version: "1.3.8",
     doNotFocus: true
 )
 
@@ -83,7 +83,6 @@ def applyCustomLabel() {
 // ===================== SNOOZE ==============================
 // ============================================================
 def snoozeEnabled() {
-    // v1.3.2: default true so existing installs keep snooze working
     return settings?.enableSnooze != false
 }
 
@@ -135,14 +134,8 @@ def getAllMonitoredDevices() {
     return monitoredDevices ?: []
 }
 
-// v1.3.2: getRawProtocol — identical to getProtocol but IGNORES any user override.
-// Used by the override page filter so devices with an active override stay visible.
 def getRawProtocol(device) {
     try {
-        // v1.3.5: only check driverName (device.typeName) — not devName (device.name).
-        // device.name is the internal name set by the driver and can contain "virtual"
-        // for LAN/cloud devices (e.g. MyQ, SwitchBot, Ring, Tuya integrations), causing
-        // them to be misdetected as Virtual. User-assigned display names are never checked.
         def driverName = (device.typeName ?: "").toLowerCase()
         if (driverName.contains("hub variable") || driverName.contains("variable connector")) {
             return "Hub Variable"
@@ -196,11 +189,8 @@ def getRawProtocol(device) {
 
 def getProtocol(device) {
     try {
-        // ── User override — always wins ──────────────────────────
         def override = settings["protocolOverride_${device.id}"]
         if (override && override != "" && override != "Auto-detect") return override
-
-        // ── Fall through to raw detection ────────────────────────
         return getRawProtocol(device)
     } catch (e) {
         if (debugEnabled()) log.debug "getProtocol error for ${device.displayName}: ${e.message}"
@@ -226,8 +216,6 @@ def getProtocolColor(protocol) {
 }
 
 def isUnresolvableProtocol(protocol) {
-    // v1.3.5: expanded to include Virtual and Hub Variable so all four
-    // unconfirmed protocol types appear on the Protocol Overrides page
     return protocol in ["Hub Mesh", "LAN", "Virtual", "Hub Variable"]
 }
 
@@ -235,23 +223,15 @@ def usesFilteredSampling(protocol) {
     return protocol in ["Virtual", "Hub Variable"]
 }
 
-// v1.3.7: Hue device detection — DNI-based for built-in integration (always starts with "Hue/"),
-// driver name-based for CoCoHue. DNI approach is immune to driver name changes.
 def isHueDevice(device) {
     def dn  = (device.typeName ?: "").toLowerCase()
     def dni = (device.deviceNetworkId ?: "").toLowerCase()
-    // Built-in Hue integration — DNI always starts with "hue/"
     if (dni.startsWith("hue/")) return true
-    // CoCoHue integration — driver names always start with "cocohue"
     if (dn.startsWith("cocohue")) return true
-    // Built-in Hue fallback — driver name contains "huebridgebulb" or "huebridge"
     if (dn.contains("huebridgebulb") || dn.contains("huebridge")) return true
     return false
 }
 
-// v1.3.7: find Hue Bridge in monitored devices list
-// Built-in bridge: DNI starts with "hue/" AND driver contains "bridge"
-// CoCoHue bridge: driver name contains "cocohue bridge"
 def findHueBridge() {
     return getAllMonitoredDevices().find { device ->
         def dn  = (device.typeName ?: "").toLowerCase()
@@ -271,15 +251,13 @@ def isModeOK() {
 // ============================================================
 // ===================== LOW ACTIVITY ========================
 // ============================================================
-// v1.3.2: returns true if a device has been monitored for >7 days
-//         but has fewer than 3 samples (low-activity / infrequent device)
 def isLowActivity(deviceId) {
     def data = state.history?.get(deviceId)
     if (!data) return false
-    def samples      = data?.samples?.size() ?: 0
-    def lastSeen     = data?.lastSeen ?: now()
-    def ageMs        = now() - lastSeen
-    def ageDays      = ageMs / (1000.0 * 60 * 60 * 24)
+    def samples  = data?.samples?.size() ?: 0
+    def lastSeen = data?.lastSeen ?: now()
+    def ageMs    = now() - lastSeen
+    def ageDays  = ageMs / (1000.0 * 60 * 60 * 24)
     return (ageDays >= 7 && samples < 3)
 }
 
@@ -290,23 +268,14 @@ def mainPage() {
     applyCustomLabel()
     dynamicPage(name: "mainPage", title: "Device Health Monitor", install: true, uninstall: true) {
 
-        def hasCustomName = settings?.customAppName?.trim()
-        section("<b>App Display Name (optional)</b>", hideable: true, hidden: hasCustomName) {
-            paragraph "Enter a name to rename this app in your Hubitat app list."
-            input "customAppName", "text",
-                  title: "Custom App Name",
-                  description: "Rename how this app appears in your Hubitat app list",
-                  required: false
-        }
-        if (hasCustomName) {
-            section("") {
-                paragraph "Current name: <b><span style='color:blue;'>${settings.customAppName}</span></b> — tap <b>App Display Name (optional)</b> above to change."
-            }
-        }
-
         // ── Device Selection ─────────────────────────────────────
-        def devicesSelected = (monitoredDevices?.size() ?: 0) > 0
-        section("<b>Monitored Devices</b>", hideable: true, hidden: devicesSelected) {
+        // v1.3.8: device count in section header — eliminates separate summary paragraph
+        def devicesSelected   = (monitoredDevices?.size() ?: 0) > 0
+        def devSectionTitle   = devicesSelected
+            ? "<b>Monitored Devices</b> — <span style='color:blue;'>${monitoredDevices.size()} selected</span>"
+            : "<b>Monitored Devices</b>"
+
+        section(devSectionTitle, hideable: true, hidden: devicesSelected) {
             paragraph "<b>Select the devices you want to monitor.</b> Protocol is detected automatically."
             paragraph "<span style='color:red; font-weight:bold;'>IMPORTANT: After selecting devices, you MUST click 'Done' before viewing reports.</span>"
             input "monitoredDevices", "capability.*",
@@ -315,21 +284,20 @@ def mainPage() {
                   required: false,
                   submitOnChange: true
         }
+
         if (devicesSelected) {
-            def allSelected          = monitoredDevices
-            def zigbeeCount          = allSelected.count { getProtocol(it) in ["Zigbee", "Hub Mesh (Zigbee)"] }
-            def zwaveCount           = allSelected.count { getProtocol(it) in ["Z-Wave", "Hub Mesh (Z-Wave)"] }
-            def matterCount          = allSelected.count { getProtocol(it) in ["Matter", "Hub Mesh (Matter)"] }
-            def hubMeshCount         = allSelected.count { getProtocol(it) == "Hub Mesh" }
-            def lanCount             = allSelected.count { getProtocol(it) == "LAN" }
-            def virtualCount         = allSelected.count { getProtocol(it) == "Virtual" }
-            def hubVarCount          = allSelected.count { getProtocol(it) == "Hub Variable" }
-            def unknownCount         = allSelected.count { getProtocol(it) == "Unknown" }
-            def totalCount           = allSelected.size()
-            def unresolvableCount    = allSelected.count { isUnresolvableProtocol(getRawProtocol(it)) }
+            def allSelected       = monitoredDevices
+            def zigbeeCount       = allSelected.count { getProtocol(it) in ["Zigbee", "Hub Mesh (Zigbee)"] }
+            def zwaveCount        = allSelected.count { getProtocol(it) in ["Z-Wave", "Hub Mesh (Z-Wave)"] }
+            def matterCount       = allSelected.count { getProtocol(it) in ["Matter", "Hub Mesh (Matter)"] }
+            def hubMeshCount      = allSelected.count { getProtocol(it) == "Hub Mesh" }
+            def lanCount          = allSelected.count { getProtocol(it) == "LAN" }
+            def virtualCount      = allSelected.count { getProtocol(it) == "Virtual" }
+            def hubVarCount       = allSelected.count { getProtocol(it) == "Hub Variable" }
+            def unknownCount      = allSelected.count { getProtocol(it) == "Unknown" }
+            def unresolvableCount = allSelected.count { isUnresolvableProtocol(getRawProtocol(it)) }
             section("") {
-                paragraph "<b><span style='color:blue;'>${totalCount} device(s) selected</span></b> — " +
-                          "Zigbee: <b><span style='color:#3b82f6;'>${zigbeeCount}</span></b> | " +
+                paragraph "Zigbee: <b><span style='color:#3b82f6;'>${zigbeeCount}</span></b> | " +
                           "Z-Wave: <b><span style='color:#8b5cf6;'>${zwaveCount}</span></b> | " +
                           "Matter: <b><span style='color:#f97316;'>${matterCount}</span></b> | " +
                           "Hub Mesh: <b><span style='color:#06b6d4;'>${hubMeshCount}</span></b> | " +
@@ -338,9 +306,7 @@ def mainPage() {
                           "Hub Variable: <b><span style='color:#eab308;'>${hubVarCount}</span></b>" +
                           (unknownCount > 0 ? " | <span style='color:orange;'>Unknown: <b>${unknownCount}</b> (skipped)</span>" : "") +
                           (unresolvableCount > 0 ? "<br><span style='color:#94a3b8;'>⚠ ${unresolvableCount} device(s) showing as Hub Mesh, LAN, Virtual, or Hub Variable — tap <b>Protocol Overrides</b> to review or correct.</span>" : "") +
-                          // v1.3.6: hint if Hue devices selected but no bridge in monitored list
-                          (allSelected.any { isHueDevice(it) } && !findHueBridge() ? "<br><span style='color:#1a73e8;'>ℹ️ Hue devices detected — add your <b>Hue Bridge</b> to monitored devices to enable Poor/Offline verification.</span>" : "") +
-                          " — Tap <b>Monitored Devices</b> above to change."
+                          (allSelected.any { isHueDevice(it) } && !findHueBridge() ? "<br><span style='color:#1a73e8;'>ℹ️ Hue devices detected — add your <b>Hue Bridge</b> to monitored devices to enable Poor/Offline verification.</span>" : "")
             }
         }
 
@@ -350,7 +316,7 @@ def mainPage() {
             }
         }
 
-        // ── v1.3.2: Consolidated Monitoring Settings ─────────────
+        // ── Monitoring Settings ───────────────────────────────────
         def scanIntervalLabel = ["0.5": "Every 30 min", "1": "Hourly", "3": "Every 3 h", "6": "Every 6 h"]
         def currentScan      = scanIntervalLabel[settings?.scanInterval ?: "3"] ?: "Every 3 h"
         def currentThreshold = settings?.offlineThresholdHours ?: 72
@@ -365,7 +331,6 @@ def mainPage() {
                                 "Mode restriction: <b>${modeLabel}</b>"
 
         section("<b>Monitoring Settings</b>", hideable: true, hidden: true) {
-
             paragraph "<b>Scan Interval</b> — how often device activity is checked and health ratings are updated."
             input "scanInterval", "enum",
                   title: "Scan Frequency:",
@@ -411,9 +376,11 @@ def mainPage() {
         }
 
         // ── Notifications ────────────────────────────────────────
-        def notifConfigured = settings?.enablePush != false &&
-                              (settings?.notifyDevices || settings?.pushoverDevices)
-        section("<b>Notifications</b>", hideable: true, hidden: notifConfigured) {
+        // v1.3.8: ON/OFF status in section header — blue for ON, red for OFF
+        def notifOn        = settings?.enablePush != false
+        def notifConfigured = notifOn && (settings?.notifyDevices || settings?.pushoverDevices)
+        def notifSectionTitle = "<b>Notifications</b> — <span style='color:${notifOn ? "blue" : "red"};'>${notifOn ? "ON" : "OFF"}</span>"
+        section(notifSectionTitle, hideable: true, hidden: notifConfigured) {
             paragraph "ℹ️ Enable the toggle below to configure notification settings."
             input "enablePush", "bool", title: "Enable notifications", defaultValue: true, submitOnChange: true
 
@@ -461,39 +428,26 @@ def mainPage() {
 
                 paragraph "<b>Send notification now:</b>"
                 href(name: "toSendNotification", page: "sendNotificationPage",
-                     title: "📤 Send Notification Now",
-                     description: "Tap to preview and send a device health notification")
-            }
-        }
-        if (notifConfigured) {
-            section("") {
-                def notifyTargets = []
-                if (settings?.notifyDevices)   notifyTargets.addAll(settings.notifyDevices.collect { it.displayName })
-                if (settings?.pushoverDevices) notifyTargets.addAll(settings.pushoverDevices.collect { "${it.displayName} (Pushover)" })
-                paragraph "Notifications are <b><span style='color:blue;'>ON</span></b> — sending to: <b><span style='color:blue;'>${notifyTargets.join(', ')}</span></b> — tap <b>Notifications</b> above to change."
+                     title: "📤 Send Notification Now")
             }
         }
 
         // ── Reports ──────────────────────────────────────────────
+        // v1.3.8: removed description text from report buttons — compact height
         section("<b>Reports:</b>") {
             href(name: "toActivitySummary", page: "activitySummaryPage",
-                 title: "Device Activity Summary",
-                 description: "View all monitored devices and their health status")
+                 title: "Device Activity Summary")
             href(name: "toProblemDevices", page: "problemDevicesPage",
-                 title: "⚠️ Problem Devices",
-                 description: "View devices with Fair, Poor or Offline health")
+                 title: "⚠️ Problem Devices")
             if (snoozeEnabled()) {
                 href(name: "toSnoozeManage", page: "snoozeManagePage",
-                     title: "😴 Manage Snoozed Devices",
-                     description: "Snooze devices or clear active snoozes")
+                     title: "😴 Manage Snoozed Devices")
             }
             href(name: "toProtocolOverride", page: "protocolOverridePage",
-                 title: "🔧 Protocol Overrides",
-                 description: "Manually set protocol for devices that could not be auto-detected")
+                 title: "🔧 Protocol Overrides")
         }
 
         // ── Help & Support ────────────────────────────────────────
-        // v1.3.2: App Guide, Community Thread, and Buy Me a Coffee merged into one section
         section("<b>Help & Support</b>") {
             href(name: "toInfoPage", page: "infoPage",
                  title: "📖 App Guide & Reference",
@@ -514,6 +468,19 @@ def mainPage() {
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false,
                   submitOnChange: true
+        }
+
+        // v1.3.8: App Display Name moved to bottom — rarely needed, collapsed by default
+        def hasCustomName    = settings?.customAppName?.trim()
+        def appNameTitle     = hasCustomName
+            ? "<b>App Display Name</b> — <span style='color:blue;'>${settings.customAppName}</span>"
+            : "<b>App Display Name (optional)</b>"
+        section(appNameTitle, hideable: true, hidden: true) {
+            paragraph "Enter a name to rename this app in your Hubitat app list."
+            input "customAppName", "text",
+                  title: "Custom App Name",
+                  description: "Rename how this app appears in your Hubitat app list",
+                  required: false
         }
     }
 }
@@ -581,9 +548,7 @@ def scanAllDevices() {
 
     def intervalStr     = settings?.scanInterval ?: "3"
     def intervalMinutes = (intervalStr.toFloat() * 60).toInteger()
-
-    // v1.3.2 fix: use 30.0 (not 30) to avoid Groovy Math.min(BigDecimal, Integer) type error
-    def minGate = Math.min(intervalMinutes * 0.5, 30.0)
+    def minGate         = Math.min(intervalMinutes * 0.5, 30.0)
 
     devList.each { device ->
         try {
@@ -632,16 +597,10 @@ def scanAllDevices() {
                             }
                             if (debugEnabled()) log.debug "${device.displayName} (${protocol}): interval=${elapsed.toInteger()}min smoothed=${smoothed.toInteger()}min avg=${data.avgInterval?.toInteger()}min gate=${minGate.toInteger()}min"
                         }
-                        // v1.3.3: only advance lastSeen anchor when elapsed >= minGate so that
-                        // rapid-fire devices (motion sensors, contact sensors firing every 1-2 min)
-                        // don't walk lastSeen forward in tiny steps, which would produce a
-                        // near-zero baseline and cause spurious Poor health when the device goes quiet.
                         data.lastSeen    = lastSeen
                         data.lastCheckin = lastSeen
                     } else {
                         if (debugEnabled()) log.debug "${device.displayName}: elapsed ${elapsed.toInteger()}min below gate ${minGate.toInteger()}min — skipping sample and not advancing lastSeen anchor"
-                        // v1.3.3: do NOT update lastSeen here — leave the anchor where it was
-                        // so the next scan measures elapsed from the last gate-qualifying activity
                     }
                 } else {
                     if (debugEnabled()) log.debug "${device.displayName}: no new activity since last scan"
@@ -668,7 +627,6 @@ def updateHealth(device) {
     def samples = data.samples?.size() ?: 0
     if (samples < 3) {
         state.health[id] = "Pending"
-        // v1.3.4: clear any stale verifying state if health improved to Pending
         state.verifying?.remove(id)
         return
     }
@@ -687,30 +645,25 @@ def updateHealth(device) {
         if      (ratio <= 1.2) state.health[id] = "Excellent"
         else if (ratio <= 2.0) state.health[id] = "Good"
         else if (ratio <= 3.0) state.health[id] = "Fair"
-        else if (ratio <= 5.0) state.health[id] = "Poor"
         else                   state.health[id] = "Poor"
     }
 
-    if (debugEnabled()) log.debug "${device.displayName}: health=${state.health[id]} ratio=${state.health[id] in ['Poor','Offline'] ? 'n/a' : 'ok'} lastSeen=${minutesSinceLastSeen.toInteger()}min ago"
+    if (debugEnabled()) log.debug "${device.displayName}: health=${state.health[id]} lastSeen=${minutesSinceLastSeen.toInteger()}min ago"
 
     def currentHealth = state.health[id]
 
-    // v1.3.4: if health improved away from Poor/Offline, clear verifying flag
     if (!(currentHealth in ["Poor", "Offline"])) {
         state.verifying?.remove(id)
         return
     }
 
-    // v1.3.4: health is Poor or Offline — attempt verification if not already verifying
     if (state.verifying == null) state.verifying = [:]
     if (state.verifying[id]) {
-        // Already sent refresh/ping last cycle — this is now confirmed, clear verifying
         if (debugEnabled()) log.debug "${device.displayName}: verification cycle complete — ${currentHealth} confirmed"
         state.verifying.remove(id)
         return
     }
 
-    // Attempt refresh or ping
     def protocol    = getProtocol(device)
     def isVirtual   = protocol in ["Virtual", "Hub Variable"]
     def hasRefresh  = false
@@ -721,8 +674,6 @@ def updateHealth(device) {
     if (isVirtual) {
         verifyMethod = "virtual"
     } else if (isHueDevice(device)) {
-        // v1.3.6: Hue devices — refresh the bridge instead of the individual bulb
-        // to avoid "Refresh Hue Bridge device instead" log warnings
         def bridge = findHueBridge()
         if (bridge) {
             try {
@@ -788,37 +739,24 @@ def getHealthDisplay(device) {
         return "<span style='color:#94a3b8;'>⏳ Pending (${samples}/3 samples)</span>"
     }
 
-    // v1.3.4: append verification status for Poor and Offline
     if (h in ["Poor", "Offline"]) {
         def baseDisplay = h == "Poor"
             ? "🔴 Poor"
             : "💀 <span style='color:#991b1b;font-weight:bold;'>Offline</span>"
 
         def verifyMethod = state.verifying?.get(device.id)
-        if (verifyMethod == null) {
-            // Not currently verifying — plain display
-            return baseDisplay
-        }
+        if (verifyMethod == null) return baseDisplay
 
         switch (verifyMethod) {
-            case "refresh":
-                return "${baseDisplay} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (refresh sent)</span>"
-            case "ping":
-                return "${baseDisplay} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (ping sent)</span>"
-            case "hue_bridge":
-                return "${baseDisplay} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (Hue Bridge refresh sent)</span>"
-            case "hue_no_bridge":
-                return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — add Hue Bridge to monitored devices</span>"
-            case "hue_bridge_failed":
-                return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Hue Bridge refresh failed</span>"
-            case "virtual":
-                return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — virtual device</span>"
-            case "none":
-                return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — device does not support ping or refresh</span>"
-            case "failed":
-                return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Verification attempted but command failed</span>"
-            default:
-                return baseDisplay
+            case "refresh":           return "${baseDisplay} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (refresh sent)</span>"
+            case "ping":              return "${baseDisplay} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (ping sent)</span>"
+            case "hue_bridge":        return "${baseDisplay} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (Hue Bridge refresh sent)</span>"
+            case "hue_no_bridge":     return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — add Hue Bridge to monitored devices</span>"
+            case "hue_bridge_failed": return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Hue Bridge refresh failed</span>"
+            case "virtual":           return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — virtual device</span>"
+            case "none":              return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — device does not support ping or refresh</span>"
+            case "failed":            return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Verification attempted but command failed</span>"
+            default:                  return baseDisplay
         }
     }
 
@@ -873,22 +811,18 @@ def formatInterval(minutes) {
 // ============================================================
 // ===================== ACTIVITY SUMMARY PAGE ===============
 // ============================================================
-// v1.3.3: DataTables sortable columns
 def activitySummaryPage() {
     dynamicPage(name: "activitySummaryPage", title: "Device Activity Summary", install: false) {
         section("") {
-            // v1.3.3: load DataTables CSS and JS
             paragraph rawHtml: true, """
 <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
 <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
 """
             href(name: "toForceScan", page: "forceScanPage",
-                 title: "🔄 Force Scan Now",
-                 description: "Tap to immediately check all monitored devices")
+                 title: "🔄 Force Scan Now")
             if (snoozeEnabled()) {
                 href(name: "toSnoozeFromSummary", page: "snoozeManagePage",
-                     title: "😴 Manage Snoozed Devices",
-                     description: "Snooze devices or clear active snoozes")
+                     title: "😴 Manage Snoozed Devices")
             }
 
             def devList = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
@@ -906,7 +840,6 @@ def activitySummaryPage() {
 
             def hubIp = location?.hub?.localIP ?: ""
 
-            // v1.3.3: thead/tbody required for DataTables
             def table = "<table id='activityTable' style='width:100%; border-collapse: collapse; border: 1px solid #ccc;'>"
             table += "<thead><tr style='font-weight:bold; background-color:#f0f0f0;'>"
             table += "<th style='padding:4px; border:1px solid #ccc;'>Device</th>"
@@ -927,27 +860,20 @@ def activitySummaryPage() {
                 def rowBg       = snoozed ? "#f8f8f8" : (rowNum % 2 == 0) ? "#ffffff" : "#ebebeb"
                 def protocolDisplay = hasOverride ? "${protocol} <span style='color:#94a3b8;font-size:10px;'>(override)</span>" : protocol
 
-                // v1.3.3: data-order values
-                // Last Seen — epoch ms (higher = more recent; invert so "most recent" sorts first asc)
                 def lastSeenMs  = data?.lastSeen ? (data.lastSeen as Long) : 0
                 def lastSeenStr = lastSeenMs ? formatTimeAgo(lastSeenMs) : "Never"
 
-                // Avg Check-in — raw minutes for numeric sort; Learning... = 999999 (sorts last)
                 def avgRawMin = data?.userInterval ? (data.userInterval as Long) :
                                 data?.avgInterval  ? (data.avgInterval as Long) : 999999
                 def avgIntStr = data?.userInterval ? formatInterval(data.userInterval) + " (manual)" :
                                 data?.avgInterval  ? formatInterval(data.avgInterval) : "Learning..."
 
-                // Samples — numeric
-                def sampleCount = data?.samples?.size() ?: 0
-
-                // Low Activity label
+                def sampleCount    = data?.samples?.size() ?: 0
                 def lowActivity    = isLowActivity(device.id as String)
                 def samplesDisplay = lowActivity
                     ? "${sampleCount} <span style='color:#f97316;font-size:10px;'>⚠ Low Activity</span>"
                     : "${sampleCount}"
 
-                // Health sort: Offline=1, Poor=2, Fair=3, Good=4, Excellent=5, Pending=6, Snoozed=99
                 def h           = state.health?.get(device.id) ?: "Pending"
                 def healthOrder = snoozed ? 99 :
                                   (h == "Offline" ? 1 : h == "Poor" ? 2 : h == "Fair" ? 3 :
@@ -955,18 +881,14 @@ def activitySummaryPage() {
 
                 rowNum++
 
-                def deviceLink
-                if (hubIp) {
-                    deviceLink = "<a href='http://${hubIp}/device/edit/${device.id}' target='_blank'>${device.displayName}</a>"
-                } else {
-                    deviceLink = device.displayName
-                }
+                def deviceLink = hubIp
+                    ? "<a href='http://${hubIp}/device/edit/${device.id}' target='_blank'>${device.displayName}</a>"
+                    : device.displayName
 
                 table += "<tr style='background-color:${rowBg};${snoozed ? "opacity:0.6;" : ""}'>"
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${device.displayName.toLowerCase().trim()}'>${deviceLink}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${protocol}'><span style='color:${getProtocolColor(protocol)};font-weight:bold;'>${protocolDisplay}</span></td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${healthOrder}'>${getHealthDisplay(device)}</td>"
-                // v1.3.3: negate epoch ms so ascending sort = most recent first
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${-lastSeenMs}'>${lastSeenStr}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${avgRawMin}'>${avgIntStr}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${sampleCount}'>${samplesDisplay}</td>"
@@ -975,7 +897,6 @@ def activitySummaryPage() {
 
             table += "</tbody></table>"
 
-            // v1.3.3: DataTables init — paging off, search on, default sort col 2 (Health) asc, numeric on cols 2/3/4/5
             paragraph rawHtml: true, """
 ${hubIp ? "<span style='color:#94a3b8;font-size:11px;'>⚠ Device links are accessible on your local network only.</span><br>" : ""}
 <div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>
@@ -998,8 +919,7 @@ ${hubIp ? "<span style='color:#94a3b8;font-size:11px;'>⚠ Device links are acce
         section("<b>🔄 Reset Device History</b>", hideable: true, hidden: true) {
             paragraph "Reset check-in history for specific devices. Health returns to Pending while fresh data is collected."
             href(name: "toResetHistory", page: "resetHistoryPage",
-                 title: "🔄 Reset Device History",
-                 description: "Select devices to reset")
+                 title: "🔄 Reset Device History")
         }
     }
 }
@@ -1008,15 +928,11 @@ ${hubIp ? "<span style='color:#94a3b8;font-size:11px;'>⚠ Device links are acce
 // ===================== PROTOCOL OVERRIDE PAGE ==============
 // ============================================================
 def protocolOverridePage() {
-    // v1.3.2: show only unresolvable devices, but keep devices with an active override
-    // visible regardless of what their resolved protocol is now (fix for disappearing devices).
-    // We check the RAW auto-detected protocol — ignoring the override — so once a device has
-    // been overridden it stays on this page until the user sets it back to Auto-detect.
     def devList = getAllMonitoredDevices()
         .findAll { device ->
-            def hasOverride  = settings["protocolOverride_${device.id}"] &&
-                               settings["protocolOverride_${device.id}"] != "Auto-detect"
-            def rawProtocol  = getRawProtocol(device)
+            def hasOverride = settings["protocolOverride_${device.id}"] &&
+                              settings["protocolOverride_${device.id}"] != "Auto-detect"
+            def rawProtocol = getRawProtocol(device)
             hasOverride || isUnresolvableProtocol(rawProtocol)
         }
         .sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
@@ -1206,12 +1122,9 @@ def problemDevicesPage() {
                 def rowBg    = (rowNum % 2 == 0) ? "#ffffff" : "#ebebeb"
                 rowNum++
 
-                def deviceLink
-                if (hubIp) {
-                    deviceLink = "<a href='http://${hubIp}/device/edit/${device.id}' target='_blank'>${device.displayName}</a>"
-                } else {
-                    deviceLink = device.displayName
-                }
+                def deviceLink = hubIp
+                    ? "<a href='http://${hubIp}/device/edit/${device.id}' target='_blank'>${device.displayName}</a>"
+                    : device.displayName
 
                 table += "<tr style='background-color:${rowBg};'>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${deviceLink}</td>"
@@ -1243,7 +1156,6 @@ def forceScanPage() {
             def devList         = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
             def intervalStr     = settings?.scanInterval ?: "3"
             def intervalMinutes = (intervalStr.toFloat() * 60).toInteger()
-            // v1.3.2 fix: 30.0 not 30 — avoids Math.min(BigDecimal, Integer) type error
             def minGate         = Math.min(intervalMinutes * 0.5, 30.0).toInteger()
             paragraph "✅ Device scan complete — ${devList.size()} device(s) checked. " +
                       "Return to Device Activity Summary to see updated values.<br><br>" +
