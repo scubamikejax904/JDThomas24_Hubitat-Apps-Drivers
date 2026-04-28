@@ -1,12 +1,12 @@
 {
   "packageName": "Battery Monitor 2.0",
   "author": "Jdthomas24",
-  "version": "2.4.13",
+  "version": "2.4.14",
   "category": "Convenience",
   "description": "Advanced Hubitat battery monitoring with analytics, trends and replacement tracking. Recurring scan schedule, confidence-weighted health, EWMA smoothing.",
   "dateReleased": "4/8/26",
   "minimumHEVersion": "2.3.0",
-  "releaseNotes": "v2.4.13 - Pending health now shows sample and day progress bars in the Battery Health column so you can see exactly where each device stands in the learning phase. Contact and motion sensors moved to the standard 5-sample gate — smoke and CO detectors keep the 7-sample slow reporter gate. Battery Catalog now supports custom battery types via a free text field when Other is selected. Clickable device links added to the Battery Trends page. Code cleanup: removed dead variables in Trends table, flattened legacy catalog migration guard.",
+  "releaseNotes": "v2.4.14 - Main page UI cleanup. Status now shown directly in section headers (device count, snooze state, notifications on/off). App Display Name moved to bottom and collapsed by default. Report buttons are now compact.",
   "apps": [
     {
       "name": "Battery Monitor 2.0",
