@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.15",
+    version: "2.4.16",
     doNotFocus: true
 )
 
@@ -122,11 +122,9 @@ def mainPage() {
                 title: "",
                 install: true, uninstall: true) {
 
-        // v1.3.8: App Display Name near top, collapsed by default, shows name in header
-        def hasCustomName = settings?.customAppName?.trim()
-        def appNameTitle  = hasCustomName
-            ? "<b>App Display Name</b> — <span style='color:blue;'>${settings.customAppName}</span>"
-            : "<b>App Display Name (optional)</b>"
+        // v2.4.15: App Display Name always shows current label in header
+        def currentLabel  = app.label ?: "Battery Monitor 2.0"
+        def appNameTitle  = "<b>App Display Name</b> — <span style='color:blue;'>${currentLabel}</span>"
         section(appNameTitle, hideable: true, hidden: true) {
             paragraph "Enter a name to rename this app in your Hubitat app list."
             input "customAppName", "text",
