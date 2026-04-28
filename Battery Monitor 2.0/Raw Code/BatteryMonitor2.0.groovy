@@ -188,10 +188,10 @@ def mainPage() {
         // ── Notification Snooze ──────────────────────────────
         def snoozed = state.notifSnoozedUntil && state.notifSnoozedUntil >= now()
         def snoozeHoursLeft = snoozed ? Math.ceil((state.notifSnoozedUntil - now()) / 3600000).toInteger() : 0
-        // v2.4.14: snooze status in section header — snoozed in orange, off in blue
+        // v2.4.15: snooze status in section header — snoozed in orange, off in red
         def snoozeSectionTitle = snoozed
             ? "<b>Notification Snooze</b> — <span style='color:orange;'>😴 ${snoozeHoursLeft}h remaining</span>"
-            : "<b>Notification Snooze</b> — <span style='color:blue;'>Off</span>"
+            : "<b>Notification Snooze</b> — <span style='color:red;'>Off</span>"
         section(snoozeSectionTitle, hideable: true, hidden: !snoozed) {
             paragraph "Silence all Battery Monitor notifications for a set duration. Useful when traveling or away from home."
             if (snoozed) {
