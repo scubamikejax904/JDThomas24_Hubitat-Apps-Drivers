@@ -11,7 +11,7 @@
       "id": "a045ac2b-5fe0-4159-830b-8550899d9553",
       "name": "Device Health Monitor App",
       "namespace": "Jdthomas24",
-      "location": "https://github.com/jdthomas24/Hubitat-Apps-Drivers/blob/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
+      "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
       "required": true
     }
   ]
