@@ -1,12 +1,12 @@
 {
   "packageName": "SmartThings Motion Sensor Driver",
   "author": "jdthomas24",
-  "version": "1.7.5",
+  "version": "1.7.6",
   "category": "Utility",
   "description": "Custom Hubitat driver for SmartThings Zigbee motion sensors with local processing and battery reporting.",
   "dateReleased": "4-10-26",
   "minimumHEVersion": "2.3.0",
-  "releaseNotes": "v1.7.5 - Removed presence detection which was causing devices to stop reporting. Removed lastCheckin, zigbeeHealth, and missedCheckins attributes. Battery voltage curve tightened to 5% increments for cleaner reporting. Temperature events fully suppressed when disabled. General cleanup.",
+  "releaseNotes": "v1.7.6 - Removed presence detection which was causing devices to stop reporting. Removed lastCheckin, zigbeeHealth, and missedCheckins attributes. Battery voltage curve tightened to 5% increments for cleaner reporting. Temperature events fully suppressed when disabled. General cleanup.",
   "drivers": [
     {
       "id": "a60901b6-bed8-4d00-9c98-a12ff7fa196b",
