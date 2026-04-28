@@ -325,12 +325,14 @@ def mainPage() {
         def modeOn           = settings?.enableModeRestriction == true
         def modeLabel        = modeOn ? (settings?.restrictedModes ? settings.restrictedModes.join(", ") : "none set") : "off"
 
-        def monitoringSummary = "Scan: <b>${currentScan}</b> | " +
-                                "Offline after: <b>${currentThreshold}h</b> | " +
-                                "Snooze: <b>${snoozeOn ? "${currentSnooze}h" : "disabled"}</b> | " +
-                                "Mode restriction: <b>${modeLabel}</b>"
+        // v1.3.8: monitoring summary in section header — eliminates separate paragraph below
+        def monitoringTitle = "<b>Monitoring Settings</b> — " +
+            "<span style='color:blue;'>Scan: ${currentScan}</span> | " +
+            "<span style='color:blue;'>Offline after: ${currentThreshold}h</span> | " +
+            "<span style='color:${snoozeOn ? "blue" : "red"};'>Snooze: ${snoozeOn ? "${currentSnooze}h" : "disabled"}</span> | " +
+            "<span style='color:${modeOn ? "blue" : "red"};'>Mode: ${modeOn ? modeLabel : "off"}</span>"
 
-        section("<b>Monitoring Settings</b>", hideable: true, hidden: true) {
+        section(monitoringTitle, hideable: true, hidden: true) {
             paragraph "<b>Scan Interval</b> — how often device activity is checked and health ratings are updated."
             input "scanInterval", "enum",
                   title: "Scan Frequency:",
@@ -370,11 +372,6 @@ def mainPage() {
                       multiple: true,
                       required: false
             }
-        }
-        section("") {
-            paragraph "<span style='color:blue;'>${monitoringSummary}</span> — tap <b>Monitoring Settings</b> above to change."
-        }
-
         // ── Notifications ────────────────────────────────────────
         // v1.3.8: ON/OFF status in section header — blue for ON, red for OFF
         def notifOn        = settings?.enablePush != false
