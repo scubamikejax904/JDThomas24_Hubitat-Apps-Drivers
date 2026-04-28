@@ -19,7 +19,7 @@
  *  Author: bloodtick
  *  Date: 2024-04-18
  */
-public static String version() {return "1.1.15"}
+public static String version() {return "1.1.16"}
 
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
@@ -417,12 +417,12 @@ void processEvent(String name, def value) {
         break    
     case "rooms":
         sendEventX(name: "rooms", value: JsonOutput.toJson(value), descriptionText: "rooms set to $value")
-        String roomsList = value?.sort{ a,b -> a.key.toInteger() <=> b.key.toInteger() }?.collect{ k,v -> "$k: $v" }?.join("\n")
+        String roomsList = value?.sort{ a,b -> a.key.toInteger() <=> b.key.toInteger() }?.findAll{ k,v -> v != null }?.collect{ k,v -> "$k: $v" }?.join(" | ")
         sendEventX(name: "roomsList", value: roomsList)
         break
     case "scenes":
         sendEventX(name: "scenes", value: JsonOutput.toJson(value), descriptionText: "scenes set to $value")
-        String scenesList = value?.sort{ a,b -> a.key.toInteger() <=> b.key.toInteger() }?.collect{ k,v -> "$k: $v" }?.join("\n")
+        String scenesList = value?.sort{ a,b -> a.key.toInteger() <=> b.key.toInteger() }?.collect{ k,v -> "$k: $v" }?.join(" | ")
         sendEventX(name: "scenesList", value: scenesList)
         break
     case "rpc_request":
