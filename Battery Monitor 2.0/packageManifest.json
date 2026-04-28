@@ -1,12 +1,12 @@
 {
   "packageName": "Battery Monitor 2.0",
   "author": "Jdthomas24",
-  "version": "2.4.15",
+  "version": "2.4.16",
   "category": "Convenience",
   "description": "Advanced Hubitat battery monitoring with analytics, trends and replacement tracking. Recurring scan schedule, confidence-weighted health, EWMA smoothing.",
   "dateReleased": "4/8/26",
   "minimumHEVersion": "2.3.0",
-  "releaseNotes": "v2.4.15 - Replacement history now ID-based — deleted devices show as removed, renamed devices update automatically, existing entries migrate on first update. Duplicate app title removed. Battery Scan Interval label consolidated. Version number added to Diagnostics section.",
+  "releaseNotes": "v2.4.16 - App Display Name header now always shows the current app name in blue.",
   "apps": [
     {
       "name": "Battery Monitor 2.0",
