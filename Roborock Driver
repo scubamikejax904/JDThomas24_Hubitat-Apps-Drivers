@@ -1351,4 +1351,3 @@ def logDebug(msg) { if(deviceDebugEnable)  log.debug "${device.displayName} ${ms
 def logTrace(msg) { if(deviceTraceEnable)  log.trace "${device.displayName} ${msg}" }
 def logWarn(msg)  { log.warn "${device.displayName} ${msg}" }
 def logError(msg) { log.error "${device.displayName} ${msg}" }
-
