@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.14",
+    version: "2.4.15",
     doNotFocus: true
 )
 
@@ -48,6 +48,22 @@ def updated() {
         }
     }
     state.history = state.history
+
+    // v2.4.15: one-time migration — add deviceId to existing replacement history entries
+    // Matches on displayName against currently selected devices. Entries for deleted devices
+    // will not match and remain name-only — these will show as orphaned in the history page.
+    def didMigrate = false
+    state.replacements?.each { r ->
+        if (!r.deviceId) {
+            def match = autoDevices?.find { it.displayName == r.device }
+            if (match) {
+                r.deviceId = match.id
+                didMigrate = true
+                if (debugMode) log.debug "Migrated replacement entry deviceId for ${r.device}: ${r.deviceId}"
+            }
+        }
+    }
+    if (didMigrate) state.replacements = state.replacements
 }
 
 def disableDebugLogging() {
@@ -103,8 +119,21 @@ def mainPage() {
     applyCustomLabel()
 
     dynamicPage(name: "mainPage",
-                title: "Battery Monitor 2.0",
+                title: "",
                 install: true, uninstall: true) {
+
+        // v1.3.8: App Display Name near top, collapsed by default, shows name in header
+        def hasCustomName = settings?.customAppName?.trim()
+        def appNameTitle  = hasCustomName
+            ? "<b>App Display Name</b> — <span style='color:blue;'>${settings.customAppName}</span>"
+            : "<b>App Display Name (optional)</b>"
+        section(appNameTitle, hideable: true, hidden: true) {
+            paragraph "Enter a name to rename this app in your Hubitat app list."
+            input "customAppName", "text",
+                  title: "Custom App Name",
+                  description: "Rename how this app appears in your Hubitat app list",
+                  required: false
+        }
 
         // v2.4.14: device count in section header — eliminates separate summary paragraph
         def devicesSelected = (autoDevices?.size() ?: 0) > 0
@@ -147,9 +176,9 @@ def mainPage() {
             }
         }
 
-        section("<b>Battery Scan Interval</b>") {
+        section("") {
             input "scanInterval", "enum",
-                  title: "Scan Frequency:",
+                  title: "<b>Battery Scan Interval</b>",
                   description: "How often battery levels are read. More frequent = faster health ratings. Devices also update on their own battery events.",
                   options: ["1": "Hourly", "3": "Every 3 Hours", "6": "Every 6 Hours"],
                   defaultValue: "3",
@@ -270,21 +299,9 @@ def mainPage() {
                  description: "Enjoying the app? Any amount is appreciated — thank you!"
         }
 
-        // v2.4.14: App Display Name moved to bottom — rarely needed, collapsed by default
-        def hasCustomName = settings?.customAppName?.trim()
-        def appNameTitle  = hasCustomName
-            ? "<b>App Display Name</b> — <span style='color:blue;'>${settings.customAppName}</span>"
-            : "<b>App Display Name (optional)</b>"
-        section(appNameTitle, hideable: true, hidden: true) {
-            paragraph "Enter a name to rename this app in your Hubitat app list."
-            input "customAppName", "text",
-                  title: "Custom App Name",
-                  description: "Rename how this app appears in your Hubitat app list",
-                  required: false
-        }
-
         section("<b>Diagnostics</b>") {
             input "debugMode", "bool", title: "Debug Logging (auto-disables after 30 min)", defaultValue: false, submitOnChange: true
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Battery Monitor v${app.version() ?: "2.4.15"}</span>"
         }
     }
 }
@@ -476,7 +493,11 @@ def scheduledSummary() {
     if (deadBatteryList) {
         body += "\n🪫 Dead Batteries:\n"
         deadBatteryList.each { dev ->
-            def info    = getCatalogBatteryInfo(devList.find { it.displayName.trim() == dev.name })
+            // v2.4.15: look up by deviceId if available
+            def foundDev = dev.deviceId
+                ? devList.find { it.id == dev.deviceId }
+                : devList.find { it.displayName.trim() == dev.name }
+            def info    = getCatalogBatteryInfo(foundDev)
             def infoStr = info ? " (${info})" : ""
             body += "• ${dev.name}${infoStr}\n"
         }
@@ -972,10 +993,11 @@ def logReplacement(device, newLevel, manual = false) {
 
     state.replacements = state.replacements?.findAll { it.device != device.displayName } ?: []
     state.replacements << [
-        device: device.displayName,
-        level:  newLevel,
-        date:   new Date().format("yyyy-MM-dd HH:mm", location.timeZone),
-        type:   manual ? "manual" : "auto"
+        deviceId: device.id,          // v2.4.15: store ID as primary key
+        device:   device.displayName,
+        level:    newLevel,
+        date:     new Date().format("yyyy-MM-dd HH:mm", location.timeZone),
+        type:     manual ? "manual" : "auto"
     ]
     state.replacements = state.replacements.sort { a, b -> b.date <=> a.date }
 
@@ -1392,12 +1414,24 @@ def historyPage() {
                 def historyRowBg = (idx % 2 == 0) ? "#ffffff" : "#ebebeb"
                 def typeTag = r.type == "manual" ? "<span style='color:blue;'>M</span>" :
                               r.type == "auto"   ? "<span style='color:green;'>A</span>" : "?"
-                def dev     = autoDevices?.find { it.displayName == r.device }
-                def info    = dev ? getCatalogBatteryInfo(dev) : null
-                def infoStr = info ? "${info}" : ""
 
-                table += "<tr style='background-color:${historyRowBg};'>"
-                table += "<td style='padding:4px; border:1px solid #ccc;'>${r.device}</td>"
+                // v2.4.15: look up by deviceId first, fall back to name for legacy entries
+                def dev = r.deviceId
+                    ? autoDevices?.find { it.id == r.deviceId }
+                    : autoDevices?.find { it.displayName == r.device }
+
+                def orphaned = (dev == null)
+                def info     = dev ? getCatalogBatteryInfo(dev) : null
+                def infoStr  = info ? "${info}" : ""
+
+                // v2.4.15: use current device name if found (handles renames), else use stored name
+                def displayName = dev ? dev.displayName : r.device
+                def nameDisplay = orphaned
+                    ? "<span style='color:#94a3b8;'>${displayName} <em>(device removed)</em></span>"
+                    : displayName
+
+                table += "<tr style='background-color:${historyRowBg};${orphaned ? "opacity:0.6;" : ""}'>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${nameDisplay}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${infoStr}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${r.level}%</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${r.date}</td>"
@@ -1544,10 +1578,11 @@ def manualReplacementConfirmPage() {
 
                         state.replacements = state.replacements?.findAll { it.device != device.displayName } ?: []
                         state.replacements << [
-                            device: device.displayName,
-                            level:  level,
-                            date:   new Date().format("yyyy-MM-dd HH:mm", location.timeZone),
-                            type:   "manual"
+                            deviceId: device.id,          // v2.4.15: store ID as primary key
+                            device:   device.displayName,
+                            level:    level,
+                            date:     new Date().format("yyyy-MM-dd HH:mm", location.timeZone),
+                            type:     "manual"
                         ]
                         state.replacements = state.replacements.sort { a, b -> b.date <=> a.date }
 
