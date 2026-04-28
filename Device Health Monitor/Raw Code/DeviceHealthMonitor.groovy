@@ -327,10 +327,10 @@ def mainPage() {
 
         // v1.3.8: monitoring summary in section header — eliminates separate paragraph below
         def monitoringTitle = "<b>Monitoring Settings</b> — " +
-            "<span style='color:blue;'>Scan: ${currentScan}</span> | " +
-            "<span style='color:blue;'>Offline after: ${currentThreshold}h</span> | " +
-            "<span style='color:${snoozeOn ? "blue" : "red"};'>Snooze: ${snoozeOn ? "${currentSnooze}h" : "disabled"}</span> | " +
-            "<span style='color:${modeOn ? "blue" : "red"};'>Mode: ${modeOn ? modeLabel : "off"}</span>"
+            "Scan: <span style='color:blue;'>${currentScan}</span> | " +
+            "Offline after: <span style='color:blue;'>${currentThreshold}h</span> | " +
+            "Snooze: <span style='color:${snoozeOn ? "blue" : "red"};'>${snoozeOn ? "${currentSnooze}h" : "disabled"}</span> | " +
+            "Mode: <span style='color:${modeOn ? "blue" : "red"};'>${modeOn ? modeLabel : "off"}</span>"
 
         section(monitoringTitle, hideable: true, hidden: true) {
             paragraph "<b>Scan Interval</b> — how often device activity is checked and health ratings are updated."
@@ -375,11 +375,10 @@ def mainPage() {
         }
 
         // ── Notifications ────────────────────────────────────────
-        // v1.3.8: ON/OFF status in section header — blue for ON, red for OFF
-        def notifOn        = settings?.enablePush != false
-        def notifConfigured = notifOn && (settings?.notifyDevices || settings?.pushoverDevices)
+        // v1.3.8: ON/OFF status in section header — always collapsed, value colored only
+        def notifOn           = settings?.enablePush != false
         def notifSectionTitle = "<b>Notifications</b> — <span style='color:${notifOn ? "blue" : "red"};'>${notifOn ? "ON" : "OFF"}</span>"
-        section(notifSectionTitle, hideable: true, hidden: notifConfigured) {
+        section(notifSectionTitle, hideable: true, hidden: true) {
             paragraph "ℹ️ Enable the toggle below to configure notification settings."
             input "enablePush", "bool", title: "Enable notifications", defaultValue: true, submitOnChange: true
 
@@ -1537,4 +1536,3 @@ def infoPage(Map params = [:]) {
         }
     }
 }
-
