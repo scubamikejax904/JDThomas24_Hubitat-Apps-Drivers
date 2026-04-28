@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
-    version: "1.3.9",
+    version: "1.3.10",
     doNotFocus: true
 )
 
@@ -268,11 +268,10 @@ def mainPage() {
     applyCustomLabel()
     dynamicPage(name: "mainPage", title: "", install: true, uninstall: true) {
 
-        // v1.3.9: App Display Name near top, collapsed by default, shows name in header
+        // v1.3.9: App Display Name near top, collapsed by default, shows current label in header
         def hasCustomName = settings?.customAppName?.trim()
-        def appNameTitle  = hasCustomName
-            ? "<b>App Display Name</b> — <span style='color:blue;'>${settings.customAppName}</span>"
-            : "<b>App Display Name (optional)</b>"
+        def currentLabel  = app.label ?: "Device Health Monitor"
+        def appNameTitle  = "<b>App Display Name</b> — <span style='color:blue;'>${currentLabel}</span>"
         section(appNameTitle, hideable: true, hidden: true) {
             paragraph "Enter a name to rename this app in your Hubitat app list."
             input "customAppName", "text",
@@ -338,11 +337,15 @@ def mainPage() {
         def modeOn           = settings?.enableModeRestriction == true
         def modeLabel        = modeOn ? (settings?.restrictedModes ? settings.restrictedModes.join(", ") : "none set") : "off"
 
-        // v1.3.8: monitoring summary in section header — eliminates separate paragraph below
+        // v1.3.9: monitoring summary in section header — snooze shows time remaining when active
+        def snoozedDeviceCount = state.snoozed?.count { id, until -> until >= now() } ?: 0
+        def snoozeLabel = !snoozeOn ? "<span style='color:red;'>off</span>" :
+                          snoozedDeviceCount > 0 ? "<span style='color:orange;'>${snoozedDeviceCount} snoozed</span>" :
+                          "<span style='color:blue;'>${currentSnooze}h</span>"
         def monitoringTitle = "<b>Monitoring Settings</b> — " +
             "Scan: <span style='color:blue;'>${currentScan}</span> | " +
             "Offline after: <span style='color:blue;'>${currentThreshold}h</span> | " +
-            "Snooze: <span style='color:${snoozeOn ? "blue" : "red"};'>${snoozeOn ? "${currentSnooze}h" : "disabled"}</span> | " +
+            "Snooze: ${snoozeLabel} | " +
             "Mode: <span style='color:${modeOn ? "blue" : "red"};'>${modeOn ? modeLabel : "off"}</span>"
 
         section(monitoringTitle, hideable: true, hidden: true) {
@@ -443,8 +446,6 @@ def mainPage() {
             }
         }
 
-        // ── Reports ──────────────────────────────────────────────
-        // v1.3.8: removed description text from report buttons — compact height
         section("<b>Reports:</b>") {
             href(name: "toActivitySummary", page: "activitySummaryPage",
                  title: "Device Activity Summary")
