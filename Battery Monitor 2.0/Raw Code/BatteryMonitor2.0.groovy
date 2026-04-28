@@ -563,7 +563,8 @@ def updateBattery(device, level) {
         data = state.history[device.id]
     }
 
-    if (level == 0) {
+    // v2.4.16: treat 1% same as 0% for dead battery detection
+    if (level <= 1) {
         data.zeroCount = (data.zeroCount ?: 0) + 1
     } else {
         data.zeroCount = 0
@@ -579,7 +580,7 @@ def updateBattery(device, level) {
         return
     }
 
-    if (level == 0 && (data.zeroCount ?: 0) < 3) {
+    if (level <= 1 && (data.zeroCount ?: 0) < 3) {
         data.justReplaced = false
         data.replacedTime = null
         data.drain        = 1.0
@@ -637,7 +638,8 @@ def isBatteryDead(device) {
     if (!data) return false
     def level     = device.currentValue("battery")
     def zeroCount = data.zeroCount ?: 0
-    return (level != null && level.toInteger() == 0 && zeroCount >= 3)
+    // v2.4.16: treat 1% same as 0% — 3 consecutive readings at 0% or 1% confirms dead
+    return (level != null && level.toInteger() <= 1 && zeroCount >= 3)
 }
 
 // ============================================================
