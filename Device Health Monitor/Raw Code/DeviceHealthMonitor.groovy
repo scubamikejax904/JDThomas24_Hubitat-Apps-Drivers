@@ -372,6 +372,8 @@ def mainPage() {
                       multiple: true,
                       required: false
             }
+        }
+
         // ── Notifications ────────────────────────────────────────
         // v1.3.8: ON/OFF status in section header — blue for ON, red for OFF
         def notifOn        = settings?.enablePush != false
@@ -1535,3 +1537,4 @@ def infoPage(Map params = [:]) {
         }
     }
 }
+
