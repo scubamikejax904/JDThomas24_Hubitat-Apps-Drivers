@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
-    version: "1.3.8",
+    version: "1.3.9",
     doNotFocus: true
 )
 
@@ -266,7 +266,20 @@ def isLowActivity(deviceId) {
 // ============================================================
 def mainPage() {
     applyCustomLabel()
-    dynamicPage(name: "mainPage", title: "Device Health Monitor", install: true, uninstall: true) {
+    dynamicPage(name: "mainPage", title: "", install: true, uninstall: true) {
+
+        // v1.3.9: App Display Name near top, collapsed by default, shows name in header
+        def hasCustomName = settings?.customAppName?.trim()
+        def appNameTitle  = hasCustomName
+            ? "<b>App Display Name</b> — <span style='color:blue;'>${settings.customAppName}</span>"
+            : "<b>App Display Name (optional)</b>"
+        section(appNameTitle, hideable: true, hidden: true) {
+            paragraph "Enter a name to rename this app in your Hubitat app list."
+            input "customAppName", "text",
+                  title: "Custom App Name",
+                  description: "Rename how this app appears in your Hubitat app list",
+                  required: false
+        }
 
         // ── Device Selection ─────────────────────────────────────
         // v1.3.8: device count in section header — eliminates separate summary paragraph
@@ -466,19 +479,7 @@ def mainPage() {
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false,
                   submitOnChange: true
-        }
-
-        // v1.3.8: App Display Name moved to bottom — rarely needed, collapsed by default
-        def hasCustomName    = settings?.customAppName?.trim()
-        def appNameTitle     = hasCustomName
-            ? "<b>App Display Name</b> — <span style='color:blue;'>${settings.customAppName}</span>"
-            : "<b>App Display Name (optional)</b>"
-        section(appNameTitle, hideable: true, hidden: true) {
-            paragraph "Enter a name to rename this app in your Hubitat app list."
-            input "customAppName", "text",
-                  title: "Custom App Name",
-                  description: "Rename how this app appears in your Hubitat app list",
-                  required: false
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v${app.version() ?: "1.3.9"}</span>"
         }
     }
 }
