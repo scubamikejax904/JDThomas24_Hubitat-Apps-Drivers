@@ -3,9 +3,10 @@
   "author": "Jdthomas24",
   "version": "1.3.10",
   "category": "Utility",
-  "description": "v1.3.10 - App Display Name header now always shows the current app name in blue.",
-  "dateReleased": "4-28-26",
+  "description": "Monitor device check-in health across Zigbee, Z-Wave, Matter, Hub Mesh, LAN, Virtual and Hub Variable — learns each device's normal pattern and alerts you when something goes quiet.",
+  "dateReleased": "4/28/26",
   "minimumHEVersion": "2.3.0",
+  "releaseNotes": "v1.3.10 - UI polish: App Display Name always shows current name in blue, duplicate title removed, Monitoring Settings header updated, compact report buttons, version number added to Diagnostics.",
   "apps": [
     {
       "id": "a045ac2b-5fe0-4159-830b-8550899d9553",
