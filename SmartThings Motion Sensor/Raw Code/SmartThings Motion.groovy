@@ -1,7 +1,7 @@
 /*
 SmartThings Motion Sensor Enhanced
 
-Version: 1.7.5
+Version: 1.7.6
 Author: jdthomas24
 Namespace: jdthomas24
 
@@ -21,7 +21,7 @@ Enhancements:
 - Debug logging auto-disables after 30 minutes
 - Temperature logging suppressed when enableTemp is off
 
-Changes in 1.7.5:
+Changes in 1.7.6:
 - Removed presence detection — was causing interference with device reporting
   due to aggressive runIn() scheduling on every parse event
 - Removed lastCheckin attribute — redundant with Hubitat built-in Last Activity
