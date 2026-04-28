@@ -1,9 +1,9 @@
 {
   "packageName": "Device Health Monitor",
   "author": "Jdthomas24",
-  "version": "1.3.9",
+  "version": "1.3.10",
   "category": "Utility",
-  "description": "Monitor device check-in health across Zigbee, Z-Wave, Matter, Hub Mesh, LAN, Virtual and Hub Variable — learns each device's normal pattern and alerts you when something goes quiet.",
+  "description": "v1.3.10 - App Display Name header now always shows the current app name in blue.",
   "dateReleased": "4-28-26",
   "minimumHEVersion": "2.3.0",
   "apps": [
