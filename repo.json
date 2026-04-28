@@ -40,7 +40,7 @@
         {
             "name": "Device Health Monitor",
             "category": "Utility",
-            "location": "https://github.com/jdthomas24/Hubitat-Apps-Drivers/blob/main/Device%20Health%20Monitor/packageManifest.json",
+            "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/packageManifest.json",
             "description": "Monitor device check-in health across Zigbee, Z-Wave, Matter, Hub Mesh, LAN, Virtual and Hub Variable — learns each device's normal pattern and alerts you when something goes quiet.",
             "descriptive": "",
             "tags": [
