@@ -19,7 +19,7 @@
  *  Author: bloodtick
  *  Date: 2024-04-18
  */
-public static String version() {return "1.1.16"}
+public static String version() {return "1.1.24"}
 
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
@@ -67,19 +67,19 @@ metadata {
         attribute "dustCollection", "enum", ["off","on"]
         attribute "dockError", "enum", dockErrorCodes.values().collect{ it.toLowerCase() }
         attribute "name", "string"
-        attribute "rooms", "JSON_OBJECT"
-        attribute "scenes", "JSON_OBJECT"
+        //attribute "rooms", "JSON_OBJECT" // hidden - use roomsList
+        //attribute "scenes", "JSON_OBJECT" // hidden - use scenesList
         attribute "state", "enum", stateCodes.values().collect{ it.toLowerCase() }   
         attribute "error", "enum", errorCodes.values().collect{ it.toLowerCase() }
         attribute "fanPower", "enum", fanPowerCodes.values().collect{ it.toLowerCase() }
-        attribute "cleanTime", "number"
-        attribute "cleanArea", "number"
-        attribute "cleanPercent", "number"
-        attribute "remainingFilter", "number"
-        attribute "remainingMainBrush", "number"
-        attribute "remainingSensors", "number"
-        attribute "remainingSideBrush", "number"
-        attribute "remainingHighSpeedMaintBrush", "number"
+        attribute "cleanTime (min)", "number"
+        attribute "cleanArea (sq ft)", "number"
+        attribute "cleanPercent (%)", "number"
+        attribute "remainingFilter (%)", "number"
+        attribute "remainingMainBrush (%)", "number"
+        attribute "remainingSensors (%)", "number"
+        attribute "remainingSideBrush (%)", "number"
+        attribute "remainingHighSpeedMaintBrush (%)", "number"
         attribute "locating", "enum", ["true","false"]
         attribute "mopMode", "enum", mopModeCodes.values().collect{ it.toLowerCase() }
         attribute "mopWaterMode", "enum", mopWaterModeCodes.values().collect{ it.toLowerCase() } 
@@ -115,7 +115,8 @@ def installed() {
 }
 
 def updated() {
-	initialize()    
+	cleanStaleAttributes()
+	initialize()
 }
 
 def initialize() {
@@ -226,6 +227,12 @@ def selectDevice() {
 void clearAttributes() {
     // blow away all attribute information. not sure if this 'is the way' but it works.
     device.currentStates?.collect{ ((new groovy.json.JsonSlurper().parseText( groovy.json.JsonOutput.toJson(it) ))?.name) }?.each{ device.deleteCurrentState(it) }    
+}
+
+void cleanStaleAttributes() {
+    // Use same method as clearAttributes to reliably delete stale states by iterating all current states
+    List stale = [ "cleanTime", "cleanArea", "cleanPercent", "remainingFilter", "remainingMainBrush", "remainingSensors", "remainingSideBrush", "remainingHighSpeedMaintBrush", "rooms", "scenes" ]
+    device.currentStates?.collect{ ((new groovy.json.JsonSlurper().parseText( groovy.json.JsonOutput.toJson(it) ))?.name) }?.each{ n -> if(stale.contains(n)) { device.deleteCurrentState(n); logInfo "removed stale attribute: $n" } }
 }
 
 void getHomeDataCallback() {
@@ -416,12 +423,12 @@ void processEvent(String name, def value) {
         //sendEventX(name: "wifi", value: value, descriptionText: "wifi set to $value")
         break    
     case "rooms":
-        sendEventX(name: "rooms", value: JsonOutput.toJson(value), descriptionText: "rooms set to $value")
+        // raw rooms JSON intentionally not sent as attribute - use roomsList
         String roomsList = value?.sort{ a,b -> a.key.toInteger() <=> b.key.toInteger() }?.findAll{ k,v -> v != null }?.collect{ k,v -> "$k: $v" }?.join(" | ")
         sendEventX(name: "roomsList", value: roomsList)
         break
     case "scenes":
-        sendEventX(name: "scenes", value: JsonOutput.toJson(value), descriptionText: "scenes set to $value")
+        // raw scenes JSON intentionally not sent as attribute - use scenesList
         String scenesList = value?.sort{ a,b -> a.key.toInteger() <=> b.key.toInteger() }?.collect{ k,v -> "$k: $v" }?.join(" | ")
         sendEventX(name: "scenesList", value: scenesList)
         break
@@ -450,17 +457,17 @@ void processEvent(String name, def value) {
         break
     case "main_brush_work_time":
         Integer percentAvail = Math.max(0, (100 - Math.floor((value.toInteger() / (life.main * 60 * 60)) * 100).toInteger()))
-        sendEventX(name: "remainingMainBrush", value: percentAvail, unit: "%", descriptionText: "main brush time remaining is $percentAvail%")
+        sendEventX(name: "remainingMainBrush (%)", value: percentAvail, unit: "%", descriptionText: "main brush time remaining is $percentAvail%")
         break
     case "side_brush_life":
         break
     case "side_brush_work_time":
         Integer percentAvail = Math.max(0, (100 - Math.floor((value.toInteger() / (life.side * 60 * 60)) * 100).toInteger()))
-        sendEventX(name: "remainingSideBrush", value: percentAvail, unit: "%", descriptionText: "side brush time remaining is $percentAvail%")
+        sendEventX(name: "remainingSideBrush (%)", value: percentAvail, unit: "%", descriptionText: "side brush time remaining is $percentAvail%")
         break
     case "cleaning_brush_work_times":
         Integer percentAvail = Math.max(0, (100 - Math.floor((value.toInteger() / life.highSpeed) * 100).toInteger()))
-        sendEventX(name: "remainingHighSpeedMaintBrush", value: percentAvail, unit: "%", descriptionText: "high-speed maintenance brush remaining life is $percentAvail%")
+        sendEventX(name: "remainingHighSpeedMaintBrush (%)", value: percentAvail, unit: "%", descriptionText: "high-speed maintenance brush remaining life is $percentAvail%")
         break
     case "filter_life":
     case "filter_work_time":
@@ -473,7 +480,7 @@ void processEvent(String name, def value) {
         break
     case "sensor_dirty_time":
         Integer percentAvail = Math.max(0, (100 - Math.floor((value.toInteger() / (life.sensor * 60 * 60)) * 100).toInteger()))
-        sendEventX(name: "remainingSensors", value: percentAvail, unit: "%", descriptionText: "sensor time remaining is $percentAvail%")
+        sendEventX(name: "remainingSensors (%)", value: percentAvail, unit: "%", descriptionText: "sensor time remaining is $percentAvail%")
         break
     case "filter_element_work_time":
     case "dust_collection_work_times":
@@ -482,12 +489,12 @@ void processEvent(String name, def value) {
         break
     case "clean_time":
         Integer totalMinutes = Math.ceil(value.toInteger()/60).toInteger()
-        sendEventX(name: "cleanTime", value: totalMinutes, unit: "min", descriptionText: "clean time is $totalMinutes ${totalMinutes==1?"minute":"minutes"}", eventDisable: cleanAttributeDisable)
+        sendEventX(name: "cleanTime (min)", value: totalMinutes, descriptionText: "clean time is $totalMinutes ${totalMinutes==1?"minute":"minutes"}", eventDisable: cleanAttributeDisable)
         break
     case "clean_area":
-        String unit = (areaUnit==null || areaUnit=="0") ? "ft²" : "m²"
-        Integer area = (unit=="ft²") ? value.toInteger() / 92903.04 : value.toInteger() / 1000000
-        sendEventX(name: "cleanArea", value: area, unit: unit, descriptionText: "clean area is $area $unit", eventDisable: cleanAttributeDisable)
+        String unit = (areaUnit==null || areaUnit=="0") ? "sq ft" : "m²"
+        Integer area = (unit=="sq ft") ? value.toInteger() / 92903.04 : value.toInteger() / 1000000
+        sendEventX(name: "cleanArea (sq ft)", value: area, descriptionText: "clean area is $area $unit", eventDisable: cleanAttributeDisable)
         break
     case "map_present":
     case "in_cleaning":
@@ -534,7 +541,7 @@ void processEvent(String name, def value) {
     case "unsave_map_flag":
         break
     case "clean_percent":
-        sendEventX(name: "cleanPercent", value: value.toInteger(), unit: "%", descriptionText: "percent completed is $value%", eventDisable: cleanAttributeDisable)        
+        sendEventX(name: "cleanPercent (%)", value: value.toInteger(), unit: "%", descriptionText: "percent completed is $value%", eventDisable: cleanAttributeDisable)        
         break
     case "rss":
     case "dss":
@@ -546,7 +553,7 @@ void processEvent(String name, def value) {
         break
     case "strainer_work_times":  // start reported by Q Revo
 		Integer percentAvail = Math.max(0, (100 - Math.floor((value.toInteger() / life.filter) * 100).toInteger()))
-        sendEventX(name: "remainingFilter", value: percentAvail, unit: "%", descriptionText: "filter life remaining is $percentAvail%")
+        sendEventX(name: "remainingFilter (%)", value: percentAvail, unit: "%", descriptionText: "filter life remaining is $percentAvail%")
         break
     case "wash_status":
     case "wash_ready":
