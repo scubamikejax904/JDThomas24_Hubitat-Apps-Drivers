@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.13",
+    version: "2.4.14",
     doNotFocus: true
 )
 
@@ -106,22 +106,13 @@ def mainPage() {
                 title: "Battery Monitor 2.0",
                 install: true, uninstall: true) {
 
-        def hasCustomName = settings?.customAppName?.trim()
-        section("<b>App Display Name (optional)</b>", hideable: true, hidden: hasCustomName) {
-            paragraph "Enter a name to rename this app in your Hubitat app list."
-            input "customAppName", "text",
-                  title: "Custom App Name",
-                  description: "Rename how this app appears in your Hubitat app list",
-                  required: false
-        }
-        if (hasCustomName) {
-            section("") {
-                paragraph "Current name: <b><span style='color:blue;'>${settings.customAppName}</span></b> — tap <b>App Display Name (optional)</b> above to change."
-            }
-        }
-
+        // v2.4.14: device count in section header — eliminates separate summary paragraph
         def devicesSelected = (autoDevices?.size() ?: 0) > 0
-        section("<b>Selected Monitored Devices</b>", hideable: true, hidden: devicesSelected) {
+        def devSectionTitle = devicesSelected
+            ? "<b>Selected Monitored Devices</b> — <span style='color:blue;'>${autoDevices.size()} selected</span>"
+            : "<b>Selected Monitored Devices</b>"
+
+        section(devSectionTitle, hideable: true, hidden: devicesSelected) {
             paragraph "<b>⚠ Important: The app automatically detects all devices reporting battery levels. " +
                       "Select the devices you want to monitor from the list below. Only selected devices will be tracked for trends, battery health, and notifications.</b>"
             paragraph "<span style='color:red; font-weight:bold;'>Note for mobile users:</span> If your device names are long, they may extend past the screen in the selection list. This is a UI limitation on smaller screens. You can still select devices as usual."
@@ -132,11 +123,8 @@ def mainPage() {
                   multiple: true,
                   required: false
         }
-        if (devicesSelected) {
-            section("") {
-                paragraph "<b><span style='color:blue;'>${autoDevices.size()} device(s)</span> selected.</b> Tap <b>Selected Monitored Devices</b> above to expand and change your selection."
-            }
 
+        if (devicesSelected) {
             def devList = autoDevices ?: []
             if (devList) {
                 if (!state.history) state.history = [:]
@@ -148,6 +136,7 @@ def mainPage() {
                             lastLevel:    currentLevel != null ? currentLevel.toInteger() : 100,
                             lastDate:     now(),
                             lastScanDate: now(),
+                            firstSeenDate: now(),
                             drain:        0.3,
                             samples:      [],
                             justReplaced: false
@@ -170,7 +159,11 @@ def mainPage() {
         // ── Notification Snooze ──────────────────────────────
         def snoozed = state.notifSnoozedUntil && state.notifSnoozedUntil >= now()
         def snoozeHoursLeft = snoozed ? Math.ceil((state.notifSnoozedUntil - now()) / 3600000).toInteger() : 0
-        section("<b>Notification Snooze</b>", hideable: true, hidden: !snoozed) {
+        // v2.4.14: snooze status in section header — snoozed in orange, off in blue
+        def snoozeSectionTitle = snoozed
+            ? "<b>Notification Snooze</b> — <span style='color:orange;'>😴 ${snoozeHoursLeft}h remaining</span>"
+            : "<b>Notification Snooze</b> — <span style='color:blue;'>Off</span>"
+        section(snoozeSectionTitle, hideable: true, hidden: !snoozed) {
             paragraph "Silence all Battery Monitor notifications for a set duration. Useful when traveling or away from home."
             if (snoozed) {
                 paragraph "<b><span style='color:orange;'>😴 Notifications snoozed — ${snoozeHoursLeft}h remaining</span></b>"
@@ -200,15 +193,12 @@ def mainPage() {
                 }
             }
         }
-        if (snoozed) {
-            section("") {
-                paragraph "😴 <b><span style='color:orange;'>Notifications snoozed — ${snoozeHoursLeft}h remaining</span></b> — tap <b>Notification Snooze</b> above to clear."
-            }
-        }
 
         // ── Notifications ────────────────────────────────────
+        def notifOn = settings?.enablePush != false
         def notificationSettings = (notificationSettings != false)
-        section("<b>Notifications</b>", hideable: true, hidden: notificationSettings) {
+        def notifSectionTitle = "<b>Notifications</b> — <span style='color:${notifOn ? "blue" : "red"};'>${notifOn ? "ON" : "OFF"}</span>"
+        section(notifSectionTitle, hideable: true, hidden: notificationSettings) {
             paragraph "ℹ️ Enable the toggle below to reveal notification settings including frequency, timing, device targets, and which battery groups to include in reports."
             input "enablePush", "bool", title: "Enable notifications", defaultValue: true, submitOnChange: true
 
@@ -253,22 +243,17 @@ def mainPage() {
 
                 paragraph "<b>Send notification now:</b>"
                 href(name: "toSendNotification", page: "sendNotificationPage",
-                     title: "📤 Send Notification Now",
-                     description: "Tap to preview and send a battery summary notification")
-            }
-        }
-        if (notificationSettings) {
-            section("") {
-                paragraph "Notifications are <b><span style='color:blue;'>" + (settings?.enablePush != false ? "ON" : "OFF") + "</span></b> — tap <b>Notifications</b> above to expand and configure."
+                     title: "📤 Send Notification Now")
             }
         }
 
+        // v2.4.14: Reports section — removed "Click to show" descriptions, buttons are now compact
         section("<b>Reports:</b>") {
-            href(name: "toSummary",     page: "summaryPage",           title: "Battery Summary")
-            href(name: "toTrends",      page: "trendsPage",            title: "Battery Trends")
-            href(name: "toHistory",     page: "historyPage",           title: "Battery Replacement History")
-            href(name: "toManualRep",   page: "manualReplacementPage", title: "Manual Battery Replacement")
-            href(name: "toCatalog",     page: "batteryCatalogPage",    title: "🔋 Battery Catalog")
+            href(name: "toSummary",   page: "summaryPage",           title: "Battery Summary")
+            href(name: "toTrends",    page: "trendsPage",            title: "Battery Trends")
+            href(name: "toHistory",   page: "historyPage",           title: "Battery Replacement History")
+            href(name: "toManualRep", page: "manualReplacementPage", title: "Manual Battery Replacement")
+            href(name: "toCatalog",   page: "batteryCatalogPage",    title: "🔋 Battery Catalog")
         }
 
         section("<b>Help & Support</b>") {
@@ -283,6 +268,19 @@ def mainPage() {
                  style: "external",
                  title: "☕ Buy Me a Coffee",
                  description: "Enjoying the app? Any amount is appreciated — thank you!"
+        }
+
+        // v2.4.14: App Display Name moved to bottom — rarely needed, collapsed by default
+        def hasCustomName = settings?.customAppName?.trim()
+        def appNameTitle  = hasCustomName
+            ? "<b>App Display Name</b> — <span style='color:blue;'>${settings.customAppName}</span>"
+            : "<b>App Display Name (optional)</b>"
+        section(appNameTitle, hideable: true, hidden: true) {
+            paragraph "Enter a name to rename this app in your Hubitat app list."
+            input "customAppName", "text",
+                  title: "Custom App Name",
+                  description: "Rename how this app appears in your Hubitat app list",
+                  required: false
         }
 
         section("<b>Diagnostics</b>") {
