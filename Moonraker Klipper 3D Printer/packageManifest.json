@@ -1,1 +1,19 @@
-
+{
+  "packageName": "Moonraker Klipper Printer",
+  "author": "Jdthomas24",
+  "version": "1.0.44",
+  "category": "Utility",
+  "description": "Hubitat driver for Moonraker/Klipper 3D printers. Monitor print status, temperatures, and progress via live dashboard tiles. Start, pause, resume, and cancel prints directly from Hubitat or any automation rule. Supports Sonicpad multi-printer setups and standard Raspberry Pi/BTT installs.",
+  "dateReleased": "2026-04-29",
+  "minimumHEVersion": "2.3.0",
+  "releaseNotes": "Initial release. Features include: live status dashboard tile (aaStatusTile) with printer name, klipper state, print state, hotend and bed temps, progress bar, and ETA. Recent prints tile (filesListTile) showing top 20 files sorted by print history with currently printing file pinned. Start prints by number or full path, startLastPrint command, auto file list refresh on print start and complete. Filament runout detection. Compatible with Sonicpad multi-printer setups and standard Moonraker installs.",
+  "drivers": [
+    {
+      "id": "382c9056-28ca-48de-b6e8-3cd1a44dea22",
+      "name": "Moonraker Klipper Printer Driver",
+      "namespace": "Jdthomas24",
+      "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Moonraker%20Klipper%203D%20Printer/Raw%20Code/Moonraker%20Klipper%20Printer.groovy",
+      "required": true
+    }
+  ]
+}
