@@ -1,1 +1,43 @@
+Moonraker / Klipper 3D Printer Driver for Hubitat
+Author: jdthomas24  ·  Version: 1.0.0  ·  License: Apache 2.0
+Integrates any Moonraker/Klipper 3D printer with Hubitat. Monitor status, temps, and progress via a live dashboard tile. Start, pause, resume, and cancel prints from Hubitat or any automation rule.
 
+Requirements
+
+Hubitat Elevation hub
+Printer running Klipper + Moonraker
+Hub must reach the printer IP on the Moonraker port (default 7125) over your local network
+
+
+Installation
+
+In Hubitat go to Drivers Code → New Driver, paste the driver code, and click Save
+Go to Devices → Add Device → Virtual
+Name the device to match your printer (e.g. 3D - CR10 Pro 1) — do this before saving preferences
+Set Type to Moonraker Klipper Printer and click Save Device
+Fill in preferences and click Save Preferences
+
+Repeat for each printer.
+
+Setup
+Sonicpad
+All printers share one IP — use the port to differentiate. Create one Hubitat device per printer:
+USB PortMoonraker PortPort 17125Port 27126Port 37127Port 47128
+Unoccupied ports will show offline — this is normal.
+Standard Install (Raspberry Pi, BTT Pi, etc.)
+Each printer has its own IP, all using port 7125.
+Preferences
+SettingNotesPrinter IP AddressSonicpad: all printers share the same IPMoonraker PortDefault 7125 — see table above for SonicpadUse HTTPSLeave off for most local installsAPI KeyOnly needed if Moonraker enforces auth. Find it at http://<ip>:<port>/access/api_keyPoll Interval10–30 seconds recommended while printingRecent Files LimitTop 20 recommendedTemperature UnitCelsius (default) or Fahrenheit
+
+Dashboard Tiles
+Add either tile to your Hubitat dashboard as an Attribute tile.
+aaStatusTile — full printer dashboard showing online status, klipper state, print state, current filename, hotend and bed temps vs target, progress bar, elapsed/remaining time, ETA, fan speed, and filament status.
+filesListTile — recent prints browser showing top 20 files sorted by print history. Currently printing file is pinned green at #1. Last completed print shown at top. Use the file number with the startPrint command.
+
+Troubleshooting
+"klipper: unknown" in tile — hit Initialize on the device. Fixes on next poll.
+Temps showing in wrong unit — go to preferences, switch Temperature Unit to Celsius, hit Save Preferences. One-time fix per device.
+"0 prints done" in tile — hit Refresh File List to load print history.
+Printer shows offline but is running — hit Refresh or Initialize to force reconnect.
+startPrint fails — verify the printer is on and Moonraker is running. Check IP and port in preferences.
+File list numbers look wrong — hit Refresh File List to rebuild from current print history.
