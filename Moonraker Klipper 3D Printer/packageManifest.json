@@ -10,7 +10,7 @@
   "drivers": [
     {
       "id": "382c9056-28ca-48de-b6e8-3cd1a44dea22",
-      "name": "Moonraker Klipper Printer Driver",
+      "name": "Moonraker Klipper Printer",
       "namespace": "Jdthomas24",
       "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Moonraker%20Klipper%203D%20Printer/Raw%20Code/Moonraker%20Klipper%20Printer.groovy",
       "required": true
