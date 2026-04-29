@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.16",
+    version: "2.4.18",
     doNotFocus: true
 )
 
@@ -274,13 +274,12 @@ def mainPage() {
             }
         }
 
-        // v2.4.14: Reports section — removed "Click to show" descriptions, buttons are now compact
         section("<b>Reports:</b>") {
-            href(name: "toSummary",   page: "summaryPage",           title: "Battery Summary")
-            href(name: "toTrends",    page: "trendsPage",            title: "Battery Trends")
-            href(name: "toHistory",   page: "historyPage",           title: "Battery Replacement History")
-            href(name: "toManualRep", page: "manualReplacementPage", title: "Manual Battery Replacement")
-            href(name: "toCatalog",   page: "batteryCatalogPage",    title: "🔋 Battery Catalog")
+            href(name: "toSummary",   page: "summaryPage",           title: "<b>Battery Summary</b>",             description: "Battery levels and health ratings")
+            href(name: "toTrends",    page: "trendsPage",            title: "<b>Battery Trends</b>",              description: "Drain rates and trend history")
+            href(name: "toHistory",   page: "historyPage",           title: "<b>Battery Replacement History</b>", description: "Auto and manual replacement log")
+            href(name: "toManualRep", page: "manualReplacementPage", title: "<b>Manual Battery Replacement</b>",  description: "Log a replacement now")
+            href(name: "toCatalog",   page: "batteryCatalogPage",    title: "<b>🔋 Battery Catalog</b>",          description: "Battery types per device")
         }
 
         section("<b>Help & Support</b>") {
@@ -299,7 +298,7 @@ def mainPage() {
 
         section("<b>Diagnostics</b>") {
             input "debugMode", "bool", title: "Debug Logging (auto-disables after 30 min)", defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Battery Monitor v${app.version() ?: "2.4.15"}</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Battery Monitor v2.4.18</span>"
         }
     }
 }
