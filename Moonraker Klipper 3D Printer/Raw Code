@@ -2,7 +2,7 @@
  *  Moonraker / Klipper 3D Printer Driver for Hubitat
  *
  *  Author:  jdthomas24
- *  Version: 1.0.42
+ *  Version: 1.0.43
  *  Date:    2026-04-29
  *
  *  Copyright 2026
@@ -39,7 +39,7 @@
  *    marcolivierarsenault - moonraker-home-assistant
  *    Arksine - Moonraker
  */
-public static String version() { return "1.0.42" }
+public static String version() { return "1.0.43" }
 
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
@@ -368,7 +368,7 @@ void statusCallback(resp, data) {
         // LOG: only on state change - complete, error get extra attention
         String prevPrintState = device.currentValue("printState") ?: ""
         if (prevPrintState != printState) {
-            if (printState == "complete")   logInfo "*** PRINT COMPLETE: ${device.currentValue('filename')} ***"
+            if (printState == "complete") { logInfo "*** PRINT COMPLETE: ${device.currentValue('filename')} ***"; runIn(5, "refreshFileList") }
             else if (printState == "error") logWarn "*** PRINT ERROR on ${device.displayName} ***"
             else if (printState == "printing") logInfo "print started: ${printStats?.filename ?: 'unknown'}"
             else if (printState == "paused")   logInfo "print paused"
