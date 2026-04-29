@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
-    version: "1.3.11",
+    version: "1.3.12",
     doNotFocus: true
 )
 
@@ -484,7 +484,7 @@ def mainPage() {
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false,
                   submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v${app.version() ?: "1.3.9"}</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.3.12</span>"
         }
     }
 }
@@ -1542,3 +1542,4 @@ def infoPage(Map params = [:]) {
         }
     }
 }
+
