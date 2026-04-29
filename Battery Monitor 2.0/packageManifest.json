@@ -1,12 +1,12 @@
 {
   "packageName": "Battery Monitor 2.0",
   "author": "Jdthomas24",
-  "version": "2.4.17",
+  "version": "2.4.18",
   "category": "Convenience",
   "description": "Advanced Hubitat battery monitoring with analytics, trends and replacement tracking. Recurring scan schedule, confidence-weighted health, EWMA smoothing.",
   "dateReleased": "4/8/26",
   "minimumHEVersion": "2.3.0",
-  "releaseNotes": "v2.4.17 - Report buttons now show bold titles with helpful descriptions replacing the default Click to show text.",
+  "releaseNotes": "v2.4.18 - Report buttons now show bold titles with helpful descriptions replacing the default Click to show text. Hotfix: app.version() method not supported in Hubitat app sandbox — version number now hardcoded to prevent error on main page load.",
   "apps": [
     {
       "name": "Battery Monitor 2.0",
