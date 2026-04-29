@@ -1,5 +1,5 @@
 Moonraker / Klipper 3D Printer Driver for Hubitat
-Author: jdthomas24  ·  Version: 1.0.0  ·  License: Apache 2.0
+Author: jdthomas24  ·  Version: 1.0.34  ·  License: Apache 2.0
 Integrates any Moonraker/Klipper 3D printer with Hubitat. Monitor status, temps, and progress via a live dashboard tile. Start, pause, resume, and cancel prints from Hubitat or any automation rule.
 
 Requirements
