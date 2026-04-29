@@ -2,7 +2,7 @@
  *  Moonraker / Klipper 3D Printer Driver for Hubitat
  *
  *  Author:  jdthomas24
- *  Version: 1.0.44
+ *  Version: 1.0.45
  *  Date:    2026-04-29
  *
  *  Copyright 2026
@@ -39,7 +39,7 @@
  *    marcolivierarsenault - moonraker-home-assistant
  *    Arksine - Moonraker
  */
-public static String version() { return "1.0.44" }
+public static String version() { return "1.0.45" }
 
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
@@ -50,6 +50,7 @@ metadata {
         capability "Initialize"
         capability "Actuator"
         capability "Sensor"
+        capability "TemperatureMeasurement"
 
         // ── Print Control ──────────────────────────────────────────
         command "pause"
