@@ -49,7 +49,20 @@
                 "Matter",
                 "LAN"
             ]
+        },
+        {
+            "name": "Moonraker Klipper Printer",
+            "category": "Utility",
+            "location": "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Moonraker%20Klipper%203D%20Printer/packageManifest.json",
+            "description": "Hubitat driver for Moonraker/Klipper 3D printers. Monitor print status, temperatures, and progress via live dashboard tiles. Start, pause, resume, and cancel prints directly from Hubitat or any automation rule. Supports Sonicpad multi-printer setups and standard Raspberry Pi/BTT installs.",
+            "descriptive": "",
+            "tags": [
+                "Automations & Groups",
+                "Notifications",
+                "Tools & Utilities"
+            ]
         }
     ]
 }
+
 
