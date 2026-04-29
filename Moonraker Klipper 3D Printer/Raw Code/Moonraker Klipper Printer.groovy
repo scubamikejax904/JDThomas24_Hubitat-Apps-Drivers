@@ -45,7 +45,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
 metadata {
-    definition(name: "Moonraker Klipper Printer", namespace: "moonraker", author: "jdthomas24") {
+    definition(name: "Moonraker Klipper Printer Driver", namespace: "Jdthomas24", author: "Jdthomas24") {
         capability "Refresh"
         capability "Initialize"
         capability "Actuator"
