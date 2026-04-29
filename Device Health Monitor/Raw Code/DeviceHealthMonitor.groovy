@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
-    version: "1.3.10",
+    version: "1.3.11",
     doNotFocus: true
 )
 
@@ -448,15 +448,19 @@ def mainPage() {
 
         section("<b>Reports:</b>") {
             href(name: "toActivitySummary", page: "activitySummaryPage",
-                 title: "Device Activity Summary")
+                 title: "Device Activity Summary",
+                 description: "All devices and health status")
             href(name: "toProblemDevices", page: "problemDevicesPage",
-                 title: "⚠️ Problem Devices")
+                 title: "⚠️ Problem Devices",
+                 description: "Offline, Poor and Fair devices")
             if (snoozeEnabled()) {
                 href(name: "toSnoozeManage", page: "snoozeManagePage",
-                     title: "😴 Manage Snoozed Devices")
+                     title: "😴 Manage Snoozed Devices",
+                     description: "Snooze or clear active snoozes")
             }
             href(name: "toProtocolOverride", page: "protocolOverridePage",
-                 title: "🔧 Protocol Overrides")
+                 title: "🔧 Protocol Overrides",
+                 description: "Fix misdetected device protocols")
         }
 
         // ── Help & Support ────────────────────────────────────────
