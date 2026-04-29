@@ -2,7 +2,7 @@
  *  Moonraker / Klipper 3D Printer Driver for Hubitat
  *
  *  Author:  jdthomas24
- *  Version: 1.0.34
+ *  Version: 1.0.35
  *  Date:    2026-04-29
  *
  *  Copyright 2026
@@ -39,7 +39,7 @@
  *    marcolivierarsenault - moonraker-home-assistant
  *    Arksine - Moonraker
  */
-public static String version() { return "1.0.0" }
+public static String version() { return "1.0.35" }
 
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
@@ -92,7 +92,7 @@ preferences {
           description: "<i>IP address of your Moonraker host.<br>Sonicpad users: all printers share the same IP — use Port to differentiate.</i>",
           required: true, width: 4)
     input(name: "port",           type: "string",   title: "<b>Moonraker Port:</b>",
-          description: "<i>Default is 7125.<br><b>Sonicpad (4 USB ports):</b> Port 1=7125, Port 2=7126, Port 3=7127, Port 4=7128<br>Use the port matching your printer's USB port — unconnected ports will show offline.<br><b>Standard install:</b> usually 7125</i>",
+          description: "<i>Default is 7125.<br><b>Sonicpad (4 USB ports):</b> Port 1=7125, Port 2=7126, Port 3=7127, Port 4=7128<br>Use the port matching your printer's USB port — unconnected ports will show offline.<br><b>Standard install:</b> check your moonraker.conf for the configured port</i>",
           defaultValue: "7125", required: true, width: 4)
     input(name: "useSSL",         type: "bool",     title: "<b>Use HTTPS:</b>",
           description: "<i>Enable only if your Moonraker uses SSL. Most local installs do not.</i>",
@@ -761,7 +761,8 @@ void filesCallback(resp, data) {
 
         // Last completed print banner
         String lastPrintVal = device.currentValue("lastPrint") ?: ""
-        if (lastPrintVal && lastPrintVal != "none") {
+        String currentPrintState = device.currentValue("printState") ?: "standby"
+        if (lastPrintVal && lastPrintVal != "none" && !(currentPrintState in ["printing", "paused"])) {
             html.append("<div style=\"background:#16213e;border-left:3px solid #00ff87;padding:4px 8px;margin-bottom:6px;\">")
             html.append("<div style=\"font-size:9px;color:#aaa;\">last completed &middot; use startLastPrint to reprint</div>")
             html.append("<div style=\"color:#00ff87;font-weight:bold;font-size:11px;margin-top:1px;\">${lastPrintVal}</div>")
