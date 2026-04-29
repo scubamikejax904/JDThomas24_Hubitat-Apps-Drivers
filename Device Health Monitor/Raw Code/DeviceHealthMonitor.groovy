@@ -448,18 +448,18 @@ def mainPage() {
 
         section("<b>Reports:</b>") {
             href(name: "toActivitySummary", page: "activitySummaryPage",
-                 title: "Device Activity Summary",
+                 title: "<b>Device Activity Summary</b>",
                  description: "All devices and health status")
             href(name: "toProblemDevices", page: "problemDevicesPage",
-                 title: "⚠️ Problem Devices",
+                 title: "<b>⚠️ Problem Devices</b>",
                  description: "Offline, Poor and Fair devices")
             if (snoozeEnabled()) {
                 href(name: "toSnoozeManage", page: "snoozeManagePage",
-                     title: "😴 Manage Snoozed Devices",
+                     title: "<b>😴 Manage Snoozed Devices</b>",
                      description: "Snooze or clear active snoozes")
             }
             href(name: "toProtocolOverride", page: "protocolOverridePage",
-                 title: "🔧 Protocol Overrides",
+                 title: "<b>🔧 Protocol Overrides</b>",
                  description: "Fix misdetected device protocols")
         }
 
