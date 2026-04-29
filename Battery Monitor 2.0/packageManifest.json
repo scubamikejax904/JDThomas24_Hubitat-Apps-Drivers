@@ -1,12 +1,12 @@
 {
   "packageName": "Battery Monitor 2.0",
   "author": "Jdthomas24",
-  "version": "2.4.16",
+  "version": "2.4.17",
   "category": "Convenience",
   "description": "Advanced Hubitat battery monitoring with analytics, trends and replacement tracking. Recurring scan schedule, confidence-weighted health, EWMA smoothing.",
   "dateReleased": "4/8/26",
   "minimumHEVersion": "2.3.0",
-  "releaseNotes": "v2.4.16 - App Display Name header now always shows current app name in blue. 1% battery now treated same as 0% for dead battery detection — 3 consecutive readings at 0% or 1% confirms dead.",
+  "releaseNotes": "v2.4.17 - Report buttons now show bold titles with helpful descriptions replacing the default Click to show text.",
   "apps": [
     {
       "name": "Battery Monitor 2.0",
