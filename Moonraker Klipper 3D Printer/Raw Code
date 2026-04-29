@@ -2,7 +2,7 @@
  *  Moonraker / Klipper 3D Printer Driver for Hubitat
  *
  *  Author:  jdthomas24
- *  Version: 1.0.36
+ *  Version: 1.0.42
  *  Date:    2026-04-29
  *
  *  Copyright 2026
@@ -39,7 +39,7 @@
  *    marcolivierarsenault - moonraker-home-assistant
  *    Arksine - Moonraker
  */
-public static String version() { return "1.0.36" }
+public static String version() { return "1.0.42" }
 
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
@@ -71,11 +71,11 @@ metadata {
         attribute "printState",            "enum",   ["standby", "printing", "paused", "complete", "error", "cancelled"]
         attribute "filename",              "string"
         attribute "error",                 "string"
-        attribute "message",               "string"
         attribute "currentLayer",          "number"
         attribute "totalLayers",           "number"
         attribute "chamberTemp (°C)",      "number"
         attribute "mcuTemp (°C)",          "number"
+        attribute "filamentDetected",      "enum",   ["true", "false", "unknown"]
         attribute "lastPrint",             "string"
         attribute "filesList (1-10)",      "string"
         attribute "filesList (11-20)",     "string"
@@ -122,15 +122,20 @@ def installed() {
 }
 
 def updated() {
+    cleanStaleState()
     cleanStaleAttributes()
     initialize()
 }
 
+void cleanStaleState() {
+    if (state?.moonrakerVersion != null) state.remove("moonrakerVersion")
+}
+
 void cleanStaleAttributes() {
     List stale = [
-        "healthStatus", "printerInfo", "statusTile", "printerStatusTile",
+        "healthStatus", "printerInfo", "statusTile", "printerStatusTile", "message",
         "progress (%)", "printTime (min)", "printTimeLeft (min)", "printETA",
-        "filamentUsed (mm)", "filamentDetected", "fanSpeed (%)", "printsCompleted",
+        "filamentUsed (mm)", "fanSpeed (%)", "printsCompleted",
         "hotendTemp (°C)", "hotendTarget (°C)", "bedTemp (°C)", "bedTarget (°C)", "hotendTemp (° C)", "hotendTarget (° C)", "bedTemp (° C)", "bedTarget (° C)",
         "hotendTemp (°F)", "hotendTarget (°F)", "bedTemp (°F)", "bedTarget (°F)",
         "temperature", "filesCount",
@@ -278,8 +283,10 @@ void serverInfoCallback(resp, data) {
     try {
         Map json   = new JsonSlurper().parseText(resp.data)
         Map result = json?.result ?: [:]
+        logDebug "serverInfo result keys: ${result.keySet()}"
         String version = result?.moonraker_version ?: result?.api_version_string ?: ""
-        if (version) { state.moonrakerVersion = version; logDebug "moonraker version: $version" }
+        if (version && version != "?") { logDebug "moonraker version: $version" }
+        else { logDebug "moonraker version unavailable (Sonicpad returns ? — this is normal)" }
     } catch (e) {
         logWarn "serverInfoCallback() parse error: $e"
     }
@@ -427,10 +434,12 @@ void statusCallback(resp, data) {
             }
         }
 
+        // ---- filament detected attribute for rules ----
+        sendEventX(name: "filamentDetected", value: filamentDetected)
+
         // ---- display_status (M117 message) ----
         Map display = status?.display_status ?: [:]
         String msg = display?.message ?: ""
-        sendEventX(name: "message", value: (msg ?: "none"))
 
         // ---- collect temp values for tile ----
         Double hotendC     = extruder?.temperature ?: 0.0
@@ -478,8 +487,7 @@ void statusCallback(resp, data) {
         // Header
         tile.append("<div style=\"background:#0f3460;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;\">")
         tile.append("<div><div style=\"color:#00b4d8;font-weight:bold;font-size:13px;\">${printerName}</div>")
-        String moonrakerVer = state?.moonrakerVersion ? " &middot; v${state.moonrakerVersion}" : ""
-        if (hostname) tile.append("<div style=\"color:#aaa;font-size:10px;\">${hostname} &middot; port ${port}${moonrakerVer}</div>")
+        if (hostname) tile.append("<div style=\"color:#aaa;font-size:10px;\">${hostname} &middot; port ${port}</div>")
         tile.append("</div>")
         tile.append("<div style=\"display:flex;gap:6px;align-items:center;\">")
         tile.append("<span style=\"background:#1b4332;color:#00ff87;font-size:10px;padding:2px 8px;border-radius:10px;\">&#9679; online</span>")
@@ -491,6 +499,14 @@ void statusCallback(resp, data) {
         tile.append("<span style=\"background:${stateBg};color:${stateColor};font-size:10px;padding:2px 10px;border-radius:10px;font-weight:bold;\">${stateIcon}${printState}</span>")
         if (filenameNow != "none") tile.append("<span style=\"color:#eee;font-size:11px;font-weight:bold;\">${filenameNow}</span>")
         tile.append("</div>")
+
+        // Error banner — only show when error is present
+        String errorVal = device.currentValue("error") ?: "none"
+        if (errorVal && errorVal != "none") {
+            tile.append("<div style=\"background:#3d0000;border-left:3px solid #ff6b6b;padding:6px 12px;\">")
+            tile.append("<span style=\"color:#ffaaaa;font-size:11px;\">&#9888; ${errorVal}</span>")
+            tile.append("</div>")
+        }
 
         // Temps row
         tile.append("<div style=\"padding:8px 12px;\">")
