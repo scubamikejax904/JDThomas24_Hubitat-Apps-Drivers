@@ -1731,7 +1731,7 @@ def protocolOverridePage() {
                           options: ["Auto-detect", "Zigbee", "Z-Wave", "Matter",
                                     "Hub Mesh (Zigbee)", "Hub Mesh (Z-Wave)", "Hub Mesh (Matter)", "Hub Mesh",
                                     "LAN", "Virtual", "Hub Variable"],
-                          defaultValue: currentOverride, required: false
+                          defaultValue: currentOverride, required: false, width: 6
                 }
             }
         }
@@ -1764,7 +1764,7 @@ def protocolOverridePage() {
                           title: "<b>${device.displayName}</b> — showing: <span style='color:#94a3b8;'>${currentDisplay}</span>",
                           options: options,
                           defaultValue: currentOverride,
-                          required: false
+                          required: false, width: 6
                 }
             }
         }
