@@ -143,13 +143,14 @@ def getRawProtocol(device) {
             if (device.getDataValue("zwaveSecurePairingComplete") != null)    return "Hub Mesh (Z-Wave)"
             if (device.getDataValue("secureInClusters")           != null)    return "Hub Mesh (Z-Wave)"
             if (device.getDataValue("Zw Node Info")               != null)    return "Hub Mesh (Z-Wave)"
-            if (driverName.contains("zigbee"))                                return "Hub Mesh (Zigbee)"
+            if (driverName.contains("zigbee") || driverName.contains("thirdreality") || driverName.contains("third reality")) return "Hub Mesh (Zigbee)"
             if (driverName.contains("z-wave") || driverName.contains("zwave")) return "Hub Mesh (Z-Wave)"
             if (driverName.contains("matter"))                                return "Hub Mesh (Matter)"
             def manufacturer = (device.getDataValue("Manufacturer") ?: "").toLowerCase()
             if (manufacturer in ["centralite", "lumi", "ikea", "sengled",
                                  "osram", "philips", "samsung", "smartthings",
-                                 "sonoff", "tuya", "third reality"]) {
+                                 "sonoff", "tuya", "third reality", "thirdreality",
+                                 "third_reality"]) {
                 return "Hub Mesh (Zigbee)"
             }
             return "Hub Mesh"
@@ -399,14 +400,12 @@ def getCurrentStateDisplay(device) {
                     type: "lock"]
         }
 
-        // ── Carbon Dioxide (some air quality sensors) ─────────────
-        def co2 = device.currentValue("carbonDioxide")
-        if (co2 != null) {
-            return [label: "${co2} ppm",
-                    color: "#94a3b8",
-                    isAlert: false,
-                    type: "carbonDioxide"]
-        }
+        // ── Carbon Dioxide ────────────────────────────────────────
+        // Intentionally skipped — CO2 is a measurement (numeric ppm),
+        // not a meaningful state label. Devices like Air Things radon
+        // sensors expose this but showing "594.0 ppm" as state is
+        // more confusing than useful. Falls through to LAN fallback
+        // which will find a better attribute if one exists.
 
         // ── Tamper ────────────────────────────────────────────────
         def tamper = device.currentValue("tamper")
@@ -624,16 +623,20 @@ def getLANStateDisplay(device) {
         for (attr in rankedAttrs) {
             def val = stateMap[attr]
             if (val == null) continue
-            def vl = val.toLowerCase()
-            // Skip useless values
-            if (vl in ["unknown", "null", "", "none", "0", "false"]) continue
-            // Skip pure numbers for status-type attrs (they're measurements, not states)
-            if (attr in ["status", "deviceStatus", "healthStatus", "connectionStatus",
-                         "systemStatus", "operatingState", "currentState"] && val.isNumber()) continue
+            def vl = val.toLowerCase().trim()
+            // Skip useless or ambiguous values
+            if (vl in ["unknown", "null", "", "none", "0", "false", "true"]) continue
+            // Skip pure numbers — they're measurements, not state labels
+            if (val.isNumber()) continue
+            // Skip values over 30 chars — likely an automation message or description, not a state
+            if (val.length() > 30) continue
+            // Skip values containing sentence-like patterns (colon-space, multiple words with capitals)
+            if (val.contains(": ")) continue
             def isActive = vl in ["on", "active", "connected", "online", "running",
-                                   "enabled", "open", "true", "playing", "present"]
+                                   "enabled", "open", "playing", "present", "idle",
+                                   "ready", "operational"]
             def isAlert  = vl in ["offline", "disconnected", "error", "fault",
-                                   "alarm", "wet", "detected", "open"]
+                                   "alarm", "wet", "detected"]
             def color    = isAlert  ? "#dc2626" :
                            isActive ? "#1a73e8" : "#94a3b8"
             if (debugEnabled()) log.debug "getLANStateDisplay: ${device.displayName} matched attr '${attr}' = '${val}'"
@@ -1271,10 +1274,10 @@ def activitySummaryPage() {
                                    h == "Good" ? 4 : h == "Excellent" ? 5 : 6)
                 def stateInfo    = getCurrentStateDisplay(device)
                 def stateDisplay = "—"
-                def stateOrder   = 9
+                def stateOrderVal = "zzz"
                 if (stateInfo) {
-                    stateDisplay = "<span style='color:${stateInfo.color};font-weight:bold;'>${stateInfo.label}</span>"
-                    stateOrder   = stateInfo.isAlert ? 1 : 2
+                    stateDisplay  = "<span style='color:${stateInfo.color};font-weight:bold;'>${stateInfo.label}</span>"
+                    stateOrderVal = stateInfo.label.toLowerCase()
                 }
 
                 // State changed display
@@ -1292,7 +1295,7 @@ def activitySummaryPage() {
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${device.displayName.toLowerCase().trim()}'>${deviceLink}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${protocol}'><span style='color:${getProtocolColor(protocol)};font-weight:bold;'>${protocolDisplay}</span></td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${healthOrder}'>${getHealthDisplay(device)}</td>"
-                table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;' data-order='${stateOrder}'>${stateDisplay}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;' data-order='${stateOrderVal}'>${stateDisplay}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${-lastChangedMs}'>${lastChangedStr}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${-lastSeenMs}'>${lastSeenStr}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${avgRawMin}'>${avgIntStr}</td>"
@@ -1312,7 +1315,8 @@ ${hubIp ? "<span style='color:#94a3b8;font-size:11px;'>⚠ Device links are acce
         searching:  true,
         order:      [[2, 'asc']],
         columnDefs: [
-            { type: 'num', targets: [2, 3, 4, 5, 6] }
+            { type: 'num',    targets: [2, 4, 5, 6] },
+            { type: 'string', targets: [3] }
         ]
     });
 });
@@ -1426,7 +1430,7 @@ def hubMeshSummaryPage() {
             }
             paragraph "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>"
 
-            paragraph "<span style='color:#94a3b8;font-size:11px;'>ℹ️ Source hub is detected from device data values. If all devices show as \"Remote Hub\", the source hub name is not being transmitted via Hub Mesh — this is a Hubitat platform limitation and does not affect health monitoring.</span>"
+            paragraph "<span style='color:#94a3b8;font-size:11px;'>ℹ️ Source hub detection has been confirmed as unsupported on current Hubitat firmware (tested on C-8 Pro v2.5.0.126–128). All Hub Mesh devices will show as \"Remote Hub\" — this does not affect health monitoring. Hub grouping will improve automatically if Hubitat exposes this data in a future firmware release.</span>"
         }
     }
 }
