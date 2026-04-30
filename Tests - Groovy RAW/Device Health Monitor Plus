@@ -265,17 +265,55 @@ def isLowActivity(deviceId) {
 //   Orange(#f97316) — stale override (applied externally in rendering)
 def getCurrentStateDisplay(device) {
     try {
-        // ── Switch / Outlet / Dimmer ──────────────────────────────
-        def sw = device.currentValue("switch")
-        if (sw != null) {
-            def isOn = sw.toString().toLowerCase() == "on"
-            return [label: isOn ? "ON" : "OFF",
-                    color: isOn ? "#1a73e8" : "#94a3b8",
-                    isAlert: false,   // ON is normal, not an alert — stale logic handles stuck-on
-                    type: "switch"]
+        def driverName = (device.typeName ?: "").toLowerCase()
+
+        // ── Presence-first devices ────────────────────────────────
+        // Life360, mobile presence, and arrival sensors report both
+        // switch and presence — always use presence for these.
+        def isPresenceDevice = driverName.contains("life360") ||
+                               driverName.contains("presence") ||
+                               driverName.contains("arrival") ||
+                               driverName.contains("mobile")
+        if (isPresenceDevice) {
+            def presence = device.currentValue("presence")
+            if (presence != null) {
+                def isPresent = presence.toString().toLowerCase() == "present"
+                return [label: isPresent ? "Present" : "Not Present",
+                        color: isPresent ? "#1a73e8" : "#94a3b8",
+                        isAlert: false,
+                        type: "presence"]
+            }
+        }
+
+        // ── 3D Printer / Octoprint / Bambu / Prusa ───────────────
+        // Check printer-specific status attributes before switch.
+        def isPrinter = driverName.contains("octoprint") ||
+                        driverName.contains("bambu") ||
+                        driverName.contains("prusa") ||
+                        driverName.contains("3d print") ||
+                        driverName.contains("printer")
+        if (isPrinter) {
+            // Octoprint / community drivers use "currentStatus" or "status"
+            def printerStatus = device.currentValue("currentStatus") ?:
+                                device.currentValue("printerStatus") ?:
+                                device.currentValue("status")
+            if (printerStatus != null) {
+                def ps      = printerStatus.toString().toLowerCase()
+                def isPrint = ps in ["printing", "busy"]
+                def isIdle  = ps in ["idle", "ready", "operational", "standby"]
+                def isPause = ps in ["paused", "pausing"]
+                def isError = ps in ["error", "offline", "disconnected", "cancelled"]
+                def color   = isPrint ? "#1a73e8" : isIdle ? "#94a3b8" :
+                              isPause ? "#f97316" : isError ? "#dc2626" : "#94a3b8"
+                return [label: printerStatus.toString().capitalize(),
+                        color: color,
+                        isAlert: isError,
+                        type: "printerStatus"]
+            }
         }
 
         // ── Water / Moisture ──────────────────────────────────────
+        // Checked before switch — water sensors often also have a switch attribute
         def water = device.currentValue("water")
         if (water != null) {
             def isWet = water.toString().toLowerCase() == "wet"
@@ -285,7 +323,38 @@ def getCurrentStateDisplay(device) {
                     type: "water"]
         }
 
-        // ── Presence (Life360, mobile, arrival sensors) ───────────
+        // ── Smoke ─────────────────────────────────────────────────
+        // Checked before switch for same reason
+        def smoke = device.currentValue("smoke")
+        if (smoke != null) {
+            def isDetected = smoke.toString().toLowerCase() == "detected"
+            return [label: isDetected ? "Smoke!" : "Clear",
+                    color: isDetected ? "#dc2626" : "#94a3b8",
+                    isAlert: isDetected,
+                    type: "smoke"]
+        }
+
+        // ── Carbon Monoxide ───────────────────────────────────────
+        def co = device.currentValue("carbonMonoxide")
+        if (co != null) {
+            def isDetected = co.toString().toLowerCase() == "detected"
+            return [label: isDetected ? "CO!" : "Clear",
+                    color: isDetected ? "#dc2626" : "#94a3b8",
+                    isAlert: isDetected,
+                    type: "carbonMonoxide"]
+        }
+
+        // ── Switch / Outlet / Dimmer ──────────────────────────────
+        def sw = device.currentValue("switch")
+        if (sw != null) {
+            def isOn = sw.toString().toLowerCase() == "on"
+            return [label: isOn ? "ON" : "OFF",
+                    color: isOn ? "#1a73e8" : "#94a3b8",
+                    isAlert: false,
+                    type: "switch"]
+        }
+
+        // ── Presence (non-driver-name-detected) ───────────────────
         def presence = device.currentValue("presence")
         if (presence != null) {
             def isPresent = presence.toString().toLowerCase() == "present"
@@ -323,26 +392,6 @@ def getCurrentStateDisplay(device) {
                     color: isUnlocked ? "#f97316" : "#94a3b8",
                     isAlert: isUnlocked,
                     type: "lock"]
-        }
-
-        // ── Smoke ─────────────────────────────────────────────────
-        def smoke = device.currentValue("smoke")
-        if (smoke != null) {
-            def isDetected = smoke.toString().toLowerCase() == "detected"
-            return [label: isDetected ? "Smoke!" : "Clear",
-                    color: isDetected ? "#dc2626" : "#94a3b8",
-                    isAlert: isDetected,
-                    type: "smoke"]
-        }
-
-        // ── Carbon Monoxide ───────────────────────────────────────
-        def co = device.currentValue("carbonMonoxide")
-        if (co != null) {
-            def isDetected = co.toString().toLowerCase() == "detected"
-            return [label: isDetected ? "CO!" : "Clear",
-                    color: isDetected ? "#dc2626" : "#94a3b8",
-                    isAlert: isDetected,
-                    type: "carbonMonoxide"]
         }
 
         // ── Carbon Dioxide (some air quality sensors) ─────────────
