@@ -251,23 +251,169 @@ def isLowActivity(deviceId) {
 // ===================== NEW: STATE TRACKING =================
 // ============================================================
 
-// Returns the current switch/contact/motion/lock state for display
-// Returns null if device has no relevant attributes
+// Returns the current state for display across all common device types.
+// Return map: [label, color, isAlert, type]
+//   label   — human-readable display string
+//   color   — hex color for the state badge
+//   isAlert — true when state is "interesting" (wet, open, motion active, unlocked, etc.)
+//   type    — attribute name that matched
+//
+// Color convention (matches app protocol color language):
+//   Blue  (#1a73e8) — normal/active/present/on
+//   Gray  (#94a3b8) — inactive/normal-safe state (off, closed, dry, locked, not present)
+//   Red   (#dc2626) — alert state (wet, open when alerting, smoke, CO, etc.)
+//   Orange(#f97316) — stale override (applied externally in rendering)
 def getCurrentStateDisplay(device) {
     try {
+        // ── Switch / Outlet / Dimmer ──────────────────────────────
         def sw = device.currentValue("switch")
         if (sw != null) {
             def isOn = sw.toString().toLowerCase() == "on"
-            return [value: sw.toString().toUpperCase(), isOn: isOn, type: "switch"]
+            return [label: isOn ? "ON" : "OFF",
+                    color: isOn ? "#1a73e8" : "#94a3b8",
+                    isAlert: false,   // ON is normal, not an alert — stale logic handles stuck-on
+                    type: "switch"]
         }
-        def contact = device.currentValue("contact")
-        if (contact != null) return [value: contact.toString(), isOn: contact == "open", type: "contact"]
-        def motion = device.currentValue("motion")
-        if (motion != null) return [value: motion.toString(), isOn: motion == "active", type: "motion"]
-        def lock = device.currentValue("lock")
-        if (lock != null) return [value: lock.toString(), isOn: lock == "unlocked", type: "lock"]
+
+        // ── Water / Moisture ──────────────────────────────────────
+        def water = device.currentValue("water")
+        if (water != null) {
+            def isWet = water.toString().toLowerCase() == "wet"
+            return [label: isWet ? "Wet" : "Dry",
+                    color: isWet ? "#dc2626" : "#94a3b8",
+                    isAlert: isWet,
+                    type: "water"]
+        }
+
+        // ── Presence (Life360, mobile, arrival sensors) ───────────
         def presence = device.currentValue("presence")
-        if (presence != null) return [value: presence.toString(), isOn: presence == "present", type: "presence"]
+        if (presence != null) {
+            def isPresent = presence.toString().toLowerCase() == "present"
+            return [label: isPresent ? "Present" : "Not Present",
+                    color: isPresent ? "#1a73e8" : "#94a3b8",
+                    isAlert: false,
+                    type: "presence"]
+        }
+
+        // ── Contact (door/window sensors) ─────────────────────────
+        def contact = device.currentValue("contact")
+        if (contact != null) {
+            def isOpen = contact.toString().toLowerCase() == "open"
+            return [label: isOpen ? "Open" : "Closed",
+                    color: isOpen ? "#f97316" : "#94a3b8",
+                    isAlert: isOpen,
+                    type: "contact"]
+        }
+
+        // ── Motion ────────────────────────────────────────────────
+        def motion = device.currentValue("motion")
+        if (motion != null) {
+            def isActive = motion.toString().toLowerCase() == "active"
+            return [label: isActive ? "Active" : "Inactive",
+                    color: isActive ? "#1a73e8" : "#94a3b8",
+                    isAlert: false,
+                    type: "motion"]
+        }
+
+        // ── Lock ──────────────────────────────────────────────────
+        def lock = device.currentValue("lock")
+        if (lock != null) {
+            def isUnlocked = lock.toString().toLowerCase() == "unlocked"
+            return [label: isUnlocked ? "Unlocked" : "Locked",
+                    color: isUnlocked ? "#f97316" : "#94a3b8",
+                    isAlert: isUnlocked,
+                    type: "lock"]
+        }
+
+        // ── Smoke ─────────────────────────────────────────────────
+        def smoke = device.currentValue("smoke")
+        if (smoke != null) {
+            def isDetected = smoke.toString().toLowerCase() == "detected"
+            return [label: isDetected ? "Smoke!" : "Clear",
+                    color: isDetected ? "#dc2626" : "#94a3b8",
+                    isAlert: isDetected,
+                    type: "smoke"]
+        }
+
+        // ── Carbon Monoxide ───────────────────────────────────────
+        def co = device.currentValue("carbonMonoxide")
+        if (co != null) {
+            def isDetected = co.toString().toLowerCase() == "detected"
+            return [label: isDetected ? "CO!" : "Clear",
+                    color: isDetected ? "#dc2626" : "#94a3b8",
+                    isAlert: isDetected,
+                    type: "carbonMonoxide"]
+        }
+
+        // ── Carbon Dioxide (some air quality sensors) ─────────────
+        def co2 = device.currentValue("carbonDioxide")
+        if (co2 != null) {
+            return [label: "${co2} ppm",
+                    color: "#94a3b8",
+                    isAlert: false,
+                    type: "carbonDioxide"]
+        }
+
+        // ── Tamper ────────────────────────────────────────────────
+        def tamper = device.currentValue("tamper")
+        if (tamper != null) {
+            def isDetected = tamper.toString().toLowerCase() == "detected"
+            return [label: isDetected ? "Tampered!" : "Clear",
+                    color: isDetected ? "#dc2626" : "#94a3b8",
+                    isAlert: isDetected,
+                    type: "tamper"]
+        }
+
+        // ── Shock / Vibration ─────────────────────────────────────
+        def shock = device.currentValue("shock")
+        if (shock != null) {
+            def isDetected = shock.toString().toLowerCase() == "detected"
+            return [label: isDetected ? "Detected" : "Clear",
+                    color: isDetected ? "#f97316" : "#94a3b8",
+                    isAlert: isDetected,
+                    type: "shock"]
+        }
+
+        // ── Sleep sensor ──────────────────────────────────────────
+        def sleeping = device.currentValue("sleeping")
+        if (sleeping != null) {
+            def isSleeping = sleeping.toString().toLowerCase() == "sleeping"
+            return [label: isSleeping ? "Sleeping" : "Not Sleeping",
+                    color: isSleeping ? "#8b5cf6" : "#94a3b8",
+                    isAlert: false,
+                    type: "sleeping"]
+        }
+
+        // ── Valve ─────────────────────────────────────────────────
+        def valve = device.currentValue("valve")
+        if (valve != null) {
+            def isOpen = valve.toString().toLowerCase() == "open"
+            return [label: isOpen ? "Open" : "Closed",
+                    color: isOpen ? "#f97316" : "#94a3b8",
+                    isAlert: isOpen,
+                    type: "valve"]
+        }
+
+        // ── Garage Door / Door Control ────────────────────────────
+        def door = device.currentValue("door")
+        if (door != null) {
+            def isOpen = door.toString().toLowerCase() in ["open", "opening"]
+            return [label: door.toString().capitalize(),
+                    color: isOpen ? "#f97316" : "#94a3b8",
+                    isAlert: isOpen,
+                    type: "door"]
+        }
+
+        // ── Window Shade / Blind ──────────────────────────────────
+        def shade = device.currentValue("windowShade")
+        if (shade != null) {
+            def isOpen = shade.toString().toLowerCase() in ["open", "opening", "partially open"]
+            return [label: shade.toString().capitalize(),
+                    color: isOpen ? "#1a73e8" : "#94a3b8",
+                    isAlert: false,
+                    type: "windowShade"]
+        }
+
     } catch (e) {
         if (debugEnabled()) log.debug "getCurrentStateDisplay error for ${device.displayName}: ${e.message}"
     }
@@ -281,7 +427,7 @@ def updateStateTracking(device) {
         def stateInfo  = getCurrentStateDisplay(device)
         if (!stateInfo) return
 
-        def currentVal = stateInfo.value
+        def currentVal = stateInfo.label
         def tracked    = state.stateHistory[id]
 
         if (!tracked) {
@@ -927,17 +1073,11 @@ def activitySummaryPage() {
                 def stateDisplay = "—"
                 def stateOrder   = 9
                 if (stateInfo) {
-                    def stale      = staleOn && isStateStale(device.id as String)
-                    def staleStyle = stale ? "color:#f97316; font-weight:bold;" : ""
+                    def stale       = staleOn && isStateStale(device.id as String)
                     def staleSuffix = stale ? " <span style='color:#f97316;font-size:10px;'>🔁 Stale</span>" : ""
-                    if (stateInfo.type == "switch") {
-                        def color = stateInfo.isOn ? "#cc0000" : "#444"
-                        stateDisplay = "<span style='${staleStyle}color:${color};font-weight:bold;'>${stateInfo.value}</span>${staleSuffix}"
-                        stateOrder   = stateInfo.isOn ? 1 : 2
-                    } else {
-                        stateDisplay = "<span style='${staleStyle}'>${stateInfo.value}</span>${staleSuffix}"
-                        stateOrder   = stateInfo.isOn ? 1 : 2
-                    }
+                    def baseColor   = stale ? "#f97316" : stateInfo.color
+                    stateDisplay = "<span style='color:${baseColor};font-weight:bold;'>${stateInfo.label}</span>${staleSuffix}"
+                    stateOrder   = stateInfo.isAlert ? 1 : 2
                 }
 
                 // NEW: state changed display
@@ -1073,12 +1213,7 @@ def hubMeshSummaryPage() {
                 def stateInfo    = getCurrentStateDisplay(device)
                 def stateDisplay = "—"
                 if (stateInfo) {
-                    if (stateInfo.type == "switch") {
-                        def color = stateInfo.isOn ? "#cc0000" : "#444"
-                        stateDisplay = "<span style='color:${color};font-weight:bold;'>${stateInfo.value}</span>"
-                    } else {
-                        stateDisplay = stateInfo.value
-                    }
+                    stateDisplay = "<span style='color:${stateInfo.color};font-weight:bold;'>${stateInfo.label}</span>"
                 }
 
                 def deviceLink = hubIp
@@ -1161,13 +1296,9 @@ def problemDevicesPage() {
                 def stateInfo    = getCurrentStateDisplay(device)
                 def stateDisplay = "—"
                 if (stateInfo) {
-                    def staleSuffix = staleFlag ? " <span style='color:#f97316;font-size:10px;'>🔁 Stale</span>" : ""
-                    if (stateInfo.type == "switch") {
-                        def color = stateInfo.isOn ? "#cc0000" : "#444"
-                        stateDisplay = "<span style='color:${color};font-weight:bold;'>${stateInfo.value}</span>${staleSuffix}"
-                    } else {
-                        stateDisplay = "${stateInfo.value}${staleSuffix}"
-                    }
+                    def staleSuffix  = staleFlag ? " <span style='color:#f97316;font-size:10px;'>🔁 Stale</span>" : ""
+                    def baseColor    = staleFlag ? "#f97316" : stateInfo.color
+                    stateDisplay = "<span style='color:${baseColor};font-weight:bold;'>${stateInfo.label}</span>${staleSuffix}"
                 } else if (staleFlag) {
                     stateDisplay = "<span style='color:#f97316;font-size:10px;'>🔁 Stale</span>"
                 }
@@ -1499,7 +1630,7 @@ def scheduledSummary() {
             if (sections.containsKey(h)) {
                 // Include current state in notification name for actionable context
                 def stateInfo = getCurrentStateDisplay(device)
-                def stateStr  = stateInfo ? " [${stateInfo.value}]" : ""
+                def stateStr  = stateInfo ? " [${stateInfo.label}]" : ""
                 def lastStr   = state.history?.get(device.id)?.lastSeen
                     ? ", last seen ${formatTimeAgo(state.history[device.id].lastSeen)}"
                     : ""
@@ -1509,7 +1640,7 @@ def scheduledSummary() {
             if (staleOn && isStateStale(device.id as String) && sections["Stale"].enabled) {
                 def tracked   = state.stateHistory?.get(device.id as String)
                 def stateInfo = getCurrentStateDisplay(device)
-                def stateStr  = stateInfo ? " [${stateInfo.value}]" : ""
+                def stateStr  = stateInfo ? " [${stateInfo.label}]" : ""
                 def since     = tracked?.lastChanged ? ", unchanged since ${formatTimeAgo(tracked.lastChanged)}" : ""
                 sections["Stale"].list << "${device.displayName.trim()}${stateStr}${since}"
             }
