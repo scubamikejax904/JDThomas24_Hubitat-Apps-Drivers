@@ -1711,11 +1711,11 @@ def protocolOverridePage() {
     dynamicPage(name: "protocolOverridePage", title: "🔧 Device Overrides", install: false) {
 
         // ── Protocol Overrides ────────────────────────────────────
-        section("<b>Protocol Overrides</b>") {
-            paragraph "Some Hub Mesh linked devices and LAN devices cannot be automatically identified. " +
-                      "Use this section to manually set the correct protocol for those devices. " +
-                      "The override always takes priority over auto-detection. " +
-                      "Set back to <b>Auto-detect</b> to restore automatic detection."
+        section("") {
+            paragraph "<b style='font-size:15px;'>🔀 Protocol Overrides</b><br>" +
+                      "<span style='color:#94a3b8;font-size:12px;'>Some Hub Mesh linked devices and LAN devices cannot be automatically identified. " +
+                      "Set the correct protocol manually — override always takes priority. " +
+                      "Set back to <b>Auto-detect</b> to restore automatic detection.</span>"
         }
         if (!protocolDevList || protocolDevList.size() == 0) {
             section("") {
@@ -1737,10 +1737,11 @@ def protocolOverridePage() {
         }
 
         // ── State Attribute Overrides ─────────────────────────────
-        section("<b>State Attribute Overrides</b>") {
-            paragraph "Some devices report multiple attributes and the app may pick the wrong one to display " +
-                      "in the Current State column. Use this section to manually pin the attribute you want shown. " +
-                      "Only devices with more than one meaningful attribute are listed here."
+        section("") {
+            paragraph "<hr style='border:none; border-top:2px solid #e0e0e0; margin:8px 0;'>" +
+                      "<b style='font-size:15px;'>📌 State Attribute Overrides</b><br>" +
+                      "<span style='color:#94a3b8;font-size:12px;'>Pin a specific attribute per device when the app picks the wrong one to display in the Current State column. " +
+                      "Only devices with more than one meaningful attribute are listed.</span>"
         }
         if (!stateDevList || stateDevList.size() == 0) {
             section("") {
