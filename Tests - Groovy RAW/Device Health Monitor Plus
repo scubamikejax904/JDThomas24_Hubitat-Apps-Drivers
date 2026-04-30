@@ -285,22 +285,27 @@ def getCurrentStateDisplay(device) {
             }
         }
 
-        // ── 3D Printer / Octoprint / Bambu / Prusa ───────────────
+        // ── 3D Printer / Octoprint / Bambu / Prusa / Moonraker ──
         // Check printer-specific status attributes before switch.
-        def isPrinter = driverName.contains("octoprint") ||
+        // Moonraker Klipper driver uses "printState" attribute.
+        def isPrinter = driverName.contains("moonraker") ||
+                        driverName.contains("klipper") ||
+                        driverName.contains("octoprint") ||
                         driverName.contains("bambu") ||
                         driverName.contains("prusa") ||
                         driverName.contains("3d print") ||
                         driverName.contains("printer")
         if (isPrinter) {
-            // Octoprint / community drivers use "currentStatus" or "status"
-            def printerStatus = device.currentValue("currentStatus") ?:
+            // Moonraker Klipper driver uses "printState"
+            // Octoprint / other community drivers use "currentStatus", "printerStatus", or "status"
+            def printerStatus = device.currentValue("printState") ?:
+                                device.currentValue("currentStatus") ?:
                                 device.currentValue("printerStatus") ?:
                                 device.currentValue("status")
             if (printerStatus != null) {
                 def ps      = printerStatus.toString().toLowerCase()
                 def isPrint = ps in ["printing", "busy"]
-                def isIdle  = ps in ["idle", "ready", "operational", "standby"]
+                def isIdle  = ps in ["idle", "ready", "operational", "standby", "complete"]
                 def isPause = ps in ["paused", "pausing"]
                 def isError = ps in ["error", "offline", "disconnected", "cancelled"]
                 def color   = isPrint ? "#1a73e8" : isIdle ? "#94a3b8" :
@@ -463,8 +468,175 @@ def getCurrentStateDisplay(device) {
                     type: "windowShade"]
         }
 
+        // ── LAN / Cloud integration smart fallback ────────────────
+        // For LAN devices that didn't match any standard attribute above,
+        // inspect all current states and pick the most meaningful one.
+        // This handles Shelly, Govee, Ecobee, Nest, Tesla, Lutron,
+        // Sonos, Denon, Roku, and any other LAN/cloud driver.
+        def lanResult = getLANStateDisplay(device)
+        if (lanResult != null) return lanResult
+
     } catch (e) {
         if (debugEnabled()) log.debug "getCurrentStateDisplay error for ${device.displayName}: ${e.message}"
+    }
+    return null
+}
+
+// ── LAN / Cloud smart attribute inspector ────────────────────
+// Inspects all current states on a device and returns the most
+// meaningful one based on a priority-ranked attribute list.
+// Called as a last resort for devices that didn't match any
+// standard capability check above.
+def getLANStateDisplay(device) {
+    try {
+        // Get all attribute names currently reporting values on this device
+        def currentStates = device.currentStates
+        if (!currentStates) return null
+        def stateMap = [:]
+        currentStates.each { s ->
+            if (s?.name && s?.value != null) stateMap[s.name] = s.value.toString()
+        }
+        if (!stateMap) return null
+
+        def driverName = (device.typeName ?: "").toLowerCase()
+
+        // ── Thermostat / HVAC (Ecobee, Nest, Honeywell, Sinope) ──
+        def isThermostat = driverName.contains("thermostat") ||
+                           driverName.contains("ecobee") ||
+                           driverName.contains("nest") ||
+                           driverName.contains("honeywell") ||
+                           driverName.contains("sinope") ||
+                           stateMap.containsKey("thermostatMode") ||
+                           stateMap.containsKey("thermostatOperatingState")
+        if (isThermostat) {
+            def opState = stateMap["thermostatOperatingState"]
+            def mode    = stateMap["thermostatMode"]
+            def temp    = stateMap["temperature"]
+            def setpt   = stateMap["thermostatSetpoint"] ?: stateMap["coolingSetpoint"] ?: stateMap["heatingSetpoint"]
+            if (opState) {
+                def isActive = opState.toLowerCase() in ["heating", "cooling", "fan only", "pending heat", "pending cool"]
+                def color    = opState.toLowerCase() == "heating" ? "#f97316" :
+                               opState.toLowerCase() == "cooling" ? "#1a73e8" :
+                               isActive ? "#1a73e8" : "#94a3b8"
+                def label    = opState.capitalize()
+                if (temp)  label += " ${temp}°"
+                if (setpt) label += " → ${setpt}°"
+                return [label: label, color: color, isAlert: false, type: "thermostat"]
+            }
+            if (mode) {
+                def isOff = mode.toLowerCase() == "off"
+                return [label: "Mode: ${mode.capitalize()}", color: isOff ? "#94a3b8" : "#1a73e8",
+                        isAlert: false, type: "thermostat"]
+            }
+        }
+
+        // ── Media / AV (Sonos, Denon, Yamaha, Roku, Apple TV) ────
+        def isMedia = driverName.contains("sonos") ||
+                      driverName.contains("denon") ||
+                      driverName.contains("yamaha") ||
+                      driverName.contains("roku") ||
+                      driverName.contains("apple tv") ||
+                      driverName.contains("media player") ||
+                      stateMap.containsKey("trackDescription") ||
+                      stateMap.containsKey("mediaPlaybackStatus") ||
+                      stateMap.containsKey("transportStatus")
+        if (isMedia) {
+            def playback = stateMap["mediaPlaybackStatus"] ?:
+                           stateMap["transportStatus"] ?:
+                           stateMap["status"]
+            if (playback) {
+                def isPlaying = playback.toLowerCase() in ["playing", "play"]
+                def isPaused  = playback.toLowerCase() in ["paused", "pause", "stopped", "stop"]
+                def color     = isPlaying ? "#1a73e8" : "#94a3b8"
+                def track     = stateMap["trackDescription"] ?: stateMap["trackData"] ?: ""
+                def label     = playback.capitalize()
+                if (track && track.length() > 0 && track != "null") {
+                    // Truncate long track names
+                    label += ": " + (track.length() > 20 ? track[0..19] + "…" : track)
+                }
+                return [label: label, color: color, isAlert: false, type: "media"]
+            }
+        }
+
+        // ── EV / Tesla ────────────────────────────────────────────
+        def isEV = driverName.contains("tesla") ||
+                   driverName.contains("electric vehicle") ||
+                   stateMap.containsKey("chargingState") ||
+                   stateMap.containsKey("batteryLevel")
+        if (isEV) {
+            def charging = stateMap["chargingState"]
+            def battery  = stateMap["battery"] ?: stateMap["batteryLevel"]
+            if (charging) {
+                def isCharging = charging.toLowerCase() in ["charging", "complete"]
+                def color      = charging.toLowerCase() == "complete" ? "#16a34a" :
+                                 isCharging ? "#1a73e8" : "#94a3b8"
+                def label      = charging.capitalize()
+                if (battery) label += " ${battery}%"
+                return [label: label, color: color, isAlert: false, type: "ev"]
+            }
+            if (battery) {
+                def pct = battery.isNumber() ? battery.toInteger() : 0
+                def color = pct < 20 ? "#dc2626" : pct < 40 ? "#f97316" : "#94a3b8"
+                return [label: "Battery ${battery}%", color: color, isAlert: pct < 20, type: "ev"]
+            }
+        }
+
+        // ── Shelly / Relay / Power Meter ──────────────────────────
+        def isShelly = driverName.contains("shelly") ||
+                       stateMap.containsKey("power") ||
+                       stateMap.containsKey("energy")
+        if (isShelly && stateMap.containsKey("switch")) {
+            // Already handled by switch check above — shouldn't reach here,
+            // but if it does, show switch + power if available
+            def sw    = stateMap["switch"]
+            def isOn  = sw?.toLowerCase() == "on"
+            def power = stateMap["power"]
+            def label = isOn ? "ON" : "OFF"
+            if (isOn && power && power.isNumber()) label += " ${power.toDouble().round(1)}W"
+            return [label: label, color: isOn ? "#1a73e8" : "#94a3b8", isAlert: false, type: "shelly"]
+        }
+
+        // ── Garage Door / MyQ ─────────────────────────────────────
+        if (stateMap.containsKey("door")) {
+            def d = stateMap["door"].toLowerCase()
+            def isOpen = d in ["open", "opening"]
+            return [label: stateMap["door"].capitalize(),
+                    color: isOpen ? "#f97316" : "#94a3b8",
+                    isAlert: isOpen, type: "door"]
+        }
+
+        // ── Generic ranked fallback ───────────────────────────────
+        // Try each attribute in priority order — return first non-null,
+        // non-numeric, non-trivial value found.
+        def rankedAttrs = [
+            // Status-type strings that are meaningful on their own
+            "status", "deviceStatus", "healthStatus", "connectionStatus",
+            "systemStatus", "operatingState", "currentState",
+            // Boolean-style
+            "active", "enabled", "connected", "running",
+            // Catch-all meaningful strings
+            "mode", "level", "speed", "inputSource"
+        ]
+        for (attr in rankedAttrs) {
+            def val = stateMap[attr]
+            if (val == null) continue
+            def vl = val.toLowerCase()
+            // Skip useless values
+            if (vl in ["unknown", "null", "", "none", "0", "false"]) continue
+            // Skip pure numbers for status-type attrs (they're measurements, not states)
+            if (attr in ["status", "deviceStatus", "healthStatus", "connectionStatus",
+                         "systemStatus", "operatingState", "currentState"] && val.isNumber()) continue
+            def isActive = vl in ["on", "active", "connected", "online", "running",
+                                   "enabled", "open", "true", "playing", "present"]
+            def isAlert  = vl in ["offline", "disconnected", "error", "fault",
+                                   "alarm", "wet", "detected", "open"]
+            def color    = isAlert  ? "#dc2626" :
+                           isActive ? "#1a73e8" : "#94a3b8"
+            return [label: val.capitalize(), color: color, isAlert: isAlert, type: attr]
+        }
+
+    } catch (e) {
+        if (debugEnabled()) log.debug "getLANStateDisplay error for ${device.displayName}: ${e.message}"
     }
     return null
 }
