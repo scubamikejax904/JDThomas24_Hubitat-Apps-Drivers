@@ -1385,6 +1385,7 @@ def activitySummaryPage() {
             if (snoozeEnabled()) {
                 href(name: "toSnoozeFromSummary", page: "snoozeManagePage", title: "😴 Manage Snoozed Devices")
             }
+            paragraph "<span style='color:#94a3b8;font-size:11px;'>ℹ️ Data reflects the last completed scan — states do not update live. Use <b>Force Scan</b> above to refresh.</span>"
 
             def devList = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
             if (!devList) { paragraph "No devices found. Please select devices on the main page first."; return }
@@ -2103,11 +2104,10 @@ def infoPage(Map params = [:]) {
 
         section("<b>💡 Tips for Best Results</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-
-
-
+                      "• The Activity Summary reflects the state at the last scan — device states do not update live in the browser. Use <b>Force Scan</b> to refresh. This is by design; live updates would require a fundamentally different and heavier architecture that conflicts with DHM's lightweight polling approach.<br>" +
                       "• Hub Mesh Overview is most useful when you have 10+ Hub Mesh devices — for smaller setups the Activity Summary is sufficient<br>" +
                       "• Notifications now include [state] and last-seen time — if you use Pushover, the extra context makes alerts much more actionable</div>"
         }
     }
 }
+
