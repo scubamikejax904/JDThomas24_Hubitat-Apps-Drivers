@@ -1241,7 +1241,7 @@ def activitySummaryPage() {
             table += "<th style='padding:4px; border:1px solid #ccc;' title='Health rating based on check-in frequency. Shows sample progress while learning.'>Health</th>"
             table += "<th style='padding:4px; border:1px solid #ccc;' title='Current reported state of the device'>Current State</th>"
             table += "<th style='padding:4px; border:1px solid #ccc;' title='How long ago this state last changed'>State Changed</th>"
-            table += "<th style='padding:4px; border:1px solid #ccc;' title='How long ago the device last sent any activity to the hub'>Last Activity</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;' title='How long ago the device last sent any activity to the hub'>Last Check-in</th>"
             table += "<th style='padding:4px; border:1px solid #ccc;'>Avg Check-in</th>"
             table += "</tr></thead><tbody>"
 
@@ -1377,7 +1377,7 @@ def hubMeshSummaryPage() {
             table += "<td style='padding:4px; border:1px solid #ccc;'>Protocol</td>"
             table += "<td style='padding:4px; border:1px solid #ccc;'>Health</td>"
             table += "<td style='padding:4px; border:1px solid #ccc;' title='Current reported state'>State</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;' title='How long ago the device last sent any activity to the hub'>Last Activity</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;' title='How long ago the device last sent any activity to the hub'>Last Check-in</td>"
             table += "</tr>"
 
             def sorted = devList.sort { a, b ->
@@ -1463,7 +1463,7 @@ def problemDevicesPage() {
             table += "<td style='padding:4px; border:1px solid #ccc;'>Health</td>"
             table += "<td style='padding:4px; border:1px solid #ccc;' title='Current reported state of the device'>State</td>"
             table += "<td style='padding:4px; border:1px solid #ccc;' title='How long ago this state last changed'>State Changed</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;' title='How long ago the device last sent any activity to the hub'>Last Activity</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;' title='How long ago the device last sent any activity to the hub'>Last Check-in</td>"
             table += "<td style='padding:4px; border:1px solid #ccc;'>Avg Check-in</td>"
             table += "</tr>"
 
