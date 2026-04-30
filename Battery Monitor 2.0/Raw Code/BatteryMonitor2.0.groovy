@@ -764,13 +764,13 @@ def health(device) {
 
     def daysSinceReplaced = 999
     if (hist?.replacedTime) {
-        daysSinceReplaced = (now() - safeTime(hist.replacedTime)) / (1000 * 60 * 60 * 24)
+        daysSinceReplaced = (now() - (hist.replacedTime as Long)) / (1000 * 60 * 60 * 24)
     } else if (hist?.firstSeenDate) {
-        // v2.4.13: use stable firstSeenDate anchor instead of lastDate which advances on every sample
-        daysSinceReplaced = (now() - safeTime(hist.firstSeenDate)) / (1000 * 60 * 60 * 24)
+        // v2.4.19: explicit Long cast to ensure correct arithmetic on deserialized state values
+        daysSinceReplaced = (now() - (hist.firstSeenDate as Long)) / (1000 * 60 * 60 * 24)
     } else if (hist?.lastDate) {
         // legacy fallback for devices seeded before 2.4.13
-        daysSinceReplaced = (now() - safeTime(hist.lastDate)) / (1000 * 60 * 60 * 24)
+        daysSinceReplaced = (now() - (hist.lastDate as Long)) / (1000 * 60 * 60 * 24)
     }
 
     def slowReporter = (daysSinceReplaced >= 14 && samples >= 2)
@@ -804,15 +804,14 @@ def getHealthDisplay(device) {
     def minSamples = (isLock || isSlowSensor) ? 7 : 5
 
     if (h == "Pending") {
-        // v2.4.13: use firstSeenDate as stable anchor for days progress bar
+        // v2.4.19: use explicit Long cast to ensure correct arithmetic on deserialized state values
         def daysSinceReplaced = 0
         if (hist?.replacedTime) {
-            daysSinceReplaced = ((now() - safeTime(hist.replacedTime)) / (1000 * 60 * 60 * 24)).toInteger()
+            daysSinceReplaced = ((now() - (hist.replacedTime as Long)) / (1000 * 60 * 60 * 24)).toInteger()
         } else if (hist?.firstSeenDate) {
-            daysSinceReplaced = ((now() - safeTime(hist.firstSeenDate)) / (1000 * 60 * 60 * 24)).toInteger()
+            daysSinceReplaced = ((now() - (hist.firstSeenDate as Long)) / (1000 * 60 * 60 * 24)).toInteger()
         } else if (hist?.lastDate) {
-            // legacy fallback for devices seeded before 2.4.13
-            daysSinceReplaced = ((now() - safeTime(hist.lastDate)) / (1000 * 60 * 60 * 24)).toInteger()
+            daysSinceReplaced = ((now() - (hist.lastDate as Long)) / (1000 * 60 * 60 * 24)).toInteger()
         }
 
         def minDays   = 5
