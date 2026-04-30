@@ -2,7 +2,7 @@ definition(
     name: "Device Health Monitor Plus",
     namespace: "jdthomas24",
     author: "jdthomas24",
-    description: "Monitor device check-in health across Zigbee, Z-Wave, Matter, Hub Mesh, LAN, Virtual and Hub Variable — learns each device's normal pattern and alerts you when something goes quiet. Plus: ON/OFF state column, stale state detection, Hub Mesh hub grouping, and richer notifications.",
+    description: "Monitor device check-in health across Zigbee, Z-Wave, Matter, Hub Mesh, LAN, Virtual and Hub Variable — learns each device's normal pattern and alerts you when something goes quiet. Plus: device state column, Hub Mesh hub grouping, and richer notifications.",
     category: "Convenience",
     importUrl: "",
     iconUrl: "",
@@ -262,7 +262,7 @@ def isLowActivity(deviceId) {
 //   Blue  (#1a73e8) — normal/active/present/on
 //   Gray  (#94a3b8) — inactive/normal-safe state (off, closed, dry, locked, not present)
 //   Red   (#dc2626) — alert state (wet, open when alerting, smoke, CO, etc.)
-//   Orange(#f97316) — stale override (applied externally in rendering)
+//   Orange(#f97316) — alert/warning states
 def getCurrentStateDisplay(device) {
     try {
         def driverName = (device.typeName ?: "").toLowerCase()
@@ -641,7 +641,7 @@ def getLANStateDisplay(device) {
     return null
 }
 
-// Tracks last time device state actually changed and detects stale state
+// Tracks last time device state actually changed
 def updateStateTracking(device) {
     try {
         def id         = device.id
@@ -661,7 +661,7 @@ def updateStateTracking(device) {
         }
 
         if (tracked.lastValue != currentVal) {
-            // State changed — reset the stale clock
+            // State changed — reset the clock
             state.stateHistory[id] = [
                 lastValue:       currentVal,
                 lastChanged:     now(),
@@ -675,23 +675,7 @@ def updateStateTracking(device) {
     }
 }
 
-// Returns true if device state has been stuck for stale threshold
-def isStateStale(deviceId) {
-    if (settings?.enableStaleDetection == false) return false
-    def tracked = state.stateHistory?.get(deviceId)
-    if (!tracked) return false
-    def staleHours   = (settings?.staleThresholdHours ?: 48).toDouble()
-    def staleMs      = staleHours * 3600000
-    def unchangedMs  = now() - (tracked.unchangedSince ?: now())
-    return unchangedMs >= staleMs
-}
 
-def getStateStaleAge(deviceId) {
-    def tracked = state.stateHistory?.get(deviceId)
-    if (!tracked) return null
-    def ms = now() - (tracked.unchangedSince ?: now())
-    return formatTimeAgo(now() - ms)
-}
 
 // ============================================================
 // ===================== HUB MESH GROUPING ===================
@@ -809,14 +793,10 @@ def mainPage() {
         def snoozeLabel = !snoozeOn ? "<span style='color:red;'>off</span>" :
                           snoozedDeviceCount > 0 ? "<span style='color:orange;'>${snoozedDeviceCount} snoozed</span>" :
                           "<span style='color:blue;'>${currentSnooze}h</span>"
-        def staleOn    = settings?.enableStaleDetection != false
-        def staleHours = settings?.staleThresholdHours ?: 48
-
         def monitoringTitle = "<b>Monitoring Settings</b> — " +
             "Scan: <span style='color:blue;'>${currentScan}</span> | " +
             "Offline after: <span style='color:blue;'>${currentThreshold}h</span> | " +
             "Snooze: ${snoozeLabel} | " +
-            "Stale: <span style='color:${staleOn ? "blue" : "red"};'>${staleOn ? staleHours + "h" : "off"}</span> | " +
             "Mode: <span style='color:${modeOn ? "blue" : "red"};'>${modeOn ? modeLabel : "off"}</span>"
 
         section(monitoringTitle, hideable: true, hidden: true) {
@@ -831,19 +811,12 @@ def mainPage() {
                   defaultValue: 72, required: true, submitOnChange: true
 
             paragraph "<b>Snooze</b> — enable or disable snooze globally."
-            input "enableSnooze", "bool", title: "Enable snooze", defaultValue: true, submitOnChange: true
+            input "enableSnooze", "bool", title: "Enable snooze", defaultValue: false, submitOnChange: true
             if (snoozeEnabled()) {
                 input "snoozeDurationHours", "number", title: "Snooze duration (hours):",
                       defaultValue: 24, required: true, submitOnChange: true
             }
 
-            paragraph "<b>Stale State Detection</b> — flag devices whose reported state (ON/OFF/motion/contact) has not changed for an extended period. Useful for spotting stuck sensors or devices that stopped reporting state changes while still appearing healthy."
-            input "enableStaleDetection", "bool", title: "Enable stale state detection", defaultValue: true, submitOnChange: true
-            if (settings?.enableStaleDetection != false) {
-                input "staleThresholdHours", "number",
-                      title: "Flag as stale after state unchanged for (hours):",
-                      defaultValue: 48, required: true, submitOnChange: true
-            }
 
             paragraph "<b>Mode Restriction</b> — optionally restrict notifications to specific hub modes."
             input "enableModeRestriction", "bool", title: "Enable mode restriction for notifications",
@@ -882,7 +855,6 @@ def mainPage() {
                 input "notifyFair",         "bool", title: "🟠 Include Fair health devices",           defaultValue: true
                 input "notifyGood",         "bool", title: "🟢 Include Good health devices",           defaultValue: false
                 input "notifyExcellent",    "bool", title: "🟢 Include Excellent health devices",      defaultValue: false
-                input "notifyStale",        "bool", title: "🔁 Include Stale State devices",           defaultValue: true
                 input "suppressEmptyReport","bool", title: "🔕 Don't send notification if nothing to report", defaultValue: false
 
                 paragraph "<b>Send notification now:</b>"
@@ -896,7 +868,7 @@ def mainPage() {
                  description: "All devices, health status, current state")
             href(name: "toProblemDevices", page: "problemDevicesPage",
                  title: "<b>⚠️ Problem Devices</b>",
-                 description: "Offline, Poor, Fair, and Stale devices")
+                 description: "Offline, Poor, and Fair devices")
             href(name: "toHubMeshSummary", page: "hubMeshSummaryPage",
                  title: "<b>🔗 Hub Mesh Overview</b>",
                  description: "Health summary grouped by source hub")
@@ -913,7 +885,7 @@ def mainPage() {
         section("<b>Help & Support</b>") {
             href(name: "toInfoPage", page: "infoPage",
                  title: "📖 App Guide & Reference",
-                 description: "Health scoring, state tracking, stale detection, and troubleshooting explained")
+                 description: "Health scoring, state tracking, and troubleshooting explained")
             href url: "https://community.hubitat.com/t/beta-device-health-monitor/163229",
                  style: "external",
                  title: "💬 Hubitat Community Thread",
@@ -1241,10 +1213,6 @@ def activitySummaryPage() {
             }
 
             def hubIp    = location?.hub?.localIP ?: ""
-            def staleOn  = settings?.enableStaleDetection != false
-
-            // Count stale devices for summary banner
-            def staleCount = staleOn ? devList.count { isStateStale(it.id as String) } : 0
 
             def table = "<table id='activityTable' style='width:100%; border-collapse: collapse; border: 1px solid #ccc;'>"
             table += "<thead><tr style='font-weight:bold; background-color:#f0f0f0;'>"
@@ -1294,20 +1262,14 @@ def activitySummaryPage() {
                 def stateDisplay = "—"
                 def stateOrder   = 9
                 if (stateInfo) {
-                    def stale       = staleOn && isStateStale(device.id as String)
-                    def staleSuffix = stale ? " <span style='color:#f97316;font-size:10px;'>🔁 Stale</span>" : ""
-                    def baseColor   = stale ? "#f97316" : stateInfo.color
-                    stateDisplay = "<span style='color:${baseColor};font-weight:bold;'>${stateInfo.label}</span>${staleSuffix}"
+                    stateDisplay = "<span style='color:${stateInfo.color};font-weight:bold;'>${stateInfo.label}</span>"
                     stateOrder   = stateInfo.isAlert ? 1 : 2
                 }
 
-                // NEW: state changed display
+                // State changed display
                 def tracked          = state.stateHistory?.get(device.id as String)
                 def lastChangedMs    = tracked?.lastChanged ? (tracked.lastChanged as Long) : 0
                 def lastChangedStr   = lastChangedMs ? formatTimeAgo(lastChangedMs) : "—"
-                def staleChangedStyle = (staleOn && isStateStale(device.id as String))
-                    ? "color:#f97316;"
-                    : ""
 
                 rowNum++
 
@@ -1320,7 +1282,7 @@ def activitySummaryPage() {
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${protocol}'><span style='color:${getProtocolColor(protocol)};font-weight:bold;'>${protocolDisplay}</span></td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${healthOrder}'>${getHealthDisplay(device)}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;' data-order='${stateOrder}'>${stateDisplay}</td>"
-                table += "<td style='padding:4px; border:1px solid #ccc; ${staleChangedStyle}' data-order='${-lastChangedMs}'>${lastChangedStr}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${-lastChangedMs}'>${lastChangedStr}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${-lastSeenMs}'>${lastSeenStr}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${avgRawMin}'>${avgIntStr}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${sampleCount}'>${samplesDisplay}</td>"
@@ -1329,12 +1291,7 @@ def activitySummaryPage() {
 
             table += "</tbody></table>"
 
-            def staleWarning = (staleOn && staleCount > 0)
-                ? "<span style='color:#f97316;font-weight:bold;'>🔁 ${staleCount} device(s) with stale state detected.</span><br>"
-                : ""
-
             paragraph rawHtml: true, """
-${staleWarning}
 ${hubIp ? "<span style='color:#94a3b8;font-size:11px;'>⚠ Device links are accessible on your local network only.</span><br>" : ""}
 <div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>
 <script>
@@ -1470,12 +1427,9 @@ def hubMeshSummaryPage() {
 def problemDevicesPage() {
     dynamicPage(name: "problemDevicesPage", title: "⚠️ Problem Devices", install: false) {
         section("") {
-            def staleOn = settings?.enableStaleDetection != false
-
             def devList = getAllMonitoredDevices().findAll { device ->
-                def h     = state.health?.get(device.id) ?: "Pending"
-                def stale = staleOn && isStateStale(device.id as String)
-                (h in ["Offline", "Poor", "Fair"] || stale) && !isDeviceSnoozed(device.id as String)
+                def h = state.health?.get(device.id) ?: "Pending"
+                h in ["Offline", "Poor", "Fair"] && !isDeviceSnoozed(device.id as String)
             }
 
             if (!devList) {
@@ -1512,27 +1466,17 @@ def problemDevicesPage() {
                                 data?.avgInterval  ? formatInterval(data.avgInterval) : "Learning..."
                 def rowBg     = (rowNum % 2 == 0) ? "#ffffff" : "#ebebeb"
 
-                def staleFlag = staleOn && isStateStale(device.id as String)
-
                 def stateInfo    = getCurrentStateDisplay(device)
                 def stateDisplay = "—"
                 if (stateInfo) {
-                    def staleSuffix  = staleFlag ? " <span style='color:#f97316;font-size:10px;'>🔁 Stale</span>" : ""
-                    def baseColor    = staleFlag ? "#f97316" : stateInfo.color
-                    stateDisplay = "<span style='color:${baseColor};font-weight:bold;'>${stateInfo.label}</span>${staleSuffix}"
-                } else if (staleFlag) {
-                    stateDisplay = "<span style='color:#f97316;font-size:10px;'>🔁 Stale</span>"
+                    stateDisplay = "<span style='color:${stateInfo.color};font-weight:bold;'>${stateInfo.label}</span>"
                 }
 
                 def tracked        = state.stateHistory?.get(device.id as String)
                 def lastChangedMs  = tracked?.lastChanged ? (tracked.lastChanged as Long) : 0
                 def lastChangedStr = lastChangedMs ? formatTimeAgo(lastChangedMs) : "—"
-                def changedStyle   = staleFlag ? "color:#f97316;" : ""
 
                 def healthDisplay  = getHealthDisplay(device)
-                if (staleFlag && !(state.health?.get(device.id) in ["Offline", "Poor", "Fair"])) {
-                    healthDisplay = "🔁 <span style='color:#f97316;'>Stale State</span>"
-                }
 
                 rowNum++
                 def deviceLink = hubIp
@@ -1544,7 +1488,7 @@ def problemDevicesPage() {
                 table += "<td style='padding:4px; border:1px solid #ccc;'><span style='color:${getProtocolColor(protocol)};font-weight:bold;'>${protocol}</span></td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${healthDisplay}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;'>${stateDisplay}</td>"
-                table += "<td style='padding:4px; border:1px solid #ccc; ${changedStyle}'>${lastChangedStr}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${lastChangedStr}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${lastSeen}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${avgInt}</td>"
                 table += "</tr>"
@@ -1823,7 +1767,6 @@ def scheduledSummary() {
     def devList = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
     if (!devList) return
 
-    def staleOn     = settings?.enableStaleDetection != false
     def usePushover = (settings?.enablePushover == true && settings?.pushoverPrefix?.trim())
     def prefix      = ""
     def postfix     = ""
@@ -1842,7 +1785,6 @@ def scheduledSummary() {
         "Fair":      [emoji: "🟠", enabled: settings?.notifyFair      != false, list: []],
         "Good":      [emoji: "🟢", enabled: settings?.notifyGood      ?: false, list: []],
         "Excellent": [emoji: "🟢", enabled: settings?.notifyExcellent ?: false, list: []],
-        "Stale":     [emoji: "🔁", enabled: staleOn && (settings?.notifyStale != false), list: []]
     ]
 
     devList.each { device ->
@@ -1857,14 +1799,7 @@ def scheduledSummary() {
                     : ""
                 sections[h].list << "${device.displayName.trim()}${stateStr}${lastStr}"
             }
-            // Stale state — only add if not already in a health section
-            if (staleOn && isStateStale(device.id as String) && sections["Stale"].enabled) {
-                def tracked   = state.stateHistory?.get(device.id as String)
-                def stateInfo = getCurrentStateDisplay(device)
-                def stateStr  = stateInfo ? " [${stateInfo.label}]" : ""
-                def since     = tracked?.lastChanged ? ", unchanged since ${formatTimeAgo(tracked.lastChanged)}" : ""
-                sections["Stale"].list << "${device.displayName.trim()}${stateStr}${since}"
-            }
+
         }
     }
 
@@ -1904,24 +1839,11 @@ def infoPage(Map params = [:]) {
                       "<b>Device Health Monitor Plus</b> adds four enhancements on top of DHM v1.3.12:<br><br>" +
                       "1. <b>State Column</b> — Activity Summary now shows each device's current ON/OFF/motion/contact/lock/presence state inline, color-coded for quick scanning.<br><br>" +
                       "2. <b>State Changed Column</b> — Shows how long ago the device last changed state, separate from Last Seen. A motion sensor can check in frequently but still be stuck reporting the same state.<br><br>" +
-                      "3. <b>Stale State Detection</b> — Devices whose state has not changed beyond a configurable threshold (default 48h) are flagged with 🔁. This catches a different failure mode than health scoring — a device can be checking in fine but stuck reporting the same value.<br><br>" +
-                      "4. <b>Hub Mesh Overview</b> — A dedicated page grouping Hub Mesh devices by their source hub with per-hub health banners. Useful when you have many Hub Mesh devices across multiple linked hubs.<br><br>" +
-                      "5. <b>Richer Notifications</b> — Alert messages now include each device's current state and last-seen time inline, making them more actionable without needing to open the app.</div>"
+
+                      "3. <b>Hub Mesh Overview</b> — A dedicated page grouping Hub Mesh devices by their source hub with per-hub health banners. Useful when you have many Hub Mesh devices across multiple linked hubs.<br><br>" +
+                      "4. <b>Richer Notifications</b> — Alert messages now include each device's current state and last-seen time inline, making them more actionable without needing to open the app.</div>"
         }
 
-        section("<b>🔁 Stale State Detection</b>") {
-            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "Stale state is a separate signal from health scoring. A device can have Excellent health (checking in frequently) but a stale state (reporting the same value for days).<br><br>" +
-                      "<b>Examples of stale state problems:</b><br>" +
-                      "• A motion sensor that hasn't triggered active in 3 days — could be dead PIR or bad positioning<br>" +
-                      "• A contact sensor stuck reporting closed when a door was left open<br>" +
-                      "• A switch that's been ON for 5 days when it should cycle off<br>" +
-                      "• A hub variable connector that stopped updating because its Rule Machine rule stopped running<br><br>" +
-                      "<b>Tuning the threshold:</b><br>" +
-                      "Set the stale threshold to match your expectations for each device type. 48h is a reasonable default for most sensors. " +
-                      "For devices you expect to stay in one state (like a hub variable that only updates weekly), consider raising the threshold or disabling stale detection globally and relying on the Low Activity flag instead.<br><br>" +
-                      "<b>State types tracked:</b> switch (ON/OFF), contact (open/closed), motion (active/inactive), lock (locked/unlocked), presence (present/not present).</div>"
-        }
 
         section("<b>🔗 Hub Mesh Source Hub Detection</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
@@ -1944,16 +1866,16 @@ def infoPage(Map params = [:]) {
                       "<tr><td>🟠 Fair</td><td>Checking in within 3x of baseline</td></tr>" +
                       "<tr><td>🔴 Poor</td><td>Checking in beyond 3x of baseline</td></tr>" +
                       "<tr><td>💀 Offline</td><td>No activity for ${settings?.offlineThresholdHours ?: 72}h (hard threshold)</td></tr>" +
-                      "<tr><td>🔁 Stale State</td><td>State unchanged beyond stale threshold — health may still be Good</td></tr>" +
+
                       "<tr><td>😴 Snoozed</td><td>Excluded from notifications for a set duration</td></tr>" +
                       "</table></div></div>"
         }
 
         section("<b>💡 Tips for Best Results</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "• Stale state detection works best after a day of normal operation — give devices time to establish their first state change<br>" +
-                      "• The State Changed column is most useful for motion sensors, contact sensors, and hub variable connectors<br>" +
-                      "• For switches you rarely toggle (like always-on equipment), raise the stale threshold to 7+ days or disable stale detection for those devices by snoozeing them<br>" +
+
+
+
                       "• Hub Mesh Overview is most useful when you have 10+ Hub Mesh devices — for smaller setups the Activity Summary is sufficient<br>" +
                       "• Notifications now include [state] and last-seen time — if you use Pushover, the extra context makes alerts much more actionable</div>"
         }
