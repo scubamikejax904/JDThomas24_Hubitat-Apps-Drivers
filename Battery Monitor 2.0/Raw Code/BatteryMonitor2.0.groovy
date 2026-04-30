@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.18",
+    version: "2.4.19",
     doNotFocus: true
 )
 
@@ -36,18 +36,20 @@ def updated() {
         if (debugMode) log.debug "Cleaned up removed device: ${removedId}"
     }
 
-    // v2.4.13: one-time migration — seed firstSeenDate for existing devices
-    // Uses replacedTime if available, otherwise lastDate as best approximation.
-    // This ensures the 5-day gate uses a stable anchor going forward rather than
-    // lastDate which advances on every drain sample and kept devices in Pending indefinitely.
+    // v2.4.19: fixed firstSeenDate migration — use explicit HashMap copy to ensure
+    // nested map mutation persists correctly in Hubitat's state storage.
+    // Previous versions used in-place mutation which silently failed to persist.
+    def migrationDirty = false
     state.history?.each { id, data ->
         if (data && !data.firstSeenDate) {
-            data.firstSeenDate = data.replacedTime ?: data.lastDate ?: now()
-            state.history[id] = data
-            if (debugMode) log.debug "Migrated firstSeenDate for device ${id}: ${new Date(data.firstSeenDate as long)}"
+            def newData = new HashMap(data)
+            newData.firstSeenDate = newData.replacedTime ?: newData.lastDate ?: now()
+            state.history[id] = newData
+            migrationDirty = true
+            if (debugMode) log.debug "Migrated firstSeenDate for device ${id}: ${new Date(newData.firstSeenDate as long)}"
         }
     }
-    state.history = state.history
+    if (migrationDirty) state.history = state.history
 
     // v2.4.15: one-time migration — add deviceId to existing replacement history entries
     // Matches on displayName against currently selected devices. Entries for deleted devices
@@ -298,7 +300,7 @@ def mainPage() {
 
         section("<b>Diagnostics</b>") {
             input "debugMode", "bool", title: "Debug Logging (auto-disables after 30 min)", defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Battery Monitor v2.4.18</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Battery Monitor v2.4.19</span>"
         }
     }
 }
