@@ -191,14 +191,14 @@ def getProtocolColor(protocol) {
         case "Hub Mesh (Zigbee)":  return "#3b82f6"
         case "Z-Wave":             return "#8b5cf6"
         case "Hub Mesh (Z-Wave)":  return "#8b5cf6"
-        case "Matter":             return "#f97316"
-        case "Hub Mesh (Matter)":  return "#f97316"
+        case "Matter":             return "#e65100"
+        case "Hub Mesh (Matter)":  return "#e65100"
         case "Hub Mesh":           return "#06b6d4"
         case "LAN":                return "#14b8a6"
         case "Virtual":            return "#ec4899"
         case "Hub Variable":       return "#eab308"
         case "Bluetooth":          return "#06b6d4"
-        default:                   return "#94a3b8"
+        default:                   return "#c0c4cc"
     }
 }
 
@@ -306,46 +306,46 @@ def getOverrideStateDisplay(device, attrName) {
             case "switch":
                 def isOn = vl == "on"
                 return [label: isOn ? "ON" : "OFF",
-                        color: isOn ? "#1a73e8" : "#94a3b8", isAlert: false, type: attrName]
+                        color: isOn ? "#1565c0" : "#c0c4cc", isAlert: false, type: attrName]
             case "contact":
                 def isOpen = vl == "open"
                 return [label: isOpen ? "Open" : "Closed",
-                        color: isOpen ? "#f97316" : "#94a3b8", isAlert: isOpen, type: attrName]
+                        color: isOpen ? "#e65100" : "#c0c4cc", isAlert: isOpen, type: attrName]
             case "motion":
                 def isActive = vl == "active"
                 return [label: isActive ? "Active" : "Inactive",
-                        color: isActive ? "#1a73e8" : "#94a3b8", isAlert: false, type: attrName]
+                        color: isActive ? "#1565c0" : "#c0c4cc", isAlert: false, type: attrName]
             case "lock":
                 def isUnlocked = vl == "unlocked"
                 return [label: isUnlocked ? "Unlocked" : "Locked",
-                        color: isUnlocked ? "#f97316" : "#94a3b8", isAlert: isUnlocked, type: attrName]
+                        color: isUnlocked ? "#e65100" : "#c0c4cc", isAlert: isUnlocked, type: attrName]
             case "presence":
                 def isPresent = vl == "present"
                 return [label: isPresent ? "Present" : "Not Present",
-                        color: isPresent ? "#1a73e8" : "#94a3b8", isAlert: false, type: attrName]
+                        color: isPresent ? "#1565c0" : "#c0c4cc", isAlert: false, type: attrName]
             case "water":
                 def isWet = vl == "wet"
                 return [label: isWet ? "Wet" : "Dry",
-                        color: isWet ? "#dc2626" : "#94a3b8", isAlert: isWet, type: attrName]
+                        color: isWet ? "#c62828" : "#c0c4cc", isAlert: isWet, type: attrName]
             case "smoke":
             case "carbonMonoxide":
             case "tamper":
                 def isDetected = vl == "detected"
                 return [label: isDetected ? "${attrName.capitalize()}!" : "Clear",
-                        color: isDetected ? "#dc2626" : "#94a3b8", isAlert: isDetected, type: attrName]
+                        color: isDetected ? "#c62828" : "#c0c4cc", isAlert: isDetected, type: attrName]
             case "valve":
             case "door":
                 def isOpen2 = vl in ["open", "opening"]
                 return [label: vs.capitalize(),
-                        color: isOpen2 ? "#f97316" : "#94a3b8", isAlert: isOpen2, type: attrName]
+                        color: isOpen2 ? "#e65100" : "#c0c4cc", isAlert: isOpen2, type: attrName]
             case "printState":
             case "currentStatus":
             case "printerStatus":
                 def isPrint = vl in ["printing", "busy"]
                 def isPause = vl in ["paused", "pausing"]
                 def isError = vl in ["error", "offline", "disconnected", "cancelled"]
-                def color   = isPrint ? "#1a73e8" : isPause ? "#f97316" :
-                              isError ? "#dc2626" : "#94a3b8"
+                def color   = isPrint ? "#1565c0" : isPause ? "#e65100" :
+                              isError ? "#c62828" : "#c0c4cc"
                 return [label: vs.capitalize(), color: color, isAlert: isError, type: attrName]
             default:
                 // Unknown attribute — show raw value with semantic color guessing
@@ -353,7 +353,7 @@ def getOverrideStateDisplay(device, attrName) {
                                       "enabled", "playing", "present", "open"]
                 def isAlert  = vl in ["offline", "disconnected", "error", "fault", "alarm",
                                       "wet", "detected"]
-                def color    = isAlert ? "#dc2626" : isActive ? "#1a73e8" : "#94a3b8"
+                def color    = isAlert ? "#c62828" : isActive ? "#1565c0" : "#c0c4cc"
                 return [label: vs.capitalize(), color: color, isAlert: isAlert, type: attrName]
         }
     } catch (e) {
@@ -369,11 +369,11 @@ def getOverrideStateDisplay(device, attrName) {
 //   isAlert — true when state is "interesting" (wet, open, motion active, unlocked, etc.)
 //   type    — attribute name that matched
 //
-// Color convention (matches app protocol color language):
-//   Blue  (#1a73e8) — normal/active/present/on
-//   Gray  (#94a3b8) — inactive/normal-safe state (off, closed, dry, locked, not present)
-//   Red   (#dc2626) — alert state (wet, open when alerting, smoke, CO, etc.)
-//   Orange(#f97316) — alert/warning states
+// Color convention:
+//   Blue  (#1565c0) — active/on/present/playing — bold, pops out
+//   Gray  (#c0c4cc) — inactive/off/closed/dry   — muted, recedes
+//   Red   (#c62828) — alert state (wet, smoke, CO, tamper)
+//   Orange(#e65100) — warning state (open contact, unlocked, open valve)
 def getCurrentStateDisplay(device) {
     try {
         // ── Manual state attribute override ──────────────────────
@@ -400,7 +400,7 @@ def getCurrentStateDisplay(device) {
             if (contact != null) {
                 def isOpen = contact.toString().toLowerCase() == "open"
                 return [label: isOpen ? "Open" : "Closed",
-                        color: isOpen ? "#f97316" : "#94a3b8",
+                        color: isOpen ? "#e65100" : "#c0c4cc",
                         isAlert: isOpen,
                         type: "contact"]
             }
@@ -414,7 +414,7 @@ def getCurrentStateDisplay(device) {
             if (motion != null) {
                 def isActive = motion.toString().toLowerCase() == "active"
                 return [label: isActive ? "Active" : "Inactive",
-                        color: isActive ? "#1a73e8" : "#94a3b8",
+                        color: isActive ? "#1565c0" : "#c0c4cc",
                         isAlert: false,
                         type: "motion"]
             }
@@ -426,7 +426,7 @@ def getCurrentStateDisplay(device) {
             if (lock != null) {
                 def isUnlocked = lock.toString().toLowerCase() == "unlocked"
                 return [label: isUnlocked ? "Unlocked" : "Locked",
-                        color: isUnlocked ? "#f97316" : "#94a3b8",
+                        color: isUnlocked ? "#e65100" : "#c0c4cc",
                         isAlert: isUnlocked,
                         type: "lock"]
             }
@@ -444,7 +444,7 @@ def getCurrentStateDisplay(device) {
             if (presence != null) {
                 def isPresent = presence.toString().toLowerCase() == "present"
                 return [label: isPresent ? "Present" : "Not Present",
-                        color: isPresent ? "#1a73e8" : "#94a3b8",
+                        color: isPresent ? "#1565c0" : "#c0c4cc",
                         isAlert: false,
                         type: "presence"]
             }
@@ -473,8 +473,8 @@ def getCurrentStateDisplay(device) {
                 def isIdle  = ps in ["idle", "ready", "operational", "standby", "complete"]
                 def isPause = ps in ["paused", "pausing"]
                 def isError = ps in ["error", "offline", "disconnected", "cancelled"]
-                def color   = isPrint ? "#1a73e8" : isIdle ? "#94a3b8" :
-                              isPause ? "#f97316" : isError ? "#dc2626" : "#94a3b8"
+                def color   = isPrint ? "#1565c0" : isIdle ? "#c0c4cc" :
+                              isPause ? "#e65100" : isError ? "#c62828" : "#c0c4cc"
                 return [label: printerStatus.toString().capitalize(),
                         color: color,
                         isAlert: isError,
@@ -488,7 +488,7 @@ def getCurrentStateDisplay(device) {
         if (water != null) {
             def isWet = water.toString().toLowerCase() == "wet"
             return [label: isWet ? "Wet" : "Dry",
-                    color: isWet ? "#dc2626" : "#94a3b8",
+                    color: isWet ? "#c62828" : "#c0c4cc",
                     isAlert: isWet,
                     type: "water"]
         }
@@ -499,7 +499,7 @@ def getCurrentStateDisplay(device) {
         if (smoke != null) {
             def isDetected = smoke.toString().toLowerCase() == "detected"
             return [label: isDetected ? "Smoke!" : "Clear",
-                    color: isDetected ? "#dc2626" : "#94a3b8",
+                    color: isDetected ? "#c62828" : "#c0c4cc",
                     isAlert: isDetected,
                     type: "smoke"]
         }
@@ -509,7 +509,7 @@ def getCurrentStateDisplay(device) {
         if (co != null) {
             def isDetected = co.toString().toLowerCase() == "detected"
             return [label: isDetected ? "CO!" : "Clear",
-                    color: isDetected ? "#dc2626" : "#94a3b8",
+                    color: isDetected ? "#c62828" : "#c0c4cc",
                     isAlert: isDetected,
                     type: "carbonMonoxide"]
         }
@@ -519,7 +519,7 @@ def getCurrentStateDisplay(device) {
         if (sw != null) {
             def isOn = sw.toString().toLowerCase() == "on"
             return [label: isOn ? "ON" : "OFF",
-                    color: isOn ? "#1a73e8" : "#94a3b8",
+                    color: isOn ? "#1565c0" : "#c0c4cc",
                     isAlert: false,
                     type: "switch"]
         }
@@ -529,7 +529,7 @@ def getCurrentStateDisplay(device) {
         if (presence != null) {
             def isPresent = presence.toString().toLowerCase() == "present"
             return [label: isPresent ? "Present" : "Not Present",
-                    color: isPresent ? "#1a73e8" : "#94a3b8",
+                    color: isPresent ? "#1565c0" : "#c0c4cc",
                     isAlert: false,
                     type: "presence"]
         }
@@ -539,7 +539,7 @@ def getCurrentStateDisplay(device) {
         if (contact != null) {
             def isOpen = contact.toString().toLowerCase() == "open"
             return [label: isOpen ? "Open" : "Closed",
-                    color: isOpen ? "#f97316" : "#94a3b8",
+                    color: isOpen ? "#e65100" : "#c0c4cc",
                     isAlert: isOpen,
                     type: "contact"]
         }
@@ -549,7 +549,7 @@ def getCurrentStateDisplay(device) {
         if (motion != null) {
             def isActive = motion.toString().toLowerCase() == "active"
             return [label: isActive ? "Active" : "Inactive",
-                    color: isActive ? "#1a73e8" : "#94a3b8",
+                    color: isActive ? "#1565c0" : "#c0c4cc",
                     isAlert: false,
                     type: "motion"]
         }
@@ -559,7 +559,7 @@ def getCurrentStateDisplay(device) {
         if (lock != null) {
             def isUnlocked = lock.toString().toLowerCase() == "unlocked"
             return [label: isUnlocked ? "Unlocked" : "Locked",
-                    color: isUnlocked ? "#f97316" : "#94a3b8",
+                    color: isUnlocked ? "#e65100" : "#c0c4cc",
                     isAlert: isUnlocked,
                     type: "lock"]
         }
@@ -576,7 +576,7 @@ def getCurrentStateDisplay(device) {
         if (tamper != null) {
             def isDetected = tamper.toString().toLowerCase() == "detected"
             return [label: isDetected ? "Tampered!" : "Clear",
-                    color: isDetected ? "#dc2626" : "#94a3b8",
+                    color: isDetected ? "#c62828" : "#c0c4cc",
                     isAlert: isDetected,
                     type: "tamper"]
         }
@@ -586,7 +586,7 @@ def getCurrentStateDisplay(device) {
         if (shock != null) {
             def isDetected = shock.toString().toLowerCase() == "detected"
             return [label: isDetected ? "Detected" : "Clear",
-                    color: isDetected ? "#f97316" : "#94a3b8",
+                    color: isDetected ? "#e65100" : "#c0c4cc",
                     isAlert: isDetected,
                     type: "shock"]
         }
@@ -596,7 +596,7 @@ def getCurrentStateDisplay(device) {
         if (sleeping != null) {
             def isSleeping = sleeping.toString().toLowerCase() == "sleeping"
             return [label: isSleeping ? "Sleeping" : "Not Sleeping",
-                    color: isSleeping ? "#8b5cf6" : "#94a3b8",
+                    color: isSleeping ? "#8b5cf6" : "#c0c4cc",
                     isAlert: false,
                     type: "sleeping"]
         }
@@ -606,7 +606,7 @@ def getCurrentStateDisplay(device) {
         if (valve != null) {
             def isOpen = valve.toString().toLowerCase() == "open"
             return [label: isOpen ? "Open" : "Closed",
-                    color: isOpen ? "#f97316" : "#94a3b8",
+                    color: isOpen ? "#e65100" : "#c0c4cc",
                     isAlert: isOpen,
                     type: "valve"]
         }
@@ -616,7 +616,7 @@ def getCurrentStateDisplay(device) {
         if (door != null) {
             def isOpen = door.toString().toLowerCase() in ["open", "opening"]
             return [label: door.toString().capitalize(),
-                    color: isOpen ? "#f97316" : "#94a3b8",
+                    color: isOpen ? "#e65100" : "#c0c4cc",
                     isAlert: isOpen,
                     type: "door"]
         }
@@ -626,7 +626,7 @@ def getCurrentStateDisplay(device) {
         if (shade != null) {
             def isOpen = shade.toString().toLowerCase() in ["open", "opening", "partially open"]
             return [label: shade.toString().capitalize(),
-                    color: isOpen ? "#1a73e8" : "#94a3b8",
+                    color: isOpen ? "#1565c0" : "#c0c4cc",
                     isAlert: false,
                     type: "windowShade"]
         }
@@ -679,9 +679,9 @@ def getLANStateDisplay(device) {
             def setpt   = stateMap["thermostatSetpoint"] ?: stateMap["coolingSetpoint"] ?: stateMap["heatingSetpoint"]
             if (opState) {
                 def isActive = opState.toLowerCase() in ["heating", "cooling", "fan only", "pending heat", "pending cool"]
-                def color    = opState.toLowerCase() == "heating" ? "#f97316" :
-                               opState.toLowerCase() == "cooling" ? "#1a73e8" :
-                               isActive ? "#1a73e8" : "#94a3b8"
+                def color    = opState.toLowerCase() == "heating" ? "#e65100" :
+                               opState.toLowerCase() == "cooling" ? "#1565c0" :
+                               isActive ? "#1565c0" : "#c0c4cc"
                 def label    = opState.capitalize()
                 if (temp)  label += " ${temp}°"
                 if (setpt) label += " → ${setpt}°"
@@ -689,7 +689,7 @@ def getLANStateDisplay(device) {
             }
             if (mode) {
                 def isOff = mode.toLowerCase() == "off"
-                return [label: "Mode: ${mode.capitalize()}", color: isOff ? "#94a3b8" : "#1a73e8",
+                return [label: "Mode: ${mode.capitalize()}", color: isOff ? "#c0c4cc" : "#1565c0",
                         isAlert: false, type: "thermostat"]
             }
         }
@@ -712,7 +712,7 @@ def getLANStateDisplay(device) {
             if (playback) {
                 def isPlaying = playback.toLowerCase() in ["playing", "play"]
                 def isPaused  = playback.toLowerCase() in ["paused", "pause", "stopped", "stop"]
-                def color     = isPlaying ? "#1a73e8" : "#94a3b8"
+                def color     = isPlaying ? "#1565c0" : "#c0c4cc"
                 def track     = stateMap["trackDescription"] ?: stateMap["trackData"] ?: ""
                 def label     = playback.capitalize()
                 if (track && track.length() > 0 && track != "null") {
@@ -735,14 +735,14 @@ def getLANStateDisplay(device) {
             if (charging) {
                 def isCharging = charging.toLowerCase() in ["charging", "complete"]
                 def color      = charging.toLowerCase() == "complete" ? "#16a34a" :
-                                 isCharging ? "#1a73e8" : "#94a3b8"
+                                 isCharging ? "#1565c0" : "#c0c4cc"
                 def label      = charging.capitalize()
                 if (battery) label += " ${battery}%"
                 return [label: label, color: color, isAlert: false, type: "ev"]
             }
             if (battery) {
                 def pct = battery.isNumber() ? battery.toInteger() : 0
-                def color = pct < 20 ? "#dc2626" : pct < 40 ? "#f97316" : "#94a3b8"
+                def color = pct < 20 ? "#c62828" : pct < 40 ? "#e65100" : "#c0c4cc"
                 return [label: "Battery ${battery}%", color: color, isAlert: pct < 20, type: "ev"]
             }
         }
@@ -759,7 +759,7 @@ def getLANStateDisplay(device) {
             def power = stateMap["power"]
             def label = isOn ? "ON" : "OFF"
             if (isOn && power && power.isNumber()) label += " ${power.toDouble().round(1)}W"
-            return [label: label, color: isOn ? "#1a73e8" : "#94a3b8", isAlert: false, type: "shelly"]
+            return [label: label, color: isOn ? "#1565c0" : "#c0c4cc", isAlert: false, type: "shelly"]
         }
 
         // ── Garage Door / MyQ ─────────────────────────────────────
@@ -767,7 +767,7 @@ def getLANStateDisplay(device) {
             def d = stateMap["door"].toLowerCase()
             def isOpen = d in ["open", "opening"]
             return [label: stateMap["door"].capitalize(),
-                    color: isOpen ? "#f97316" : "#94a3b8",
+                    color: isOpen ? "#e65100" : "#c0c4cc",
                     isAlert: isOpen, type: "door"]
         }
 
@@ -801,8 +801,8 @@ def getLANStateDisplay(device) {
                                    "ready", "operational"]
             def isAlert  = vl in ["offline", "disconnected", "error", "fault",
                                    "alarm", "wet", "detected"]
-            def color    = isAlert  ? "#dc2626" :
-                           isActive ? "#1a73e8" : "#94a3b8"
+            def color    = isAlert  ? "#c62828" :
+                           isActive ? "#1565c0" : "#c0c4cc"
             if (debugEnabled()) log.debug "getLANStateDisplay: ${device.displayName} matched attr '${attr}' = '${val}'"
             return [label: val.capitalize(), color: color, isAlert: isAlert, type: attr]
         }
@@ -1440,7 +1440,8 @@ def activitySummaryPage() {
                 def stateDisplay = "—"
                 def stateOrderVal = "zzz"
                 if (stateInfo) {
-                    stateDisplay  = "<span style='color:${stateInfo.color};font-weight:bold;'>${stateInfo.label}</span>"
+                    def fw = (stateInfo.color == "#1565c0" || stateInfo.color == "#c62828" || stateInfo.color == "#e65100") ? "600" : "400"
+                    stateDisplay  = "<span style='color:${stateInfo.color};font-weight:${fw};'>${stateInfo.label}</span>"
                     stateOrderVal = stateInfo.label.toLowerCase()
                 }
 
@@ -1518,7 +1519,7 @@ def hubMeshSummaryPage() {
             def bannerHtml = ""
             groups.each { srcHub, counts ->
                 def worstColor = counts.offline > 0 ? "#991b1b" :
-                                 counts.poor    > 0 ? "#dc2626" :
+                                 counts.poor    > 0 ? "#c62828" :
                                  counts.fair    > 0 ? "#ea580c" : "#16a34a"
                 def worstLabel = counts.offline > 0 ? "💀 Offline devices present" :
                                  counts.poor    > 0 ? "🔴 Poor devices present" :
@@ -1569,7 +1570,8 @@ def hubMeshSummaryPage() {
                 def stateInfo    = getCurrentStateDisplay(device)
                 def stateDisplay = "—"
                 if (stateInfo) {
-                    stateDisplay = "<span style='color:${stateInfo.color};font-weight:bold;'>${stateInfo.label}</span>"
+                    def fw = (stateInfo.color == "#1565c0" || stateInfo.color == "#c62828" || stateInfo.color == "#e65100") ? "600" : "400"
+                    stateDisplay = "<span style='color:${stateInfo.color};font-weight:${fw};'>${stateInfo.label}</span>"
                 }
 
                 def deviceLink = hubIp
@@ -1647,7 +1649,8 @@ def problemDevicesPage() {
                 def stateInfo    = getCurrentStateDisplay(device)
                 def stateDisplay = "—"
                 if (stateInfo) {
-                    stateDisplay = "<span style='color:${stateInfo.color};font-weight:bold;'>${stateInfo.label}</span>"
+                    def fw = (stateInfo.color == "#1565c0" || stateInfo.color == "#c62828" || stateInfo.color == "#e65100") ? "600" : "400"
+                    stateDisplay = "<span style='color:${stateInfo.color};font-weight:${fw};'>${stateInfo.label}</span>"
                 }
 
                 def tracked        = state.stateHistory?.get(device.id as String)
