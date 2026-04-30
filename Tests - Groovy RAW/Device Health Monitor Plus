@@ -252,6 +252,116 @@ def isLowActivity(deviceId) {
 // ===================== NEW: STATE TRACKING =================
 // ============================================================
 
+// Returns a list of attribute names that have meaningful state values
+// for a given device — used to populate the state attribute override dropdown.
+// Only includes attributes with non-null, non-numeric, non-trivial values.
+def getMeaningfulAttributes(device) {
+    def known = [
+        "switch", "contact", "motion", "lock", "presence", "water",
+        "smoke", "carbonMonoxide", "tamper", "shock", "valve", "door",
+        "windowShade", "sleeping", "printState", "thermostatOperatingState",
+        "thermostatMode", "mediaPlaybackStatus", "transportStatus", "chargingState",
+        "currentStatus", "printerStatus", "status", "deviceStatus",
+        "healthStatus", "connectionStatus", "operatingState", "mode"
+    ]
+    def found = []
+    try {
+        device.currentStates?.each { s ->
+            if (!s?.name || s?.value == null) return
+            def val = s.value.toString().trim()
+            if (val in ["", "null", "0"]) return
+            // Include known state attrs + any non-numeric attr not in skip list
+            def skipAttrs = ["battery", "batteryLastReplaced", "lastCheckin",
+                             "temperature", "humidity", "illuminance", "pressure",
+                             "carbonDioxide", "energy", "power", "voltage",
+                             "current", "frequency", "rssi", "lqi", "driver",
+                             "notPresentCounter", "restoredCounter", "firmware"]
+            if (s.name in skipAttrs) return
+            if (val.isNumber() && !(s.name in known)) return
+            found << s.name
+        }
+    } catch (e) {
+        if (debugEnabled()) log.debug "getMeaningfulAttributes error for ${device.displayName}: ${e.message}"
+    }
+    return found.sort()
+}
+
+// Returns true if a device has more than one meaningful attribute
+// (used to decide whether to show it on the overrides page)
+def hasMultipleMeaningfulAttributes(device) {
+    return getMeaningfulAttributes(device).size() > 1
+}
+
+// Returns the display result for a manual attribute override
+def getOverrideStateDisplay(device, attrName) {
+    try {
+        def val = device.currentValue(attrName)
+        if (val == null) return null
+        def vs = val.toString().trim()
+        if (vs in ["", "null"]) return null
+        def vl = vs.toLowerCase()
+
+        // Known attributes — apply proper color/label logic
+        switch (attrName) {
+            case "switch":
+                def isOn = vl == "on"
+                return [label: isOn ? "ON" : "OFF",
+                        color: isOn ? "#1a73e8" : "#94a3b8", isAlert: false, type: attrName]
+            case "contact":
+                def isOpen = vl == "open"
+                return [label: isOpen ? "Open" : "Closed",
+                        color: isOpen ? "#f97316" : "#94a3b8", isAlert: isOpen, type: attrName]
+            case "motion":
+                def isActive = vl == "active"
+                return [label: isActive ? "Active" : "Inactive",
+                        color: isActive ? "#1a73e8" : "#94a3b8", isAlert: false, type: attrName]
+            case "lock":
+                def isUnlocked = vl == "unlocked"
+                return [label: isUnlocked ? "Unlocked" : "Locked",
+                        color: isUnlocked ? "#f97316" : "#94a3b8", isAlert: isUnlocked, type: attrName]
+            case "presence":
+                def isPresent = vl == "present"
+                return [label: isPresent ? "Present" : "Not Present",
+                        color: isPresent ? "#1a73e8" : "#94a3b8", isAlert: false, type: attrName]
+            case "water":
+                def isWet = vl == "wet"
+                return [label: isWet ? "Wet" : "Dry",
+                        color: isWet ? "#dc2626" : "#94a3b8", isAlert: isWet, type: attrName]
+            case "smoke":
+            case "carbonMonoxide":
+            case "tamper":
+                def isDetected = vl == "detected"
+                return [label: isDetected ? "${attrName.capitalize()}!" : "Clear",
+                        color: isDetected ? "#dc2626" : "#94a3b8", isAlert: isDetected, type: attrName]
+            case "valve":
+            case "door":
+                def isOpen2 = vl in ["open", "opening"]
+                return [label: vs.capitalize(),
+                        color: isOpen2 ? "#f97316" : "#94a3b8", isAlert: isOpen2, type: attrName]
+            case "printState":
+            case "currentStatus":
+            case "printerStatus":
+                def isPrint = vl in ["printing", "busy"]
+                def isPause = vl in ["paused", "pausing"]
+                def isError = vl in ["error", "offline", "disconnected", "cancelled"]
+                def color   = isPrint ? "#1a73e8" : isPause ? "#f97316" :
+                              isError ? "#dc2626" : "#94a3b8"
+                return [label: vs.capitalize(), color: color, isAlert: isError, type: attrName]
+            default:
+                // Unknown attribute — show raw value with semantic color guessing
+                def isActive = vl in ["on", "active", "connected", "online", "running",
+                                      "enabled", "playing", "present", "open"]
+                def isAlert  = vl in ["offline", "disconnected", "error", "fault", "alarm",
+                                      "wet", "detected"]
+                def color    = isAlert ? "#dc2626" : isActive ? "#1a73e8" : "#94a3b8"
+                return [label: vs.capitalize(), color: color, isAlert: isAlert, type: attrName]
+        }
+    } catch (e) {
+        if (debugEnabled()) log.debug "getOverrideStateDisplay error for ${device.displayName}: ${e.message}"
+    }
+    return null
+}
+
 // Returns the current state for display across all common device types.
 // Return map: [label, color, isAlert, type]
 //   label   — human-readable display string
@@ -266,7 +376,61 @@ def isLowActivity(deviceId) {
 //   Orange(#f97316) — alert/warning states
 def getCurrentStateDisplay(device) {
     try {
+        // ── Manual state attribute override ──────────────────────
+        // Check settings first — user can pin any attribute on this page
+        def attrOverride = settings["stateAttrOverride_${device.id}"]
+        if (attrOverride && attrOverride != "Auto-detect") {
+            def overrideResult = getOverrideStateDisplay(device, attrOverride)
+            if (overrideResult) return overrideResult
+        }
+
         def driverName = (device.typeName ?: "").toLowerCase()
+
+        // ── Capability-first devices ─────────────────────────────
+        // Some drivers (e.g. Xiaomi/Aqara contact sensors) add a
+        // presence attribute as a keep-alive heartbeat mechanism.
+        // Always use the device's PRIMARY capability first when the
+        // driver name makes the intent unambiguous — presence should
+        // never win over contact, motion, or lock on these devices.
+        def isContactDevice = driverName.contains("contact") ||
+                              driverName.contains("door sensor") ||
+                              driverName.contains("window sensor")
+        if (isContactDevice) {
+            def contact = device.currentValue("contact")
+            if (contact != null) {
+                def isOpen = contact.toString().toLowerCase() == "open"
+                return [label: isOpen ? "Open" : "Closed",
+                        color: isOpen ? "#f97316" : "#94a3b8",
+                        isAlert: isOpen,
+                        type: "contact"]
+            }
+        }
+
+        def isMotionDevice = driverName.contains("motion sensor") ||
+                             driverName.contains("motion detector") ||
+                             driverName.contains("pir")
+        if (isMotionDevice) {
+            def motion = device.currentValue("motion")
+            if (motion != null) {
+                def isActive = motion.toString().toLowerCase() == "active"
+                return [label: isActive ? "Active" : "Inactive",
+                        color: isActive ? "#1a73e8" : "#94a3b8",
+                        isAlert: false,
+                        type: "motion"]
+            }
+        }
+
+        def isLockDevice = driverName.contains("lock") && !driverName.contains("unlock")
+        if (isLockDevice) {
+            def lock = device.currentValue("lock")
+            if (lock != null) {
+                def isUnlocked = lock.toString().toLowerCase() == "unlocked"
+                return [label: isUnlocked ? "Unlocked" : "Locked",
+                        color: isUnlocked ? "#f97316" : "#94a3b8",
+                        isAlert: isUnlocked,
+                        type: "lock"]
+            }
+        }
 
         // ── Presence-first devices ────────────────────────────────
         // Life360, mobile presence, and arrival sensors report both
@@ -885,8 +1049,8 @@ def mainPage() {
                      description: "Snooze or clear active snoozes")
             }
             href(name: "toProtocolOverride", page: "protocolOverridePage",
-                 title: "<b>🔧 Protocol Overrides</b>",
-                 description: "Fix misdetected device protocols")
+                 title: "<b>🔧 Protocol & State Overrides</b>",
+                 description: "Fix misdetected protocols or pin a specific state attribute per device")
         }
 
         section("<b>Help & Support</b>") {
@@ -1521,7 +1685,11 @@ def problemDevicesPage() {
 // ===================== PROTOCOL OVERRIDE PAGE ==============
 // ============================================================
 def protocolOverridePage() {
-    def devList = getAllMonitoredDevices()
+    def allDevices = getAllMonitoredDevices()
+
+    // Protocol override candidates — Hub Mesh, LAN, Virtual, Hub Variable
+    // or devices with an existing protocol override set
+    def protocolDevList = allDevices
         .findAll { device ->
             def hasOverride = settings["protocolOverride_${device.id}"] &&
                               settings["protocolOverride_${device.id}"] != "Auto-detect"
@@ -1530,31 +1698,79 @@ def protocolOverridePage() {
         }
         .sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
 
-    dynamicPage(name: "protocolOverridePage", title: "🔧 Protocol Overrides", install: false) {
-        section("<b>About Protocol Overrides</b>") {
+    // State attribute override candidates — devices with more than one
+    // meaningful attribute, or devices with an existing state override set
+    def stateDevList = allDevices
+        .findAll { device ->
+            def hasOverride = settings["stateAttrOverride_${device.id}"] &&
+                              settings["stateAttrOverride_${device.id}"] != "Auto-detect"
+            hasOverride || hasMultipleMeaningfulAttributes(device)
+        }
+        .sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
+
+    dynamicPage(name: "protocolOverridePage", title: "🔧 Device Overrides", install: false) {
+
+        // ── Protocol Overrides ────────────────────────────────────
+        section("<b>Protocol Overrides</b>") {
             paragraph "Some Hub Mesh linked devices and LAN devices cannot be automatically identified. " +
-                      "Use this page to manually set the correct protocol for those devices."
+                      "Use this section to manually set the correct protocol for those devices. " +
+                      "The override always takes priority over auto-detection. " +
+                      "Set back to <b>Auto-detect</b> to restore automatic detection."
         }
-        if (!devList || devList.size() == 0) {
+        if (!protocolDevList || protocolDevList.size() == 0) {
             section("") {
-                paragraph "✅ No Hub Mesh, LAN, Virtual, or Hub Variable devices found — no overrides needed."
+                paragraph "✅ No Hub Mesh, LAN, Virtual, or Hub Variable devices found — no protocol overrides needed."
             }
-            return
-        }
-        section("<b>Unidentified / Overridden Devices (${devList.size()})</b>") {
-            devList.each { device ->
-                def currentProtocol = getProtocol(device)
-                def currentOverride = settings["protocolOverride_${device.id}"] ?: "Auto-detect"
-                input "protocolOverride_${device.id}", "enum",
-                      title: "<b>${device.displayName}</b> — currently: <span style='color:${getProtocolColor(currentProtocol)};'>${currentProtocol}</span>",
-                      options: ["Auto-detect", "Zigbee", "Z-Wave", "Matter",
-                                "Hub Mesh (Zigbee)", "Hub Mesh (Z-Wave)", "Hub Mesh (Matter)", "Hub Mesh",
-                                "LAN", "Virtual", "Hub Variable"],
-                      defaultValue: currentOverride, required: false
+        } else {
+            section("<b>Unidentified / Overridden Devices (${protocolDevList.size()})</b>") {
+                protocolDevList.each { device ->
+                    def currentProtocol = getProtocol(device)
+                    def currentOverride = settings["protocolOverride_${device.id}"] ?: "Auto-detect"
+                    input "protocolOverride_${device.id}", "enum",
+                          title: "<b>${device.displayName}</b> — currently: <span style='color:${getProtocolColor(currentProtocol)};'>${currentProtocol}</span>",
+                          options: ["Auto-detect", "Zigbee", "Z-Wave", "Matter",
+                                    "Hub Mesh (Zigbee)", "Hub Mesh (Z-Wave)", "Hub Mesh (Matter)", "Hub Mesh",
+                                    "LAN", "Virtual", "Hub Variable"],
+                          defaultValue: currentOverride, required: false
+                }
             }
         }
+
+        // ── State Attribute Overrides ─────────────────────────────
+        section("<b>State Attribute Overrides</b>") {
+            paragraph "Some devices report multiple attributes and the app may pick the wrong one to display " +
+                      "in the Current State column. Use this section to manually pin the attribute you want shown. " +
+                      "Only devices with more than one meaningful attribute are listed here."
+        }
+        if (!stateDevList || stateDevList.size() == 0) {
+            section("") {
+                paragraph "✅ No devices with multiple meaningful attributes found — no state overrides needed."
+            }
+        } else {
+            section("<b>Devices with Multiple Attributes (${stateDevList.size()})</b>") {
+                stateDevList.each { device ->
+                    def currentOverride  = settings["stateAttrOverride_${device.id}"] ?: "Auto-detect"
+                    def autoResult       = getCurrentStateDisplay(device)
+                    def currentLabel     = autoResult ? autoResult.label : "—"
+                    def attrs            = getMeaningfulAttributes(device)
+                    def options          = ["Auto-detect"] + attrs
+
+                    // Show what it's currently displaying so user knows if it needs fixing
+                    def currentDisplay   = currentOverride == "Auto-detect"
+                        ? "auto: ${currentLabel}"
+                        : "override: ${currentOverride}"
+
+                    input "stateAttrOverride_${device.id}", "enum",
+                          title: "<b>${device.displayName}</b> — showing: <span style='color:#94a3b8;'>${currentDisplay}</span>",
+                          options: options,
+                          defaultValue: currentOverride,
+                          required: false
+                }
+            }
+        }
+
         section("") {
-            paragraph "Tap <b>Done</b> to save overrides. Changes take effect on the next scan."
+            paragraph "Tap <b>Done</b> to save. Changes take effect immediately on the next page load."
         }
     }
 }
