@@ -1385,7 +1385,7 @@ def activitySummaryPage() {
             if (snoozeEnabled()) {
                 href(name: "toSnoozeFromSummary", page: "snoozeManagePage", title: "😴 Manage Snoozed Devices")
             }
-            paragraph "<span style='color:#94a3b8;font-size:11px;'>ℹ️ Data reflects the last completed scan — states do not update live. Use <b>Force Scan</b> above to refresh.</span>"
+            paragraph "<div style='background-color:#e8f0fe; border-left:3px solid #1565c0; padding:6px 10px; border-radius:0; font-size:12px; color:#1565c0;'>🔄 Data reflects the last completed scan — states do not update live. Tap <b>Force Scan</b> above to refresh.</div>"
 
             def devList = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
             if (!devList) { paragraph "No devices found. Please select devices on the main page first."; return }
@@ -1471,7 +1471,7 @@ def activitySummaryPage() {
             table += "</tbody></table>"
 
             paragraph rawHtml: true, """
-${hubIp ? "<span style='color:#94a3b8;font-size:11px;'>⚠ Device links are accessible on your local network only.</span><br>" : ""}
+${hubIp ? "<div style='background-color:#fff8e1; border-left:3px solid #e65100; padding:6px 10px; border-radius:0; font-size:12px; color:#e65100; margin-bottom:6px;'>⚠ Device links are accessible on your local network only.</div>" : ""}
 <div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>
 <script>
 \$(document).ready(function() {
@@ -2110,4 +2110,3 @@ def infoPage(Map params = [:]) {
         }
     }
 }
-
