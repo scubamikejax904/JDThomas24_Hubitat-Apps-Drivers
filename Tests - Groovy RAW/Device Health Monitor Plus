@@ -1133,7 +1133,7 @@ def getHealthDisplay(device) {
         return "😴 <span style='color:#94a3b8;'>Snoozed (${remaining})</span>"
     }
     if (h == "Pending") {
-        return "<span style='color:#94a3b8;'>⏳ Pending (${samples}/3 samples)</span>"
+        return "<span style='color:#94a3b8;'>⏳ Pending (${samples}/3)</span>"
     }
     if (h in ["Poor", "Offline"]) {
         def baseDisplay = h == "Poor"
@@ -1153,11 +1153,14 @@ def getHealthDisplay(device) {
             default:                  return baseDisplay
         }
     }
+    // Append Low Activity flag to rated devices that qualify
+    def lowActivity = isLowActivity(device.id as String)
+    def lowSuffix   = lowActivity ? " <span style='color:#f97316;font-size:10px;'>⚠ Low Activity</span>" : ""
     switch (h) {
-        case "Excellent": return "🟢 Excellent"
-        case "Good":      return "🟢 Good"
-        case "Fair":      return "🟠 Fair"
-        default:          return "${h}"
+        case "Excellent": return "🟢 Excellent${lowSuffix}"
+        case "Good":      return "🟢 Good${lowSuffix}"
+        case "Fair":      return "🟠 Fair${lowSuffix}"
+        default:          return "${h}${lowSuffix}"
     }
 }
 
@@ -1235,12 +1238,11 @@ def activitySummaryPage() {
             table += "<thead><tr style='font-weight:bold; background-color:#f0f0f0;'>"
             table += "<th style='padding:4px; border:1px solid #ccc;'>Device</th>"
             table += "<th style='padding:4px; border:1px solid #ccc;'>Protocol</th>"
-            table += "<th style='padding:4px; border:1px solid #ccc;'>Health</th>"
-            table += "<th style='padding:4px; border:1px solid #ccc;' title='Current reported state of the device'>State</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;' title='Health rating based on check-in frequency. Shows sample progress while learning.'>Health</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;' title='Current reported state of the device'>Current State</th>"
             table += "<th style='padding:4px; border:1px solid #ccc;' title='How long ago this state last changed'>State Changed</th>"
             table += "<th style='padding:4px; border:1px solid #ccc;' title='How long ago the device last sent any activity to the hub'>Last Activity</th>"
             table += "<th style='padding:4px; border:1px solid #ccc;'>Avg Check-in</th>"
-            table += "<th style='padding:4px; border:1px solid #ccc;'>Samples</th>"
             table += "</tr></thead><tbody>"
 
             def rowNum = 0
@@ -1262,12 +1264,6 @@ def activitySummaryPage() {
                                 data?.avgInterval  ? (data.avgInterval as Long) : 999999
                 def avgIntStr = data?.userInterval ? formatInterval(data.userInterval) + " (manual)" :
                                 data?.avgInterval  ? formatInterval(data.avgInterval) : "Learning..."
-
-                def sampleCount    = data?.samples?.size() ?: 0
-                def lowActivity    = isLowActivity(device.id as String)
-                def samplesDisplay = lowActivity
-                    ? "${sampleCount} <span style='color:#f97316;font-size:10px;'>⚠ Low Activity</span>"
-                    : "${sampleCount}"
 
                 def h           = state.health?.get(device.id) ?: "Pending"
                 def healthOrder = snoozed ? 99 :
@@ -1300,7 +1296,6 @@ def activitySummaryPage() {
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${-lastChangedMs}'>${lastChangedStr}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${-lastSeenMs}'>${lastSeenStr}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${avgRawMin}'>${avgIntStr}</td>"
-                table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${sampleCount}'>${samplesDisplay}</td>"
                 table += "</tr>"
             }
 
@@ -1317,7 +1312,7 @@ ${hubIp ? "<span style='color:#94a3b8;font-size:11px;'>⚠ Device links are acce
         searching:  true,
         order:      [[2, 'asc']],
         columnDefs: [
-            { type: 'num', targets: [2, 3, 4, 5, 6, 7] }
+            { type: 'num', targets: [2, 3, 4, 5, 6] }
         ]
     });
 });
@@ -1871,7 +1866,7 @@ def infoPage(Map params = [:]) {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
                       "<div style='overflow-x:auto;'><table style='width:100%; border-collapse: collapse;'>" +
                       "<tr style='font-weight:bold;'><td>Health</td><td>Meaning</td></tr>" +
-                      "<tr><td>⏳ Pending</td><td>Not enough check-in samples yet (need 3)</td></tr>" +
+                      "<tr><td>⏳ Pending (n/3)</td><td>Learning — sample count shown inline until 3 are collected</td></tr>" +
                       "<tr><td>🟢 Excellent</td><td>Checking in within 1.2x of baseline</td></tr>" +
                       "<tr><td>🟢 Good</td><td>Checking in within 2x of baseline</td></tr>" +
                       "<tr><td>🟠 Fair</td><td>Checking in within 3x of baseline</td></tr>" +
