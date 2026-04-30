@@ -1251,9 +1251,9 @@ def activitySummaryPage() {
             table += "<th style='padding:4px; border:1px solid #ccc;'>Device</th>"
             table += "<th style='padding:4px; border:1px solid #ccc;'>Protocol</th>"
             table += "<th style='padding:4px; border:1px solid #ccc;'>Health</th>"
-            table += "<th style='padding:4px; border:1px solid #ccc;'>State</th>"        // NEW
-            table += "<th style='padding:4px; border:1px solid #ccc;'>Last Seen</th>"
-            table += "<th style='padding:4px; border:1px solid #ccc;'>State Changed</th>" // NEW
+            table += "<th style='padding:4px; border:1px solid #ccc;' title='Current reported state of the device'>State</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;' title='How long ago this state last changed'>State Changed</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;' title='How long ago the device last sent any activity to the hub'>Last Activity</th>"
             table += "<th style='padding:4px; border:1px solid #ccc;'>Avg Check-in</th>"
             table += "<th style='padding:4px; border:1px solid #ccc;'>Samples</th>"
             table += "</tr></thead><tbody>"
@@ -1320,8 +1320,8 @@ def activitySummaryPage() {
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${protocol}'><span style='color:${getProtocolColor(protocol)};font-weight:bold;'>${protocolDisplay}</span></td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${healthOrder}'>${getHealthDisplay(device)}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;' data-order='${stateOrder}'>${stateDisplay}</td>"
-                table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${-lastSeenMs}'>${lastSeenStr}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc; ${staleChangedStyle}' data-order='${-lastChangedMs}'>${lastChangedStr}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${-lastSeenMs}'>${lastSeenStr}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${avgRawMin}'>${avgIntStr}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${sampleCount}'>${samplesDisplay}</td>"
                 table += "</tr>"
@@ -1409,8 +1409,8 @@ def hubMeshSummaryPage() {
             table += "<td style='padding:4px; border:1px solid #ccc;'>Source Hub</td>"
             table += "<td style='padding:4px; border:1px solid #ccc;'>Protocol</td>"
             table += "<td style='padding:4px; border:1px solid #ccc;'>Health</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>State</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Last Seen</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;' title='Current reported state'>State</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;' title='How long ago the device last sent any activity to the hub'>Last Activity</td>"
             table += "</tr>"
 
             def sorted = devList.sort { a, b ->
@@ -1497,9 +1497,9 @@ def problemDevicesPage() {
             table += "<td style='padding:4px; border:1px solid #ccc;'>Device</td>"
             table += "<td style='padding:4px; border:1px solid #ccc;'>Protocol</td>"
             table += "<td style='padding:4px; border:1px solid #ccc;'>Health</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>State</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Last Seen</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>State Changed</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;' title='Current reported state of the device'>State</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;' title='How long ago this state last changed'>State Changed</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;' title='How long ago the device last sent any activity to the hub'>Last Activity</td>"
             table += "<td style='padding:4px; border:1px solid #ccc;'>Avg Check-in</td>"
             table += "</tr>"
 
@@ -1544,8 +1544,8 @@ def problemDevicesPage() {
                 table += "<td style='padding:4px; border:1px solid #ccc;'><span style='color:${getProtocolColor(protocol)};font-weight:bold;'>${protocol}</span></td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${healthDisplay}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;'>${stateDisplay}</td>"
-                table += "<td style='padding:4px; border:1px solid #ccc;'>${lastSeen}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc; ${changedStyle}'>${lastChangedStr}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${lastSeen}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${avgInt}</td>"
                 table += "</tr>"
             }
