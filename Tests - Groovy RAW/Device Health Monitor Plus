@@ -55,7 +55,7 @@ def initialize() {
     if (state.health        == null) state.health        = [:]
     if (state.snoozed       == null) state.snoozed       = [:]
     if (state.verifying     == null) state.verifying     = [:]
-    if (state.stateHistory  == null) state.stateHistory  = [:]   // NEW: tracks last attribute change
+    if (state.stateHistory  == null) state.stateHistory  = [:]
     scheduleScanInterval()
     scheduleReportFrequency()
     if (debugEnabled()) log.debug "Monitoring ${getAllMonitoredDevices().findAll { getProtocol(it) != 'Unknown' }.size()} device(s)"
@@ -80,7 +80,7 @@ def applyCustomLabel() {
 // ============================================================
 // ===================== SNOOZE ==============================
 // ============================================================
-def snoozeEnabled() { return settings?.enableSnooze != false }
+def snoozeEnabled() { return settings?.enableSnooze == true }
 
 def snoozeDevice(deviceId) {
     if (!snoozeEnabled()) return
@@ -509,6 +509,7 @@ def getLANStateDisplay(device) {
                            stateMap.containsKey("thermostatMode") ||
                            stateMap.containsKey("thermostatOperatingState")
         if (isThermostat) {
+            if (debugEnabled()) log.debug "getLANStateDisplay: ${device.displayName} matched as thermostat"
             def opState = stateMap["thermostatOperatingState"]
             def mode    = stateMap["thermostatMode"]
             def temp    = stateMap["temperature"]
@@ -541,6 +542,7 @@ def getLANStateDisplay(device) {
                       stateMap.containsKey("mediaPlaybackStatus") ||
                       stateMap.containsKey("transportStatus")
         if (isMedia) {
+            if (debugEnabled()) log.debug "getLANStateDisplay: ${device.displayName} matched as media"
             def playback = stateMap["mediaPlaybackStatus"] ?:
                            stateMap["transportStatus"] ?:
                            stateMap["status"]
@@ -564,6 +566,7 @@ def getLANStateDisplay(device) {
                    stateMap.containsKey("chargingState") ||
                    stateMap.containsKey("batteryLevel")
         if (isEV) {
+            if (debugEnabled()) log.debug "getLANStateDisplay: ${device.displayName} matched as EV"
             def charging = stateMap["chargingState"]
             def battery  = stateMap["battery"] ?: stateMap["batteryLevel"]
             if (charging) {
@@ -608,6 +611,7 @@ def getLANStateDisplay(device) {
         // ── Generic ranked fallback ───────────────────────────────
         // Try each attribute in priority order — return first non-null,
         // non-numeric, non-trivial value found.
+        if (debugEnabled()) log.debug "getLANStateDisplay: ${device.displayName} — available attrs: ${stateMap.keySet().sort().join(', ')}"
         def rankedAttrs = [
             // Status-type strings that are meaningful on their own
             "status", "deviceStatus", "healthStatus", "connectionStatus",
@@ -632,8 +636,10 @@ def getLANStateDisplay(device) {
                                    "alarm", "wet", "detected", "open"]
             def color    = isAlert  ? "#dc2626" :
                            isActive ? "#1a73e8" : "#94a3b8"
+            if (debugEnabled()) log.debug "getLANStateDisplay: ${device.displayName} matched attr '${attr}' = '${val}'"
             return [label: val.capitalize(), color: color, isAlert: isAlert, type: attr]
         }
+        if (debugEnabled()) log.debug "getLANStateDisplay: ${device.displayName} — no useful attribute found"
 
     } catch (e) {
         if (debugEnabled()) log.debug "getLANStateDisplay error for ${device.displayName}: ${e.message}"
@@ -653,9 +659,8 @@ def updateStateTracking(device) {
 
         if (!tracked) {
             state.stateHistory[id] = [
-                lastValue:       currentVal,
-                lastChanged:     now(),
-                unchangedSince:  now()
+                lastValue:   currentVal,
+                lastChanged: now()
             ]
             return
         }
@@ -663,9 +668,8 @@ def updateStateTracking(device) {
         if (tracked.lastValue != currentVal) {
             // State changed — reset the clock
             state.stateHistory[id] = [
-                lastValue:       currentVal,
-                lastChanged:     now(),
-                unchangedSince:  now()
+                lastValue:   currentVal,
+                lastChanged: now()
             ]
             if (debugEnabled()) log.debug "${device.displayName}: state changed to ${currentVal}"
         }
@@ -961,11 +965,31 @@ def scanAllDevices() {
     if (!devList) return
     if (debugEnabled()) log.debug "Running scan for ${devList.size()} device(s)"
 
+    // Purge orphaned state entries for devices no longer in the monitored list
+    def activeIds = devList.collect { it.id as String } as Set
+    ["history", "health", "verifying", "stateHistory"].each { stateKey ->
+        def map = state[stateKey]
+        if (map instanceof Map) {
+            def stale = map.keySet().findAll { !(it in activeIds) }
+            if (stale) {
+                stale.each { map.remove(it) }
+                state[stateKey] = map
+                if (debugEnabled()) log.debug "Purged ${stale.size()} orphaned ${stateKey} entr${stale.size() == 1 ? 'y' : 'ies'}: ${stale.join(', ')}"
+            }
+        }
+    }
+    // Also purge orphaned snooze entries
+    if (state.snoozed instanceof Map) {
+        def staleSnoozed = state.snoozed.keySet().findAll { !(it in activeIds) }
+        if (staleSnoozed) {
+            staleSnoozed.each { state.snoozed.remove(it) }
+            if (debugEnabled()) log.debug "Purged ${staleSnoozed.size()} orphaned snooze entr${staleSnoozed.size() == 1 ? 'y' : 'ies'}"
+        }
+    }
+
     def intervalStr     = settings?.scanInterval ?: "3"
     def intervalMinutes = (intervalStr.toFloat() * 60).toInteger()
     def minGate         = Math.min(intervalMinutes * 0.5, 30.0)
-
-    if (state.stateHistory == null) state.stateHistory = [:]
 
     devList.each { device ->
         try {
@@ -979,15 +1003,12 @@ def scanAllDevices() {
 
             if (!data) {
                 state.history[id] = [
-                    lastSeen:       lastSeen,
-                    lastCheckin:    lastSeen,
-                    samples:        [],
-                    avgInterval:    null,
-                    userInterval:   null,
-                    missedCheckins: 0,
-                    protocol:       protocol
+                    lastSeen:     lastSeen,
+                    samples:      [],
+                    avgInterval:  null,
+                    userInterval: null,
+                    protocol:     protocol
                 ]
-                state.history = state.history
                 state.health[id] = "Pending"
             } else {
                 def prevLastSeen = data.lastSeen ?: lastSeen
@@ -1008,17 +1029,13 @@ def scanAllDevices() {
                                 data.avgInterval = data.samples.sum() / data.samples.size()
                             }
                         }
-                        data.lastSeen    = lastSeen
-                        data.lastCheckin = lastSeen
+                        data.lastSeen = lastSeen
                     }
                 }
                 data.protocol = protocol
                 state.history[id] = data
-                state.history = state.history
                 updateHealth(device)
             }
-
-            // NEW: update state tracking every scan
             updateStateTracking(device)
 
         } catch (e) {
@@ -1256,8 +1273,6 @@ def activitySummaryPage() {
                 def healthOrder = snoozed ? 99 :
                                   (h == "Offline" ? 1 : h == "Poor" ? 2 : h == "Fair" ? 3 :
                                    h == "Good" ? 4 : h == "Excellent" ? 5 : 6)
-
-                // NEW: current state display
                 def stateInfo    = getCurrentStateDisplay(device)
                 def stateDisplay = "—"
                 def stateOrder   = 9
@@ -1638,8 +1653,7 @@ def forceScanPage() {
             def intervalStr     = settings?.scanInterval ?: "3"
             def intervalMinutes = (intervalStr.toFloat() * 60).toInteger()
             def minGate         = Math.min(intervalMinutes * 0.5, 30.0).toInteger()
-            paragraph "✅ Device scan complete — ${devList.size()} device(s) checked. " +
-                      "Return to Device Activity Summary to see updated values.<br><br>" +
+            paragraph "✅ Scan complete — ${devList.size()} device(s) checked. Check-in history, health scores, and device states have all been updated.<br><br>" +
                       "<b>Note:</b> A new check-in sample is only recorded if at least <b>${minGate} minutes</b> " +
                       "have passed since the last recorded activity."
         }
@@ -1694,15 +1708,12 @@ def resetHistoryConfirmPage() {
                     def device = devList.find { it.id == deviceId }
                     if (device) {
                         state.history[device.id] = [
-                            lastSeen:       now(),
-                            lastCheckin:    now(),
-                            samples:        [],
-                            avgInterval:    null,
-                            userInterval:   state.history?.get(device.id)?.userInterval,
-                            missedCheckins: 0,
-                            protocol:       getProtocol(device)
+                            lastSeen:     now(),
+                            samples:      [],
+                            avgInterval:  null,
+                            userInterval: state.history?.get(device.id)?.userInterval,
+                            protocol:     getProtocol(device)
                         ]
-                        state.history = state.history
                         state.health[device.id]       = "Pending"
                         state.stateHistory[device.id] = null
                         resetNames << device.displayName
