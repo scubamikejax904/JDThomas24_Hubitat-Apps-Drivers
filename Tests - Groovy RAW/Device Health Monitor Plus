@@ -1,0 +1,1609 @@
+definition(
+    name: "Device Health Monitor Plus",
+    namespace: "jdthomas24",
+    author: "jdthomas24",
+    description: "Monitor device check-in health across Zigbee, Z-Wave, Matter, Hub Mesh, LAN, Virtual and Hub Variable — learns each device's normal pattern and alerts you when something goes quiet. Plus: ON/OFF state column, stale state detection, Hub Mesh hub grouping, and richer notifications.",
+    category: "Convenience",
+    importUrl: "",
+    iconUrl: "",
+    iconX2Url: "",
+    version: "1.0.0-plus",
+    doNotFocus: true
+)
+
+preferences {
+    page(name: "mainPage")
+    page(name: "activitySummaryPage")
+    page(name: "problemDevicesPage")
+    page(name: "sendNotificationPage")
+    page(name: "forceScanPage")
+    page(name: "resetHistoryPage")
+    page(name: "resetHistoryConfirmPage")
+    page(name: "snoozeManagePage")
+    page(name: "protocolOverridePage")
+    page(name: "hubMeshSummaryPage")
+    page(name: "infoPage")
+}
+
+// ============================================================
+// ===================== LIFECYCLE ===========================
+// ============================================================
+def installed() {
+    if (debugEnabled()) log.debug "Device Health Monitor Plus installed"
+    applyCustomLabel()
+    initialize()
+}
+
+def updated() {
+    if (debugEnabled()) log.debug "Device Health Monitor Plus updated"
+    applyCustomLabel()
+    unschedule()
+    unsubscribe()
+
+    if (settings?.enableSnooze == false) {
+        state.snoozed = [:]
+        if (debugEnabled()) log.debug "Snooze disabled — all active snoozes cleared"
+    }
+
+    initialize()
+    if (debugEnabled()) runIn(1800, disableDebugLogging)
+}
+
+def initialize() {
+    if (debugEnabled()) log.debug "Device Health Monitor Plus initializing"
+    if (state.history       == null) state.history       = [:]
+    if (state.health        == null) state.health        = [:]
+    if (state.snoozed       == null) state.snoozed       = [:]
+    if (state.verifying     == null) state.verifying     = [:]
+    if (state.stateHistory  == null) state.stateHistory  = [:]   // NEW: tracks last attribute change
+    scheduleScanInterval()
+    scheduleReportFrequency()
+    if (debugEnabled()) log.debug "Monitoring ${getAllMonitoredDevices().findAll { getProtocol(it) != 'Unknown' }.size()} device(s)"
+    runIn(5, scanAllDevices)
+}
+
+def debugEnabled() { return settings?.debugMode == true }
+
+def disableDebugLogging() {
+    log.info "Device Health Monitor Plus: auto-disabling debug logging after 30 minutes"
+    app.updateSetting("debugMode", [value: false, type: "bool"])
+}
+
+def applyCustomLabel() {
+    if (settings?.customAppName) {
+        if (app.label != settings?.customAppName) {
+            app.updateLabel(settings.customAppName)
+        }
+    }
+}
+
+// ============================================================
+// ===================== SNOOZE ==============================
+// ============================================================
+def snoozeEnabled() { return settings?.enableSnooze != false }
+
+def snoozeDevice(deviceId) {
+    if (!snoozeEnabled()) return
+    def hours = (settings?.snoozeDurationHours ?: 24).toInteger()
+    def until = now() + (hours * 3600000)
+    if (!state.snoozed) state.snoozed = [:]
+    state.snoozed[deviceId] = until
+}
+
+def unsnoozeDevice(deviceId) { state.snoozed?.remove(deviceId) }
+
+def isDeviceSnoozed(deviceId) {
+    if (!snoozeEnabled()) return false
+    def until = state.snoozed?.get(deviceId)
+    if (!until) return false
+    if (until >= now()) return true
+    state.snoozed.remove(deviceId)
+    return false
+}
+
+def getSnoozedHoursRemaining(deviceId) {
+    def until = state.snoozed?.get(deviceId)
+    if (!until) return 0
+    return Math.ceil((until - now()) / 3600000).toInteger()
+}
+
+def formatSnoozeRemaining(deviceId) {
+    def until   = state.snoozed?.get(deviceId)
+    if (!until) return "expired"
+    def msLeft  = until - now()
+    def days    = (msLeft / 86400000).toInteger()
+    def hours   = ((msLeft % 86400000) / 3600000).toInteger()
+    def minutes = ((msLeft % 3600000) / 60000).toInteger()
+    if (days >= 1)  return "${days}d ${hours}h remaining"
+    if (hours >= 1) return "${hours}h ${minutes}m remaining"
+    return "${minutes}m remaining"
+}
+
+// ============================================================
+// ===================== PROTOCOL DETECTION ==================
+// ============================================================
+def getAllMonitoredDevices() { return monitoredDevices ?: [] }
+
+def getRawProtocol(device) {
+    try {
+        def driverName = (device.typeName ?: "").toLowerCase()
+        if (driverName.contains("hub variable") || driverName.contains("variable connector")) return "Hub Variable"
+        if (driverName.contains("virtual")) return "Virtual"
+        def devData = device.properties
+        if (devData?.controllerType == "LNK") {
+            def encoding = device.getDataValue("Encoding")
+            if (encoding?.toLowerCase() == "zigbee")                          return "Hub Mesh (Zigbee)"
+            if (encoding?.toLowerCase() == "z-wave")                          return "Hub Mesh (Z-Wave)"
+            if (device.getDataValue("In Clusters")  != null)                  return "Hub Mesh (Zigbee)"
+            if (device.getDataValue("inClusters")   != null)                  return "Hub Mesh (Zigbee)"
+            if (device.getDataValue("Out Clusters") != null)                  return "Hub Mesh (Zigbee)"
+            if (device.getDataValue("outClusters")  != null)                  return "Hub Mesh (Zigbee)"
+            if (device.getDataValue("zigbeeId")     != null)                  return "Hub Mesh (Zigbee)"
+            if (device.getDataValue("zigbeeNodeType") != null)                return "Hub Mesh (Zigbee)"
+            if (device.getDataValue("zwaveSecurePairingComplete") != null)    return "Hub Mesh (Z-Wave)"
+            if (device.getDataValue("secureInClusters")           != null)    return "Hub Mesh (Z-Wave)"
+            if (device.getDataValue("Zw Node Info")               != null)    return "Hub Mesh (Z-Wave)"
+            if (driverName.contains("zigbee"))                                return "Hub Mesh (Zigbee)"
+            if (driverName.contains("z-wave") || driverName.contains("zwave")) return "Hub Mesh (Z-Wave)"
+            if (driverName.contains("matter"))                                return "Hub Mesh (Matter)"
+            def manufacturer = (device.getDataValue("Manufacturer") ?: "").toLowerCase()
+            if (manufacturer in ["centralite", "lumi", "ikea", "sengled",
+                                 "osram", "philips", "samsung", "smartthings",
+                                 "sonoff", "tuya", "third reality"]) {
+                return "Hub Mesh (Zigbee)"
+            }
+            return "Hub Mesh"
+        }
+        if (devData?.controllerType == "ZGB") return "Zigbee"
+        if (devData?.controllerType == "ZWV") return "Z-Wave"
+        if (devData?.controllerType == "MAT") return "Matter"
+        if (device.getDataValue("Endpoint Id")                != null) return "Zigbee"
+        if (device.getDataValue("endpointId")                 != null) return "Zigbee"
+        if (device.getDataValue("zigbeeNodeType")             != null) return "Zigbee"
+        if (device.getDataValue("zigbeeId")                   != null) return "Zigbee"
+        if (device.getDataValue("In Clusters")                != null) return "Z-Wave"
+        if (device.getDataValue("inClusters")                 != null) return "Z-Wave"
+        if (device.getDataValue("zwaveSecurePairingComplete") != null) return "Z-Wave"
+        if (device.getDataValue("secureInClusters")           != null) return "Z-Wave"
+        if (device.getDataValue("Zw Node Info")               != null) return "Z-Wave"
+        return "LAN"
+    } catch (e) {
+        if (debugEnabled()) log.debug "getRawProtocol error for ${device.displayName}: ${e.message}"
+    }
+    return "Unknown"
+}
+
+def getProtocol(device) {
+    try {
+        def override = settings["protocolOverride_${device.id}"]
+        if (override && override != "" && override != "Auto-detect") return override
+        return getRawProtocol(device)
+    } catch (e) {
+        if (debugEnabled()) log.debug "getProtocol error for ${device.displayName}: ${e.message}"
+    }
+    return "Unknown"
+}
+
+def getProtocolColor(protocol) {
+    switch (protocol) {
+        case "Zigbee":             return "#3b82f6"
+        case "Hub Mesh (Zigbee)":  return "#3b82f6"
+        case "Z-Wave":             return "#8b5cf6"
+        case "Hub Mesh (Z-Wave)":  return "#8b5cf6"
+        case "Matter":             return "#f97316"
+        case "Hub Mesh (Matter)":  return "#f97316"
+        case "Hub Mesh":           return "#06b6d4"
+        case "LAN":                return "#14b8a6"
+        case "Virtual":            return "#ec4899"
+        case "Hub Variable":       return "#eab308"
+        case "Bluetooth":          return "#06b6d4"
+        default:                   return "#94a3b8"
+    }
+}
+
+def isUnresolvableProtocol(protocol) {
+    return protocol in ["Hub Mesh", "LAN", "Virtual", "Hub Variable"]
+}
+
+def usesFilteredSampling(protocol) {
+    return protocol in ["Virtual", "Hub Variable"]
+}
+
+def isHueDevice(device) {
+    def dn  = (device.typeName ?: "").toLowerCase()
+    def dni = (device.deviceNetworkId ?: "").toLowerCase()
+    if (dni.startsWith("hue/")) return true
+    if (dn.startsWith("cocohue")) return true
+    if (dn.contains("huebridgebulb") || dn.contains("huebridge")) return true
+    return false
+}
+
+def findHueBridge() {
+    return getAllMonitoredDevices().find { device ->
+        def dn  = (device.typeName ?: "").toLowerCase()
+        def dni = (device.deviceNetworkId ?: "").toLowerCase()
+        (dni.startsWith("hue/") && dn.contains("bridge")) ||
+        dn.contains("cocohue bridge") ||
+        (dn.contains("huebridge") && !dn.contains("bulb"))
+    }
+}
+
+def isModeOK() {
+    if (!settings?.enableModeRestriction) return true
+    if (!settings?.restrictedModes) return true
+    return settings.restrictedModes.contains(location.mode)
+}
+
+// ============================================================
+// ===================== LOW ACTIVITY ========================
+// ============================================================
+def isLowActivity(deviceId) {
+    def data = state.history?.get(deviceId)
+    if (!data) return false
+    def samples  = data?.samples?.size() ?: 0
+    def lastSeen = data?.lastSeen ?: now()
+    def ageMs    = now() - lastSeen
+    def ageDays  = ageMs / (1000.0 * 60 * 60 * 24)
+    return (ageDays >= 7 && samples < 3)
+}
+
+// ============================================================
+// ===================== NEW: STATE TRACKING =================
+// ============================================================
+
+// Returns the current switch/contact/motion/lock state for display
+// Returns null if device has no relevant attributes
+def getCurrentStateDisplay(device) {
+    try {
+        def sw = device.currentValue("switch")
+        if (sw != null) {
+            def isOn = sw.toString().toLowerCase() == "on"
+            return [value: sw.toString().toUpperCase(), isOn: isOn, type: "switch"]
+        }
+        def contact = device.currentValue("contact")
+        if (contact != null) return [value: contact.toString(), isOn: contact == "open", type: "contact"]
+        def motion = device.currentValue("motion")
+        if (motion != null) return [value: motion.toString(), isOn: motion == "active", type: "motion"]
+        def lock = device.currentValue("lock")
+        if (lock != null) return [value: lock.toString(), isOn: lock == "unlocked", type: "lock"]
+        def presence = device.currentValue("presence")
+        if (presence != null) return [value: presence.toString(), isOn: presence == "present", type: "presence"]
+    } catch (e) {
+        if (debugEnabled()) log.debug "getCurrentStateDisplay error for ${device.displayName}: ${e.message}"
+    }
+    return null
+}
+
+// Tracks last time device state actually changed and detects stale state
+def updateStateTracking(device) {
+    try {
+        def id         = device.id
+        def stateInfo  = getCurrentStateDisplay(device)
+        if (!stateInfo) return
+
+        def currentVal = stateInfo.value
+        def tracked    = state.stateHistory[id]
+
+        if (!tracked) {
+            state.stateHistory[id] = [
+                lastValue:       currentVal,
+                lastChanged:     now(),
+                unchangedSince:  now()
+            ]
+            return
+        }
+
+        if (tracked.lastValue != currentVal) {
+            // State changed — reset the stale clock
+            state.stateHistory[id] = [
+                lastValue:       currentVal,
+                lastChanged:     now(),
+                unchangedSince:  now()
+            ]
+            if (debugEnabled()) log.debug "${device.displayName}: state changed to ${currentVal}"
+        }
+        // If same value, lastChanged stays as-is (we don't update it)
+    } catch (e) {
+        if (debugEnabled()) log.debug "updateStateTracking error for ${device.displayName}: ${e.message}"
+    }
+}
+
+// Returns true if device state has been stuck for stale threshold
+def isStateStale(deviceId) {
+    if (settings?.enableStaleDetection == false) return false
+    def tracked = state.stateHistory?.get(deviceId)
+    if (!tracked) return false
+    def staleHours   = (settings?.staleThresholdHours ?: 48).toDouble()
+    def staleMs      = staleHours * 3600000
+    def unchangedMs  = now() - (tracked.unchangedSince ?: now())
+    return unchangedMs >= staleMs
+}
+
+def getStateStaleAge(deviceId) {
+    def tracked = state.stateHistory?.get(deviceId)
+    if (!tracked) return null
+    def ms = now() - (tracked.unchangedSince ?: now())
+    return formatTimeAgo(now() - ms)
+}
+
+// ============================================================
+// ===================== HUB MESH GROUPING ===================
+// ============================================================
+
+// Attempt to identify the source hub label for Hub Mesh devices.
+// Hubitat does not expose the source hub directly, so we group by
+// the hub data value if present, then fall back to "Remote Hub".
+def getHubMeshSourceHub(device) {
+    try {
+        def hubName = device.getDataValue("hubName") ?: device.getDataValue("HubName")
+        if (hubName) return hubName
+        // Some implementations store it in the device network ID prefix
+        def dni = device.deviceNetworkId ?: ""
+        if (dni.contains(":")) {
+            def prefix = dni.split(":")[0]
+            if (prefix && prefix.length() > 2 && !prefix.matches("[0-9A-Fa-f]+")) return prefix
+        }
+    } catch (e) { }
+    return "Remote Hub"
+}
+
+// Build a summary map of Hub Mesh devices grouped by source hub
+def buildHubMeshSummary() {
+    def devList  = getAllMonitoredDevices().findAll { p ->
+        def proto = getProtocol(p)
+        proto.startsWith("Hub Mesh")
+    }
+    def groups = [:]
+    devList.each { device ->
+        def srcHub = getHubMeshSourceHub(device)
+        if (!groups[srcHub]) groups[srcHub] = [total: 0, offline: 0, poor: 0, fair: 0, good: 0, excellent: 0, pending: 0]
+        groups[srcHub].total++
+        def h = state.health?.get(device.id) ?: "Pending"
+        switch (h) {
+            case "Offline":   groups[srcHub].offline++;   break
+            case "Poor":      groups[srcHub].poor++;      break
+            case "Fair":      groups[srcHub].fair++;      break
+            case "Good":      groups[srcHub].good++;      break
+            case "Excellent": groups[srcHub].excellent++; break
+            default:          groups[srcHub].pending++;   break
+        }
+    }
+    return groups
+}
+
+// ============================================================
+// ===================== MAIN PAGE ===========================
+// ============================================================
+def mainPage() {
+    applyCustomLabel()
+    dynamicPage(name: "mainPage", title: "", install: true, uninstall: true) {
+
+        def hasCustomName = settings?.customAppName?.trim()
+        def currentLabel  = app.label ?: "Device Health Monitor Plus"
+        def appNameTitle  = "<b>App Display Name</b> — <span style='color:blue;'>${currentLabel}</span>"
+        section(appNameTitle, hideable: true, hidden: true) {
+            paragraph "Enter a name to rename this app in your Hubitat app list."
+            input "customAppName", "text", title: "Custom App Name", required: false
+        }
+
+        def devicesSelected = (monitoredDevices?.size() ?: 0) > 0
+        def devSectionTitle = devicesSelected
+            ? "<b>Monitored Devices</b> — <span style='color:blue;'>${monitoredDevices.size()} selected</span>"
+            : "<b>Monitored Devices</b>"
+
+        section(devSectionTitle, hideable: true, hidden: devicesSelected) {
+            paragraph "<b>Select the devices you want to monitor.</b> Protocol is detected automatically."
+            paragraph "<span style='color:red; font-weight:bold;'>IMPORTANT: After selecting devices, you MUST click 'Done' before viewing reports.</span>"
+            input "monitoredDevices", "capability.*",
+                  title: "Select devices to monitor",
+                  multiple: true, required: false, submitOnChange: true
+        }
+
+        if (devicesSelected) {
+            def allSelected       = monitoredDevices
+            def zigbeeCount       = allSelected.count { getProtocol(it) in ["Zigbee", "Hub Mesh (Zigbee)"] }
+            def zwaveCount        = allSelected.count { getProtocol(it) in ["Z-Wave", "Hub Mesh (Z-Wave)"] }
+            def matterCount       = allSelected.count { getProtocol(it) in ["Matter", "Hub Mesh (Matter)"] }
+            def hubMeshCount      = allSelected.count { getProtocol(it) == "Hub Mesh" }
+            def lanCount          = allSelected.count { getProtocol(it) == "LAN" }
+            def virtualCount      = allSelected.count { getProtocol(it) == "Virtual" }
+            def hubVarCount       = allSelected.count { getProtocol(it) == "Hub Variable" }
+            def unknownCount      = allSelected.count { getProtocol(it) == "Unknown" }
+            def unresolvableCount = allSelected.count { isUnresolvableProtocol(getRawProtocol(it)) }
+            section("") {
+                paragraph "Zigbee: <b><span style='color:#3b82f6;'>${zigbeeCount}</span></b> | " +
+                          "Z-Wave: <b><span style='color:#8b5cf6;'>${zwaveCount}</span></b> | " +
+                          "Matter: <b><span style='color:#f97316;'>${matterCount}</span></b> | " +
+                          "Hub Mesh: <b><span style='color:#06b6d4;'>${hubMeshCount}</span></b> | " +
+                          "LAN: <b><span style='color:#14b8a6;'>${lanCount}</span></b> | " +
+                          "Virtual: <b><span style='color:#ec4899;'>${virtualCount}</span></b> | " +
+                          "Hub Variable: <b><span style='color:#eab308;'>${hubVarCount}</span></b>" +
+                          (unknownCount > 0 ? " | <span style='color:orange;'>Unknown: <b>${unknownCount}</b> (skipped)</span>" : "") +
+                          (unresolvableCount > 0 ? "<br><span style='color:#94a3b8;'>⚠ ${unresolvableCount} device(s) showing as Hub Mesh, LAN, Virtual, or Hub Variable — tap <b>Protocol Overrides</b> to review or correct.</span>" : "") +
+                          (allSelected.any { isHueDevice(it) } && !findHueBridge() ? "<br><span style='color:#1a73e8;'>ℹ️ Hue devices detected — add your <b>Hue Bridge</b> to monitored devices to enable Poor/Offline verification.</span>" : "")
+            }
+        }
+
+        if (!devicesSelected) {
+            section("") {
+                paragraph "<span style='color:red; font-weight:bold;'>⚠ No devices selected. Select devices above to begin monitoring.</span>"
+            }
+        }
+
+        // ── Monitoring Settings ──────────────────────────────────
+        def scanIntervalLabel = ["0.5": "Every 30 min", "1": "Hourly", "3": "Every 3 h", "6": "Every 6 h"]
+        def currentScan      = scanIntervalLabel[settings?.scanInterval ?: "3"] ?: "Every 3 h"
+        def currentThreshold = settings?.offlineThresholdHours ?: 72
+        def snoozeOn         = snoozeEnabled()
+        def currentSnooze    = settings?.snoozeDurationHours ?: 24
+        def modeOn           = settings?.enableModeRestriction == true
+        def modeLabel        = modeOn ? (settings?.restrictedModes ? settings.restrictedModes.join(", ") : "none set") : "off"
+        def snoozedDeviceCount = state.snoozed?.count { id, until -> until >= now() } ?: 0
+        def snoozeLabel = !snoozeOn ? "<span style='color:red;'>off</span>" :
+                          snoozedDeviceCount > 0 ? "<span style='color:orange;'>${snoozedDeviceCount} snoozed</span>" :
+                          "<span style='color:blue;'>${currentSnooze}h</span>"
+        def staleOn    = settings?.enableStaleDetection != false
+        def staleHours = settings?.staleThresholdHours ?: 48
+
+        def monitoringTitle = "<b>Monitoring Settings</b> — " +
+            "Scan: <span style='color:blue;'>${currentScan}</span> | " +
+            "Offline after: <span style='color:blue;'>${currentThreshold}h</span> | " +
+            "Snooze: ${snoozeLabel} | " +
+            "Stale: <span style='color:${staleOn ? "blue" : "red"};'>${staleOn ? staleHours + "h" : "off"}</span> | " +
+            "Mode: <span style='color:${modeOn ? "blue" : "red"};'>${modeOn ? modeLabel : "off"}</span>"
+
+        section(monitoringTitle, hideable: true, hidden: true) {
+            paragraph "<b>Scan Interval</b> — how often device activity is checked and health ratings are updated."
+            input "scanInterval", "enum",
+                  title: "Scan Frequency:",
+                  options: ["0.5": "Every 30 Minutes", "1": "Hourly", "3": "Every 3 Hours", "6": "Every 6 Hours"],
+                  defaultValue: "3", submitOnChange: true
+
+            paragraph "<b>Offline after inactivity (hours)</b> — devices with no activity beyond this threshold are marked Offline."
+            input "offlineThresholdHours", "number", title: "Offline after inactivity (hours):",
+                  defaultValue: 72, required: true, submitOnChange: true
+
+            paragraph "<b>Snooze</b> — enable or disable snooze globally."
+            input "enableSnooze", "bool", title: "Enable snooze", defaultValue: true, submitOnChange: true
+            if (snoozeEnabled()) {
+                input "snoozeDurationHours", "number", title: "Snooze duration (hours):",
+                      defaultValue: 24, required: true, submitOnChange: true
+            }
+
+            paragraph "<b>Stale State Detection</b> — flag devices whose reported state (ON/OFF/motion/contact) has not changed for an extended period. Useful for spotting stuck sensors or devices that stopped reporting state changes while still appearing healthy."
+            input "enableStaleDetection", "bool", title: "Enable stale state detection", defaultValue: true, submitOnChange: true
+            if (settings?.enableStaleDetection != false) {
+                input "staleThresholdHours", "number",
+                      title: "Flag as stale after state unchanged for (hours):",
+                      defaultValue: 48, required: true, submitOnChange: true
+            }
+
+            paragraph "<b>Mode Restriction</b> — optionally restrict notifications to specific hub modes."
+            input "enableModeRestriction", "bool", title: "Enable mode restriction for notifications",
+                  defaultValue: false, submitOnChange: true
+            if (settings?.enableModeRestriction) {
+                input "restrictedModes", "mode",
+                      title: "Only send notifications when hub is in one of these modes:",
+                      multiple: true, required: false
+            }
+        }
+
+        // ── Notifications ────────────────────────────────────────
+        def notifOn           = settings?.enablePush != false
+        def notifSectionTitle = "<b>Notifications</b> — <span style='color:${notifOn ? "blue" : "red"};'>${notifOn ? "ON" : "OFF"}</span>"
+        section(notifSectionTitle, hideable: true, hidden: true) {
+            input "enablePush", "bool", title: "Enable notifications", defaultValue: true, submitOnChange: true
+            if (settings?.enablePush != false) {
+                input "reportFrequency", "enum",
+                      title: "Notification Frequency:",
+                      options: ["daily": "Daily", "every2": "Every 2 Days", "every3": "Every 3 Days", "weekly": "Weekly"],
+                      defaultValue: "daily"
+                input "summaryTime", "time", title: "Notification Time:", required: false
+                input "notifyDevices", "capability.notification",
+                      title: "Notification devices", multiple: true, required: false, submitOnChange: true
+                input "enablePushover", "bool", title: "⚙️ Enable Pushover Markup", defaultValue: false
+                input "pushoverDevices", "capability.notification",
+                      title: "Pushover notification devices", multiple: true, required: false, submitOnChange: true
+                input "pushoverPrefix", "text",
+                      title: "Pushover tags",
+                      description: "e.g. [H][TITLE=Device Health Report][HTML][SELFDESTRUCT=43200]",
+                      required: false
+
+                paragraph "<b>Report Sections:</b>"
+                input "notifyOffline",      "bool", title: "💀 Include Offline devices",              defaultValue: true
+                input "notifyPoor",         "bool", title: "🔴 Include Poor health devices",           defaultValue: true
+                input "notifyFair",         "bool", title: "🟠 Include Fair health devices",           defaultValue: true
+                input "notifyGood",         "bool", title: "🟢 Include Good health devices",           defaultValue: false
+                input "notifyExcellent",    "bool", title: "🟢 Include Excellent health devices",      defaultValue: false
+                input "notifyStale",        "bool", title: "🔁 Include Stale State devices",           defaultValue: true
+                input "suppressEmptyReport","bool", title: "🔕 Don't send notification if nothing to report", defaultValue: false
+
+                paragraph "<b>Send notification now:</b>"
+                href(name: "toSendNotification", page: "sendNotificationPage", title: "📤 Send Notification Now")
+            }
+        }
+
+        section("<b>Reports:</b>") {
+            href(name: "toActivitySummary", page: "activitySummaryPage",
+                 title: "<b>Device Activity Summary</b>",
+                 description: "All devices, health status, current state")
+            href(name: "toProblemDevices", page: "problemDevicesPage",
+                 title: "<b>⚠️ Problem Devices</b>",
+                 description: "Offline, Poor, Fair, and Stale devices")
+            href(name: "toHubMeshSummary", page: "hubMeshSummaryPage",
+                 title: "<b>🔗 Hub Mesh Overview</b>",
+                 description: "Health summary grouped by source hub")
+            if (snoozeEnabled()) {
+                href(name: "toSnoozeManage", page: "snoozeManagePage",
+                     title: "<b>😴 Manage Snoozed Devices</b>",
+                     description: "Snooze or clear active snoozes")
+            }
+            href(name: "toProtocolOverride", page: "protocolOverridePage",
+                 title: "<b>🔧 Protocol Overrides</b>",
+                 description: "Fix misdetected device protocols")
+        }
+
+        section("<b>Help & Support</b>") {
+            href(name: "toInfoPage", page: "infoPage",
+                 title: "📖 App Guide & Reference",
+                 description: "Health scoring, state tracking, stale detection, and troubleshooting explained")
+            href url: "https://community.hubitat.com/t/beta-device-health-monitor/163229",
+                 style: "external",
+                 title: "💬 Hubitat Community Thread",
+                 description: "Questions, feedback, and release notes"
+        }
+
+        section("<b>Diagnostics</b>") {
+            input "debugMode", "bool",
+                  title: "Debug Logging (auto-disables after 30 min)",
+                  defaultValue: false, submitOnChange: true
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor Plus v1.0.0-plus</span>"
+        }
+    }
+}
+
+// ============================================================
+// ===================== REPORT SCHEDULING ==================
+// ============================================================
+def scheduleReportFrequency() {
+    unschedule("reportScheduler")
+    if (!summaryTime) return
+    schedule(summaryTime, reportScheduler)
+}
+
+def scheduleScanInterval() {
+    unschedule("scanAllDevices")
+    def intervalStr = settings?.scanInterval ?: "3"
+    def cronExpr = ""
+    switch (intervalStr) {
+        case "0.5": cronExpr = "0 */30 * * * ?"; break
+        case "1":   cronExpr = "0 0 * * * ?";    break
+        case "3":   cronExpr = "0 0 */3 * * ?";  break
+        case "6":   cronExpr = "0 0 */6 * * ?";  break
+        default:    cronExpr = "0 0 */3 * * ?";  break
+    }
+    schedule(cronExpr, scanAllDevices)
+}
+
+def reportScheduler() {
+    switch (reportFrequency) {
+        case "daily":  scheduledSummary(); break
+        case "every2": if (shouldRunEveryXDays(2)) scheduledSummary(); break
+        case "every3": if (shouldRunEveryXDays(3)) scheduledSummary(); break
+        case "weekly": if (shouldRunWeekly())       scheduledSummary(); break
+    }
+}
+
+def shouldRunEveryXDays(daysInterval) {
+    def today   = new Date().clearTime()
+    def lastRun = state.lastReportRun ? new Date(state.lastReportRun).clearTime() : null
+    if (!lastRun) { state.lastReportRun = now(); return true }
+    def diff = (today.time - lastRun.time) / (1000 * 60 * 60 * 24)
+    if (diff >= daysInterval) { state.lastReportRun = now(); return true }
+    return false
+}
+
+def shouldRunWeekly() {
+    def today   = new Date()
+    def lastRun = state.lastReportRun ? new Date(state.lastReportRun) : null
+    if (!lastRun) { state.lastReportRun = now(); return true }
+    if (today.format("u") == "1") {
+        def diff = (today.time - lastRun.time) / (1000 * 60 * 60 * 24)
+        if (diff >= 7) { state.lastReportRun = now(); return true }
+    }
+    return false
+}
+
+// ============================================================
+// ===================== SCAN ================================
+// ============================================================
+def scanAllDevices() {
+    def devList = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
+    if (!devList) return
+    if (debugEnabled()) log.debug "Running scan for ${devList.size()} device(s)"
+
+    def intervalStr     = settings?.scanInterval ?: "3"
+    def intervalMinutes = (intervalStr.toFloat() * 60).toInteger()
+    def minGate         = Math.min(intervalMinutes * 0.5, 30.0)
+
+    if (state.stateHistory == null) state.stateHistory = [:]
+
+    devList.each { device ->
+        try {
+            def id       = device.id
+            def data     = state.history[id]
+            def protocol = getProtocol(device)
+            def filtered = usesFilteredSampling(protocol)
+
+            def lastActivity = device.getLastActivity()
+            def lastSeen     = lastActivity ? safeTime(lastActivity) : now()
+
+            if (!data) {
+                state.history[id] = [
+                    lastSeen:       lastSeen,
+                    lastCheckin:    lastSeen,
+                    samples:        [],
+                    avgInterval:    null,
+                    userInterval:   null,
+                    missedCheckins: 0,
+                    protocol:       protocol
+                ]
+                state.history = state.history
+                state.health[id] = "Pending"
+            } else {
+                def prevLastSeen = data.lastSeen ?: lastSeen
+                if (lastSeen > prevLastSeen) {
+                    def elapsed = (lastSeen - prevLastSeen) / (1000 * 60)
+                    if (elapsed >= minGate) {
+                        def recordSample = true
+                        if (filtered) {
+                            recordSample = elapsed <= (intervalMinutes * 1.5)
+                        }
+                        if (recordSample) {
+                            def alpha      = 0.3
+                            def prevSmooth = (data.samples && data.samples.size() > 0) ? data.samples[-1] : elapsed
+                            def smoothed   = alpha * elapsed + (1 - alpha) * prevSmooth
+                            data.samples << smoothed
+                            if (data.samples.size() > 20) data.samples.remove(0)
+                            if (data.samples.size() >= 3) {
+                                data.avgInterval = data.samples.sum() / data.samples.size()
+                            }
+                        }
+                        data.lastSeen    = lastSeen
+                        data.lastCheckin = lastSeen
+                    }
+                }
+                data.protocol = protocol
+                state.history[id] = data
+                state.history = state.history
+                updateHealth(device)
+            }
+
+            // NEW: update state tracking every scan
+            updateStateTracking(device)
+
+        } catch (e) {
+            log.warn "Scan failed for ${device.displayName}: ${e.message}"
+        }
+    }
+}
+
+// ============================================================
+// ===================== HEALTH SCORING ======================
+// ============================================================
+def updateHealth(device) {
+    def id   = device.id
+    def data = state.history[id]
+    if (!data) return
+
+    def samples = data.samples?.size() ?: 0
+    if (samples < 3) {
+        state.health[id] = "Pending"
+        state.verifying?.remove(id)
+        return
+    }
+
+    def offlineThreshold     = ((settings?.offlineThresholdHours ?: 72) * 60).toDouble()
+    def minutesSinceLastSeen = (now() - (data.lastSeen ?: now())) / (1000 * 60)
+
+    if (minutesSinceLastSeen >= offlineThreshold) {
+        state.health[id] = "Offline"
+    } else {
+        def baseline = (data.userInterval ?: data.avgInterval ?: 60).toDouble()
+        def ratio    = minutesSinceLastSeen / baseline
+        if      (ratio <= 1.2) state.health[id] = "Excellent"
+        else if (ratio <= 2.0) state.health[id] = "Good"
+        else if (ratio <= 3.0) state.health[id] = "Fair"
+        else                   state.health[id] = "Poor"
+    }
+
+    def currentHealth = state.health[id]
+    if (!(currentHealth in ["Poor", "Offline"])) {
+        state.verifying?.remove(id)
+        return
+    }
+
+    if (state.verifying == null) state.verifying = [:]
+    if (state.verifying[id]) {
+        state.verifying.remove(id)
+        return
+    }
+
+    def protocol    = getProtocol(device)
+    def isVirtual   = protocol in ["Virtual", "Hub Variable"]
+    def hasRefresh  = false
+    def hasPing     = false
+    def attempted   = false
+    def verifyMethod = ""
+
+    if (isVirtual) {
+        verifyMethod = "virtual"
+    } else if (isHueDevice(device)) {
+        def bridge = findHueBridge()
+        if (bridge) {
+            try { bridge.refresh(); attempted = true; verifyMethod = "hue_bridge" }
+            catch (e) { verifyMethod = "hue_bridge_failed" }
+        } else {
+            verifyMethod = "hue_no_bridge"
+        }
+    } else {
+        if (!isVirtual) {
+            try { hasRefresh = device.hasCapability("Refresh") } catch (e) { }
+            try { hasPing    = device.hasCapability("Ping")    } catch (e) { }
+        }
+        if (hasRefresh) {
+            try { device.refresh(); attempted = true; verifyMethod = "refresh" }
+            catch (e) { verifyMethod = "failed" }
+        } else if (hasPing) {
+            try { device.ping(); attempted = true; verifyMethod = "ping" }
+            catch (e) { verifyMethod = "failed" }
+        } else {
+            verifyMethod = "none"
+        }
+    }
+    state.verifying[id] = verifyMethod
+}
+
+// ============================================================
+// ===================== HEALTH DISPLAY ======================
+// ============================================================
+def getHealthDisplay(device) {
+    def h       = state.health?.get(device.id) ?: "Pending"
+    def samples = state.history?.get(device.id)?.samples?.size() ?: 0
+    def snoozed = isDeviceSnoozed(device.id as String)
+
+    if (snoozed) {
+        def remaining = formatSnoozeRemaining(device.id as String)
+        return "😴 <span style='color:#94a3b8;'>Snoozed (${remaining})</span>"
+    }
+    if (h == "Pending") {
+        return "<span style='color:#94a3b8;'>⏳ Pending (${samples}/3 samples)</span>"
+    }
+    if (h in ["Poor", "Offline"]) {
+        def baseDisplay = h == "Poor"
+            ? "🔴 Poor"
+            : "💀 <span style='color:#991b1b;font-weight:bold;'>Offline</span>"
+        def verifyMethod = state.verifying?.get(device.id)
+        if (verifyMethod == null) return baseDisplay
+        switch (verifyMethod) {
+            case "refresh":           return "${baseDisplay} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (refresh sent)</span>"
+            case "ping":              return "${baseDisplay} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (ping sent)</span>"
+            case "hue_bridge":        return "${baseDisplay} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (Hue Bridge refresh sent)</span>"
+            case "hue_no_bridge":     return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — add Hue Bridge to monitored devices</span>"
+            case "hue_bridge_failed": return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Hue Bridge refresh failed</span>"
+            case "virtual":           return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — virtual device</span>"
+            case "none":              return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — device does not support ping or refresh</span>"
+            case "failed":            return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Verification attempted but command failed</span>"
+            default:                  return baseDisplay
+        }
+    }
+    switch (h) {
+        case "Excellent": return "🟢 Excellent"
+        case "Good":      return "🟢 Good"
+        case "Fair":      return "🟠 Fair"
+        default:          return "${h}"
+    }
+}
+
+def getHealthEmoji(h) {
+    switch (h) {
+        case "Excellent": return "🟢"
+        case "Good":      return "🟢"
+        case "Fair":      return "🟠"
+        case "Poor":      return "🔴"
+        case "Offline":   return "💀"
+        default:          return "⏳"
+    }
+}
+
+// ============================================================
+// ===================== SAFE HELPERS ========================
+// ============================================================
+def safeTime(ts) { return (ts instanceof Number) ? ts : ts?.time }
+
+def formatTimeAgo(ts) {
+    if (!ts) return "N/A"
+    ts = safeTime(ts)
+    def diffMs = now() - ts
+    def mins   = (diffMs / (1000 * 60)).toInteger()
+    def hours  = (diffMs / (1000 * 60 * 60)).toInteger()
+    def days   = (diffMs / (1000 * 60 * 60 * 24)).toInteger()
+    def weeks  = (days / 7).toInteger()
+    def months = (days / 30).toInteger()
+    if (months >= 1) return "${months}mo ago"
+    if (weeks  >= 1) return "${weeks}w ago"
+    if (days   >= 1) return "${days}d ago"
+    if (hours  >= 1) return "${hours}h ago"
+    return "${mins}m ago"
+}
+
+def formatInterval(minutes) {
+    if (!minutes) return "—"
+    def m = minutes.toInteger()
+    if (m < 60)   return "${m}m"
+    if (m < 1440) return "${(m / 60).toInteger()}h ${m % 60}m"
+    return "${(m / 1440).toInteger()}d ${((m % 1440) / 60).toInteger()}h"
+}
+
+// ============================================================
+// ===================== ACTIVITY SUMMARY PAGE ===============
+// ============================================================
+def activitySummaryPage() {
+    dynamicPage(name: "activitySummaryPage", title: "Device Activity Summary", install: false) {
+        section("") {
+            paragraph rawHtml: true, """
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+"""
+            href(name: "toForceScan", page: "forceScanPage", title: "🔄 Force Scan Now")
+            if (snoozeEnabled()) {
+                href(name: "toSnoozeFromSummary", page: "snoozeManagePage", title: "😴 Manage Snoozed Devices")
+            }
+
+            def devList = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
+            if (!devList) { paragraph "No devices found. Please select devices on the main page first."; return }
+
+            devList = devList.sort { a, b ->
+                def healthPriority = ["Offline": 1, "Poor": 2, "Fair": 3, "Good": 4, "Excellent": 5, "Pending": 6]
+                def hA = state.health?.get(a.id) ?: "Pending"
+                def hB = state.health?.get(b.id) ?: "Pending"
+                def pA = healthPriority[hA] ?: 6
+                def pB = healthPriority[hB] ?: 6
+                if (pA != pB) return pA <=> pB
+                return a.displayName.trim() <=> b.displayName.trim()
+            }
+
+            def hubIp    = location?.hub?.localIP ?: ""
+            def staleOn  = settings?.enableStaleDetection != false
+
+            // Count stale devices for summary banner
+            def staleCount = staleOn ? devList.count { isStateStale(it.id as String) } : 0
+
+            def table = "<table id='activityTable' style='width:100%; border-collapse: collapse; border: 1px solid #ccc;'>"
+            table += "<thead><tr style='font-weight:bold; background-color:#f0f0f0;'>"
+            table += "<th style='padding:4px; border:1px solid #ccc;'>Device</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;'>Protocol</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;'>Health</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;'>State</th>"        // NEW
+            table += "<th style='padding:4px; border:1px solid #ccc;'>Last Seen</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;'>State Changed</th>" // NEW
+            table += "<th style='padding:4px; border:1px solid #ccc;'>Avg Check-in</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;'>Samples</th>"
+            table += "</tr></thead><tbody>"
+
+            def rowNum = 0
+            devList.each { device ->
+                def data        = state.history?.get(device.id)
+                def protocol    = getProtocol(device)
+                def snoozed     = isDeviceSnoozed(device.id as String)
+                def hasOverride = settings["protocolOverride_${device.id}"] &&
+                                  settings["protocolOverride_${device.id}"] != "Auto-detect"
+                def rowBg       = snoozed ? "#f8f8f8" : (rowNum % 2 == 0) ? "#ffffff" : "#ebebeb"
+                def protocolDisplay = hasOverride
+                    ? "${protocol} <span style='color:#94a3b8;font-size:10px;'>(override)</span>"
+                    : protocol
+
+                def lastSeenMs  = data?.lastSeen ? (data.lastSeen as Long) : 0
+                def lastSeenStr = lastSeenMs ? formatTimeAgo(lastSeenMs) : "Never"
+
+                def avgRawMin = data?.userInterval ? (data.userInterval as Long) :
+                                data?.avgInterval  ? (data.avgInterval as Long) : 999999
+                def avgIntStr = data?.userInterval ? formatInterval(data.userInterval) + " (manual)" :
+                                data?.avgInterval  ? formatInterval(data.avgInterval) : "Learning..."
+
+                def sampleCount    = data?.samples?.size() ?: 0
+                def lowActivity    = isLowActivity(device.id as String)
+                def samplesDisplay = lowActivity
+                    ? "${sampleCount} <span style='color:#f97316;font-size:10px;'>⚠ Low Activity</span>"
+                    : "${sampleCount}"
+
+                def h           = state.health?.get(device.id) ?: "Pending"
+                def healthOrder = snoozed ? 99 :
+                                  (h == "Offline" ? 1 : h == "Poor" ? 2 : h == "Fair" ? 3 :
+                                   h == "Good" ? 4 : h == "Excellent" ? 5 : 6)
+
+                // NEW: current state display
+                def stateInfo    = getCurrentStateDisplay(device)
+                def stateDisplay = "—"
+                def stateOrder   = 9
+                if (stateInfo) {
+                    def stale      = staleOn && isStateStale(device.id as String)
+                    def staleStyle = stale ? "color:#f97316; font-weight:bold;" : ""
+                    def staleSuffix = stale ? " <span style='color:#f97316;font-size:10px;'>🔁 Stale</span>" : ""
+                    if (stateInfo.type == "switch") {
+                        def color = stateInfo.isOn ? "#cc0000" : "#444"
+                        stateDisplay = "<span style='${staleStyle}color:${color};font-weight:bold;'>${stateInfo.value}</span>${staleSuffix}"
+                        stateOrder   = stateInfo.isOn ? 1 : 2
+                    } else {
+                        stateDisplay = "<span style='${staleStyle}'>${stateInfo.value}</span>${staleSuffix}"
+                        stateOrder   = stateInfo.isOn ? 1 : 2
+                    }
+                }
+
+                // NEW: state changed display
+                def tracked          = state.stateHistory?.get(device.id as String)
+                def lastChangedMs    = tracked?.lastChanged ? (tracked.lastChanged as Long) : 0
+                def lastChangedStr   = lastChangedMs ? formatTimeAgo(lastChangedMs) : "—"
+                def staleChangedStyle = (staleOn && isStateStale(device.id as String))
+                    ? "color:#f97316;"
+                    : ""
+
+                rowNum++
+
+                def deviceLink = hubIp
+                    ? "<a href='http://${hubIp}/device/edit/${device.id}' target='_blank'>${device.displayName}</a>"
+                    : device.displayName
+
+                table += "<tr style='background-color:${rowBg};${snoozed ? "opacity:0.6;" : ""}'>"
+                table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${device.displayName.toLowerCase().trim()}'>${deviceLink}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${protocol}'><span style='color:${getProtocolColor(protocol)};font-weight:bold;'>${protocolDisplay}</span></td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${healthOrder}'>${getHealthDisplay(device)}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;' data-order='${stateOrder}'>${stateDisplay}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${-lastSeenMs}'>${lastSeenStr}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc; ${staleChangedStyle}' data-order='${-lastChangedMs}'>${lastChangedStr}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${avgRawMin}'>${avgIntStr}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${sampleCount}'>${samplesDisplay}</td>"
+                table += "</tr>"
+            }
+
+            table += "</tbody></table>"
+
+            def staleWarning = (staleOn && staleCount > 0)
+                ? "<span style='color:#f97316;font-weight:bold;'>🔁 ${staleCount} device(s) with stale state detected.</span><br>"
+                : ""
+
+            paragraph rawHtml: true, """
+${staleWarning}
+${hubIp ? "<span style='color:#94a3b8;font-size:11px;'>⚠ Device links are accessible on your local network only.</span><br>" : ""}
+<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>
+<script>
+\$(document).ready(function() {
+    \$('#activityTable').DataTable({
+        paging:     false,
+        info:       false,
+        searching:  true,
+        order:      [[2, 'asc']],
+        columnDefs: [
+            { type: 'num', targets: [2, 3, 4, 5, 6, 7] }
+        ]
+    });
+});
+</script>
+"""
+        }
+
+        section("<b>🔄 Reset Device History</b>", hideable: true, hidden: true) {
+            paragraph "Reset check-in history for specific devices."
+            href(name: "toResetHistory", page: "resetHistoryPage", title: "🔄 Reset Device History")
+        }
+    }
+}
+
+// ============================================================
+// ===================== HUB MESH SUMMARY PAGE ===============
+// ============================================================
+def hubMeshSummaryPage() {
+    dynamicPage(name: "hubMeshSummaryPage", title: "🔗 Hub Mesh Overview", install: false) {
+        section("") {
+            def devList = getAllMonitoredDevices().findAll { p ->
+                def proto = getProtocol(p)
+                proto.startsWith("Hub Mesh")
+            }
+
+            if (!devList) {
+                paragraph "No Hub Mesh devices found in your monitored device list."
+                return
+            }
+
+            def groups  = buildHubMeshSummary()
+            def hubIp   = location?.hub?.localIP ?: ""
+
+            // Banner summary per hub
+            def bannerHtml = ""
+            groups.each { srcHub, counts ->
+                def worstColor = counts.offline > 0 ? "#991b1b" :
+                                 counts.poor    > 0 ? "#dc2626" :
+                                 counts.fair    > 0 ? "#ea580c" : "#16a34a"
+                def worstLabel = counts.offline > 0 ? "💀 Offline devices present" :
+                                 counts.poor    > 0 ? "🔴 Poor devices present" :
+                                 counts.fair    > 0 ? "🟠 Fair devices present" : "🟢 All healthy"
+                bannerHtml += "<div style='background:#f0f0f0; border-left:4px solid ${worstColor}; padding:8px 10px; margin-bottom:8px; border-radius:3px;'>"
+                bannerHtml += "<b>${srcHub}</b> &nbsp;·&nbsp; ${counts.total} device(s) &nbsp;·&nbsp; <span style='color:${worstColor};'>${worstLabel}</span><br>"
+                bannerHtml += "<small>"
+                if (counts.offline   > 0) bannerHtml += "💀 Offline: ${counts.offline}&nbsp; "
+                if (counts.poor      > 0) bannerHtml += "🔴 Poor: ${counts.poor}&nbsp; "
+                if (counts.fair      > 0) bannerHtml += "🟠 Fair: ${counts.fair}&nbsp; "
+                if (counts.good      > 0) bannerHtml += "🟢 Good: ${counts.good}&nbsp; "
+                if (counts.excellent > 0) bannerHtml += "🟢 Excellent: ${counts.excellent}&nbsp; "
+                if (counts.pending   > 0) bannerHtml += "⏳ Pending: ${counts.pending}&nbsp; "
+                bannerHtml += "</small></div>"
+            }
+
+            paragraph rawHtml: true, bannerHtml
+
+            // Full device table for Hub Mesh devices
+            def table = "<table style='width:100%; border-collapse: collapse; border: 1px solid #ccc;'>"
+            table += "<tr style='font-weight:bold; background-color:#f0f0f0;'>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Device</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Source Hub</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Protocol</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Health</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>State</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Last Seen</td>"
+            table += "</tr>"
+
+            def sorted = devList.sort { a, b ->
+                def srcA = getHubMeshSourceHub(a)
+                def srcB = getHubMeshSourceHub(b)
+                if (srcA != srcB) return srcA <=> srcB
+                def healthPriority = ["Offline": 1, "Poor": 2, "Fair": 3, "Good": 4, "Excellent": 5, "Pending": 6]
+                def hA = state.health?.get(a.id) ?: "Pending"
+                def hB = state.health?.get(b.id) ?: "Pending"
+                return (healthPriority[hA] ?: 6) <=> (healthPriority[hB] ?: 6)
+            }
+
+            def rowNum = 0
+            sorted.each { device ->
+                def data     = state.history?.get(device.id)
+                def protocol = getProtocol(device)
+                def srcHub   = getHubMeshSourceHub(device)
+                def lastSeen = data?.lastSeen ? formatTimeAgo(data.lastSeen) : "Never"
+                def rowBg    = (rowNum % 2 == 0) ? "#ffffff" : "#ebebeb"
+
+                def stateInfo    = getCurrentStateDisplay(device)
+                def stateDisplay = "—"
+                if (stateInfo) {
+                    if (stateInfo.type == "switch") {
+                        def color = stateInfo.isOn ? "#cc0000" : "#444"
+                        stateDisplay = "<span style='color:${color};font-weight:bold;'>${stateInfo.value}</span>"
+                    } else {
+                        stateDisplay = stateInfo.value
+                    }
+                }
+
+                def deviceLink = hubIp
+                    ? "<a href='http://${hubIp}/device/edit/${device.id}' target='_blank'>${device.displayName}</a>"
+                    : device.displayName
+
+                rowNum++
+                table += "<tr style='background-color:${rowBg};'>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${deviceLink}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${srcHub}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'><span style='color:${getProtocolColor(protocol)};font-weight:bold;'>${protocol}</span></td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${getHealthDisplay(device)}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;'>${stateDisplay}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${lastSeen}</td>"
+                table += "</tr>"
+            }
+
+            table += "</table>"
+
+            if (hubIp) {
+                paragraph "<span style='color:#94a3b8;font-size:11px;'>⚠ Device links are accessible on your local network only.</span>"
+            }
+            paragraph "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>"
+
+            paragraph "<span style='color:#94a3b8;font-size:11px;'>ℹ️ Source hub is detected from device data values. If all devices show as \"Remote Hub\", the source hub name is not being transmitted via Hub Mesh — this is a Hubitat platform limitation and does not affect health monitoring.</span>"
+        }
+    }
+}
+
+// ============================================================
+// ===================== PROBLEM DEVICES PAGE ================
+// ============================================================
+def problemDevicesPage() {
+    dynamicPage(name: "problemDevicesPage", title: "⚠️ Problem Devices", install: false) {
+        section("") {
+            def staleOn = settings?.enableStaleDetection != false
+
+            def devList = getAllMonitoredDevices().findAll { device ->
+                def h     = state.health?.get(device.id) ?: "Pending"
+                def stale = staleOn && isStateStale(device.id as String)
+                (h in ["Offline", "Poor", "Fair"] || stale) && !isDeviceSnoozed(device.id as String)
+            }
+
+            if (!devList) {
+                paragraph "✅ No problem devices found — all monitored devices are healthy."
+                return
+            }
+
+            devList = devList.sort { a, b ->
+                def healthPriority = ["Offline": 1, "Poor": 2, "Fair": 3]
+                def hA = state.health?.get(a.id) ?: "Fair"
+                def hB = state.health?.get(b.id) ?: "Fair"
+                (healthPriority[hA] ?: 4) <=> (healthPriority[hB] ?: 4)
+            }
+
+            def hubIp = location?.hub?.localIP ?: ""
+
+            def table = "<table style='width:100%; border-collapse: collapse; border: 1px solid #ccc;'>"
+            table += "<tr style='font-weight:bold; background-color:#f0f0f0;'>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Device</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Protocol</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Health</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>State</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Last Seen</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>State Changed</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;'>Avg Check-in</td>"
+            table += "</tr>"
+
+            def rowNum = 0
+            devList.each { device ->
+                def data      = state.history?.get(device.id)
+                def protocol  = getProtocol(device)
+                def lastSeen  = data?.lastSeen ? formatTimeAgo(data.lastSeen) : "Never"
+                def avgInt    = data?.userInterval ? formatInterval(data.userInterval) + " (manual)" :
+                                data?.avgInterval  ? formatInterval(data.avgInterval) : "Learning..."
+                def rowBg     = (rowNum % 2 == 0) ? "#ffffff" : "#ebebeb"
+
+                def staleFlag = staleOn && isStateStale(device.id as String)
+
+                def stateInfo    = getCurrentStateDisplay(device)
+                def stateDisplay = "—"
+                if (stateInfo) {
+                    def staleSuffix = staleFlag ? " <span style='color:#f97316;font-size:10px;'>🔁 Stale</span>" : ""
+                    if (stateInfo.type == "switch") {
+                        def color = stateInfo.isOn ? "#cc0000" : "#444"
+                        stateDisplay = "<span style='color:${color};font-weight:bold;'>${stateInfo.value}</span>${staleSuffix}"
+                    } else {
+                        stateDisplay = "${stateInfo.value}${staleSuffix}"
+                    }
+                } else if (staleFlag) {
+                    stateDisplay = "<span style='color:#f97316;font-size:10px;'>🔁 Stale</span>"
+                }
+
+                def tracked        = state.stateHistory?.get(device.id as String)
+                def lastChangedMs  = tracked?.lastChanged ? (tracked.lastChanged as Long) : 0
+                def lastChangedStr = lastChangedMs ? formatTimeAgo(lastChangedMs) : "—"
+                def changedStyle   = staleFlag ? "color:#f97316;" : ""
+
+                def healthDisplay  = getHealthDisplay(device)
+                if (staleFlag && !(state.health?.get(device.id) in ["Offline", "Poor", "Fair"])) {
+                    healthDisplay = "🔁 <span style='color:#f97316;'>Stale State</span>"
+                }
+
+                rowNum++
+                def deviceLink = hubIp
+                    ? "<a href='http://${hubIp}/device/edit/${device.id}' target='_blank'>${device.displayName}</a>"
+                    : device.displayName
+
+                table += "<tr style='background-color:${rowBg};'>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${deviceLink}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'><span style='color:${getProtocolColor(protocol)};font-weight:bold;'>${protocol}</span></td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${healthDisplay}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;'>${stateDisplay}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${lastSeen}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc; ${changedStyle}'>${lastChangedStr}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${avgInt}</td>"
+                table += "</tr>"
+            }
+
+            table += "</table>"
+            if (hubIp) {
+                paragraph "<span style='color:#94a3b8;font-size:11px;'>⚠ Device links are accessible on your local network only.</span>"
+            }
+            paragraph "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>"
+        }
+    }
+}
+
+// ============================================================
+// ===================== PROTOCOL OVERRIDE PAGE ==============
+// ============================================================
+def protocolOverridePage() {
+    def devList = getAllMonitoredDevices()
+        .findAll { device ->
+            def hasOverride = settings["protocolOverride_${device.id}"] &&
+                              settings["protocolOverride_${device.id}"] != "Auto-detect"
+            def rawProtocol = getRawProtocol(device)
+            hasOverride || isUnresolvableProtocol(rawProtocol)
+        }
+        .sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
+
+    dynamicPage(name: "protocolOverridePage", title: "🔧 Protocol Overrides", install: false) {
+        section("<b>About Protocol Overrides</b>") {
+            paragraph "Some Hub Mesh linked devices and LAN devices cannot be automatically identified. " +
+                      "Use this page to manually set the correct protocol for those devices."
+        }
+        if (!devList || devList.size() == 0) {
+            section("") {
+                paragraph "✅ No Hub Mesh, LAN, Virtual, or Hub Variable devices found — no overrides needed."
+            }
+            return
+        }
+        section("<b>Unidentified / Overridden Devices (${devList.size()})</b>") {
+            devList.each { device ->
+                def currentProtocol = getProtocol(device)
+                def currentOverride = settings["protocolOverride_${device.id}"] ?: "Auto-detect"
+                input "protocolOverride_${device.id}", "enum",
+                      title: "<b>${device.displayName}</b> — currently: <span style='color:${getProtocolColor(currentProtocol)};'>${currentProtocol}</span>",
+                      options: ["Auto-detect", "Zigbee", "Z-Wave", "Matter",
+                                "Hub Mesh (Zigbee)", "Hub Mesh (Z-Wave)", "Hub Mesh (Matter)", "Hub Mesh",
+                                "LAN", "Virtual", "Hub Variable"],
+                      defaultValue: currentOverride, required: false
+            }
+        }
+        section("") {
+            paragraph "Tap <b>Done</b> to save overrides. Changes take effect on the next scan."
+        }
+    }
+}
+
+// ============================================================
+// ===================== SNOOZE MANAGE PAGE ==================
+// ============================================================
+def snoozeManagePage() {
+    app.removeSetting("devicesToSnooze")
+    app.removeSetting("devicesToUnsnooze")
+    app.updateSetting("confirmSnooze",   [value: false, type: "bool"])
+    app.updateSetting("confirmUnsnooze", [value: false, type: "bool"])
+
+    def devList     = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
+        .sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
+    def snoozedList = devList.findAll { isDeviceSnoozed(it.id as String) }
+    def activeList  = devList.findAll { !isDeviceSnoozed(it.id as String) }
+
+    dynamicPage(name: "snoozeManagePage", title: "😴 Manage Snoozed Devices", install: false) {
+        section("<b>Snooze Devices</b>") {
+            paragraph "Select devices to snooze for <b>${settings?.snoozeDurationHours ?: 24} hours</b>."
+            if (activeList) {
+                input "devicesToSnooze", "enum",
+                      title: "Select devices to snooze:",
+                      options: activeList.collectEntries { [(it.id): "${it.displayName} (${state.health?.get(it.id) ?: 'Pending'})"] }
+                                        .sort { a, b -> a.value <=> b.value },
+                      multiple: true, required: false
+            } else {
+                paragraph "All devices are currently snoozed."
+            }
+        }
+        if (activeList) {
+            section() {
+                input "confirmSnooze", "bool", title: "Confirm — snooze selected devices",
+                      defaultValue: false, submitOnChange: true
+            }
+            if (settings?.confirmSnooze == true) {
+                section("<b>Snooze Result</b>") {
+                    if (settings?.devicesToSnooze) {
+                        def count = 0
+                        settings.devicesToSnooze.each { deviceId -> snoozeDevice(deviceId); count++ }
+                        app.updateSetting("confirmSnooze", [value: false, type: "bool"])
+                        paragraph "✅ Snoozed ${count} device(s) for ${settings?.snoozeDurationHours ?: 24} hours."
+                    } else {
+                        app.updateSetting("confirmSnooze", [value: false, type: "bool"])
+                        paragraph "No devices selected to snooze."
+                    }
+                }
+            }
+        }
+        section("<b>Currently Snoozed</b>") {
+            if (snoozedList) {
+                paragraph snoozedList.collect { device ->
+                    "😴 ${device.displayName} — ${formatSnoozeRemaining(device.id as String)}"
+                }.join("\n")
+                input "devicesToUnsnooze", "enum",
+                      title: "Select devices to unsnooze early:",
+                      options: snoozedList.collectEntries { [(it.id): "${it.displayName} (${formatSnoozeRemaining(it.id as String)})"] }
+                                         .sort { a, b -> a.value <=> b.value },
+                      multiple: true, required: false
+            } else {
+                paragraph "No devices are currently snoozed."
+            }
+        }
+        if (snoozedList) {
+            section() {
+                input "confirmUnsnooze", "bool", title: "Confirm — unsnooze selected devices",
+                      defaultValue: false, submitOnChange: true
+            }
+            if (settings?.confirmUnsnooze == true) {
+                section("<b>Unsnooze Result</b>") {
+                    if (settings?.devicesToUnsnooze) {
+                        def count = 0
+                        settings.devicesToUnsnooze.each { deviceId -> unsnoozeDevice(deviceId); count++ }
+                        app.updateSetting("confirmUnsnooze", [value: false, type: "bool"])
+                        paragraph "✅ Unsnoozed ${count} device(s)."
+                    } else {
+                        app.updateSetting("confirmUnsnooze", [value: false, type: "bool"])
+                        paragraph "No devices selected to unsnooze."
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ============================================================
+// ===================== FORCE SCAN PAGE =====================
+// ============================================================
+def forceScanPage() {
+    scanAllDevices()
+    dynamicPage(name: "forceScanPage", title: "Force Scan", install: false) {
+        section("<b>Scan Complete</b>") {
+            def devList         = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
+            def intervalStr     = settings?.scanInterval ?: "3"
+            def intervalMinutes = (intervalStr.toFloat() * 60).toInteger()
+            def minGate         = Math.min(intervalMinutes * 0.5, 30.0).toInteger()
+            paragraph "✅ Device scan complete — ${devList.size()} device(s) checked. " +
+                      "Return to Device Activity Summary to see updated values.<br><br>" +
+                      "<b>Note:</b> A new check-in sample is only recorded if at least <b>${minGate} minutes</b> " +
+                      "have passed since the last recorded activity."
+        }
+    }
+}
+
+// ============================================================
+// ===================== RESET HISTORY PAGE ==================
+// ============================================================
+def resetHistoryPage() {
+    app.removeSetting("resetHistoryDevices")
+    app.updateSetting("resetHistoryConfirm", [value: false, type: "bool"])
+    def devList = getAllMonitoredDevices()
+        .findAll { getProtocol(it) != "Unknown" }
+        .sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
+    dynamicPage(name: "resetHistoryPage", title: "Reset Device History", install: false) {
+        section("<b>Select Devices to Reset</b>") {
+            if (!devList || devList.size() == 0) {
+                paragraph "No devices available."
+            } else {
+                paragraph "Select one or more devices to reset. Their check-in history and learned baseline will be cleared."
+                input "resetHistoryDevices", "enum",
+                      title: "Select devices to reset",
+                      options: devList.collectEntries { [(it.id): "${it.displayName} (${state.health?.get(it.id) ?: 'Pending'})"] }
+                                      .sort { a, b -> a.value <=> b.value },
+                      multiple: true, required: false
+            }
+        }
+        section("<b>Confirm Reset</b>") {
+            input "resetHistoryConfirm", "bool",
+                  title: "Confirm — clear history for selected devices",
+                  defaultValue: false
+        }
+        section() {
+            href(name: "toResetConfirm", page: "resetHistoryConfirmPage", title: "Submit Reset")
+        }
+    }
+}
+
+def resetHistoryConfirmPage() {
+    def devList = getAllMonitoredDevices()
+    dynamicPage(name: "resetHistoryConfirmPage", title: "Reset Device History", install: false) {
+        section("<b>Result</b>") {
+            if (!resetHistoryConfirm) {
+                paragraph "Reset cancelled — confirm checkbox was not checked."
+            } else if (!resetHistoryDevices) {
+                paragraph "No devices selected."
+            } else {
+                def successCount = 0
+                def resetNames   = []
+                resetHistoryDevices.each { deviceId ->
+                    def device = devList.find { it.id == deviceId }
+                    if (device) {
+                        state.history[device.id] = [
+                            lastSeen:       now(),
+                            lastCheckin:    now(),
+                            samples:        [],
+                            avgInterval:    null,
+                            userInterval:   state.history?.get(device.id)?.userInterval,
+                            missedCheckins: 0,
+                            protocol:       getProtocol(device)
+                        ]
+                        state.history = state.history
+                        state.health[device.id]       = "Pending"
+                        state.stateHistory[device.id] = null
+                        resetNames << device.displayName
+                        successCount++
+                    }
+                }
+                if (successCount > 0) {
+                    paragraph "✅ History reset for ${successCount} device(s): ${resetNames.join(', ')}."
+                } else {
+                    paragraph "No valid devices found."
+                }
+            }
+        }
+    }
+}
+
+// ============================================================
+// ===================== SEND NOTIFICATION PAGE ==============
+// ============================================================
+def sendNotificationPage() {
+    dynamicPage(name: "sendNotificationPage", title: "Send Notification", install: false) {
+        def devList    = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
+        def hasDevices = devList.size() > 0
+        def hasTargets = (settings?.notifyDevices?.size() ?: 0) > 0 ||
+                         (settings?.pushoverDevices?.size() ?: 0) > 0 ||
+                         (settings?.enablePush == true)
+        def notifyOn   = settings?.enablePush != false
+
+        if (!hasDevices) {
+            section("<b>Cannot Send</b>") { paragraph "⚠️ No monitored devices are selected." }; return
+        }
+        if (!notifyOn) {
+            section("<b>Cannot Send</b>") { paragraph "⚠️ Notifications are turned off." }; return
+        }
+        if (!hasTargets) {
+            section("<b>Cannot Send</b>") { paragraph "⚠️ No notification devices configured." }; return
+        }
+        section("<b>Confirm</b>") {
+            paragraph "This will send a device health summary notification now."
+            input "sendNowConfirm", "bool", title: "✅ Confirm — send the notification",
+                  defaultValue: false, submitOnChange: true
+        }
+        if (settings?.sendNowConfirm) {
+            section("<b>Result</b>") {
+                scheduledSummary()
+                app.updateSetting("sendNowConfirm", [value: false, type: "bool"])
+                def sentTo = []
+                if (settings?.notifyDevices)   sentTo.addAll(settings.notifyDevices.collect { it.displayName })
+                if (settings?.pushoverDevices) sentTo.addAll(settings.pushoverDevices.collect { "${it.displayName} (Pushover)" })
+                paragraph sentTo ? "✅ Notification sent to:\n" + sentTo.collect { "• ${it}" }.join("\n")
+                                 : "✅ Notification sent via hub push."
+            }
+        }
+    }
+}
+
+// ============================================================
+// ===================== SCHEDULED SUMMARY ===================
+// ============================================================
+def scheduledSummary() {
+    if (!isModeOK()) return
+    def devList = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
+    if (!devList) return
+
+    def staleOn     = settings?.enableStaleDetection != false
+    def usePushover = (settings?.enablePushover == true && settings?.pushoverPrefix?.trim())
+    def prefix      = ""
+    def postfix     = ""
+    if (usePushover) {
+        def tags = settings.pushoverPrefix.trim()
+        def priorityMatch = tags =~ /^(\[[EHLNS]\])(.*)/
+        if (priorityMatch) { prefix = priorityMatch[0][1]; postfix = priorityMatch[0][2].trim() }
+        else { postfix = tags }
+    }
+
+    def body = "${prefix}📡 Device Health Summary\n"
+
+    def sections = [
+        "Offline":   [emoji: "💀", enabled: settings?.notifyOffline   != false, list: []],
+        "Poor":      [emoji: "🔴", enabled: settings?.notifyPoor      != false, list: []],
+        "Fair":      [emoji: "🟠", enabled: settings?.notifyFair      != false, list: []],
+        "Good":      [emoji: "🟢", enabled: settings?.notifyGood      ?: false, list: []],
+        "Excellent": [emoji: "🟢", enabled: settings?.notifyExcellent ?: false, list: []],
+        "Stale":     [emoji: "🔁", enabled: staleOn && (settings?.notifyStale != false), list: []]
+    ]
+
+    devList.each { device ->
+        if (!isDeviceSnoozed(device.id as String)) {
+            def h = state.health?.get(device.id) ?: "Pending"
+            if (sections.containsKey(h)) {
+                // Include current state in notification name for actionable context
+                def stateInfo = getCurrentStateDisplay(device)
+                def stateStr  = stateInfo ? " [${stateInfo.value}]" : ""
+                def lastStr   = state.history?.get(device.id)?.lastSeen
+                    ? ", last seen ${formatTimeAgo(state.history[device.id].lastSeen)}"
+                    : ""
+                sections[h].list << "${device.displayName.trim()}${stateStr}${lastStr}"
+            }
+            // Stale state — only add if not already in a health section
+            if (staleOn && isStateStale(device.id as String) && sections["Stale"].enabled) {
+                def tracked   = state.stateHistory?.get(device.id as String)
+                def stateInfo = getCurrentStateDisplay(device)
+                def stateStr  = stateInfo ? " [${stateInfo.value}]" : ""
+                def since     = tracked?.lastChanged ? ", unchanged since ${formatTimeAgo(tracked.lastChanged)}" : ""
+                sections["Stale"].list << "${device.displayName.trim()}${stateStr}${since}"
+            }
+        }
+    }
+
+    if (suppressEmptyReport != null ? suppressEmptyReport : false) {
+        def hasContent = sections.any { h, data -> data.enabled && data.list }
+        if (!hasContent) return
+    }
+
+    sections.each { health, data ->
+        if (data.enabled) {
+            body += "\n${data.emoji} ${health}:\n"
+            if (data.list) {
+                data.list.each { name -> body += "• ${name}\n" }
+            } else {
+                body += "None\n"
+            }
+        }
+    }
+
+    def pushoverBody = body
+    def plainBody    = body
+    if (postfix) pushoverBody += "${postfix}\n"
+
+    if (settings?.enablePush)      sendPush(pushoverBody)
+    if (settings?.pushoverDevices) settings.pushoverDevices.each { it.deviceNotification(pushoverBody) }
+    if (settings?.notifyDevices)   notifyDevices.each { it.deviceNotification(plainBody) }
+}
+
+// ============================================================
+// ===================== INFO PAGE ===========================
+// ============================================================
+def infoPage(Map params = [:]) {
+    dynamicPage(name: "infoPage", title: "App Guide & Reference", install: false) {
+
+        section("<b>📡 What's New in DHM Plus</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "<b>Device Health Monitor Plus</b> adds four enhancements on top of DHM v1.3.12:<br><br>" +
+                      "1. <b>State Column</b> — Activity Summary now shows each device's current ON/OFF/motion/contact/lock/presence state inline, color-coded for quick scanning.<br><br>" +
+                      "2. <b>State Changed Column</b> — Shows how long ago the device last changed state, separate from Last Seen. A motion sensor can check in frequently but still be stuck reporting the same state.<br><br>" +
+                      "3. <b>Stale State Detection</b> — Devices whose state has not changed beyond a configurable threshold (default 48h) are flagged with 🔁. This catches a different failure mode than health scoring — a device can be checking in fine but stuck reporting the same value.<br><br>" +
+                      "4. <b>Hub Mesh Overview</b> — A dedicated page grouping Hub Mesh devices by their source hub with per-hub health banners. Useful when you have many Hub Mesh devices across multiple linked hubs.<br><br>" +
+                      "5. <b>Richer Notifications</b> — Alert messages now include each device's current state and last-seen time inline, making them more actionable without needing to open the app.</div>"
+        }
+
+        section("<b>🔁 Stale State Detection</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "Stale state is a separate signal from health scoring. A device can have Excellent health (checking in frequently) but a stale state (reporting the same value for days).<br><br>" +
+                      "<b>Examples of stale state problems:</b><br>" +
+                      "• A motion sensor that hasn't triggered active in 3 days — could be dead PIR or bad positioning<br>" +
+                      "• A contact sensor stuck reporting closed when a door was left open<br>" +
+                      "• A switch that's been ON for 5 days when it should cycle off<br>" +
+                      "• A hub variable connector that stopped updating because its Rule Machine rule stopped running<br><br>" +
+                      "<b>Tuning the threshold:</b><br>" +
+                      "Set the stale threshold to match your expectations for each device type. 48h is a reasonable default for most sensors. " +
+                      "For devices you expect to stay in one state (like a hub variable that only updates weekly), consider raising the threshold or disabling stale detection globally and relying on the Low Activity flag instead.<br><br>" +
+                      "<b>State types tracked:</b> switch (ON/OFF), contact (open/closed), motion (active/inactive), lock (locked/unlocked), presence (present/not present).</div>"
+        }
+
+        section("<b>🔗 Hub Mesh Source Hub Detection</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "The Hub Mesh Overview page attempts to group devices by their source hub. Detection tries:<br><br>" +
+                      "1. <b>hubName data value</b> — some Hubitat versions populate this on linked devices<br>" +
+                      "2. <b>Device Network ID prefix</b> — some integrations encode the hub name in the DNI<br>" +
+                      "3. <b>Fallback: \"Remote Hub\"</b> — if neither is available<br><br>" +
+                      "If all your Hub Mesh devices show as \"Remote Hub\", the source hub name is not being transmitted through Hub Mesh. " +
+                      "This is a platform-level limitation and does not affect health monitoring — all devices are still fully tracked. " +
+                      "You can use Protocol Overrides to add a custom label if needed in a future version.</div>"
+        }
+
+        section("<b>🔑 Health Ratings</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "<div style='overflow-x:auto;'><table style='width:100%; border-collapse: collapse;'>" +
+                      "<tr style='font-weight:bold;'><td>Health</td><td>Meaning</td></tr>" +
+                      "<tr><td>⏳ Pending</td><td>Not enough check-in samples yet (need 3)</td></tr>" +
+                      "<tr><td>🟢 Excellent</td><td>Checking in within 1.2x of baseline</td></tr>" +
+                      "<tr><td>🟢 Good</td><td>Checking in within 2x of baseline</td></tr>" +
+                      "<tr><td>🟠 Fair</td><td>Checking in within 3x of baseline</td></tr>" +
+                      "<tr><td>🔴 Poor</td><td>Checking in beyond 3x of baseline</td></tr>" +
+                      "<tr><td>💀 Offline</td><td>No activity for ${settings?.offlineThresholdHours ?: 72}h (hard threshold)</td></tr>" +
+                      "<tr><td>🔁 Stale State</td><td>State unchanged beyond stale threshold — health may still be Good</td></tr>" +
+                      "<tr><td>😴 Snoozed</td><td>Excluded from notifications for a set duration</td></tr>" +
+                      "</table></div></div>"
+        }
+
+        section("<b>💡 Tips for Best Results</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "• Stale state detection works best after a day of normal operation — give devices time to establish their first state change<br>" +
+                      "• The State Changed column is most useful for motion sensors, contact sensors, and hub variable connectors<br>" +
+                      "• For switches you rarely toggle (like always-on equipment), raise the stale threshold to 7+ days or disable stale detection for those devices by snoozeing them<br>" +
+                      "• Hub Mesh Overview is most useful when you have 10+ Hub Mesh devices — for smaller setups the Activity Summary is sufficient<br>" +
+                      "• Notifications now include [state] and last-seen time — if you use Pushover, the extra context makes alerts much more actionable</div>"
+        }
+    }
+}
