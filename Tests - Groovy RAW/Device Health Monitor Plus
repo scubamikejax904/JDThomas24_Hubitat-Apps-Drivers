@@ -7,7 +7,7 @@ definition(
     importUrl: "",
     iconUrl: "",
     iconX2Url: "",
-    version: "1.0.1-plus",
+    version: "1.0.2-plus",
     doNotFocus: true
 )
 
@@ -975,9 +975,11 @@ def mainPage() {
             href(name: "toProblemDevices", page: "problemDevicesPage",
                  title: "<b>⚠️ Problem Devices</b>",
                  description: "Offline, Poor, and Fair devices")
-            href(name: "toHubMeshSummary", page: "hubMeshSummaryPage",
-                 title: "<b>🔗 Hub Mesh Overview</b>",
-                 description: "Health summary grouped by source hub")
+            if (getAllMonitoredDevices().any { getProtocol(it).startsWith("Hub Mesh") }) {
+                href(name: "toHubMeshSummary", page: "hubMeshSummaryPage",
+                     title: "<b>🔗 Hub Mesh Overview</b>",
+                     description: "Health summary grouped by source hub")
+            }
             if (snoozeEnabled()) {
                 href(name: "toSnoozeManage", page: "snoozeManagePage",
                      title: "<b>😴 Manage Snoozed Devices</b>",
@@ -1002,7 +1004,7 @@ def mainPage() {
             input "debugMode", "bool",
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor Plus v1.0.1-plus</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor Plus v1.0.2-plus</span>"
         }
     }
 }
@@ -1650,10 +1652,11 @@ def protocolOverridePage() {
 
         // ── Protocol Overrides ────────────────────────────────────
         section("") {
-            paragraph "<b style='font-size:15px;'>🔀 Protocol Overrides</b><br>" +
-                      "<span style='color:#94a3b8;font-size:12px;'>Some Hub Mesh linked devices and LAN devices cannot be automatically identified. " +
+            paragraph "<div style='background-color:#eef2ff; border-left:4px solid #3b82f6; padding:10px 12px; border-radius:3px;'>" +
+                      "<span style='font-size:15px; font-weight:bold; color:#1e3a5f;'>🔀 Protocol Overrides</span><br>" +
+                      "<span style='color:#475569;font-size:12px;'>Some Hub Mesh linked devices and LAN devices cannot be automatically identified. " +
                       "Set the correct protocol manually — override always takes priority. " +
-                      "Set back to <b>Auto-detect</b> to restore automatic detection.</span>"
+                      "Set back to <b>Auto-detect</b> to restore automatic detection.</span></div>"
         }
         if (!protocolDevList || protocolDevList.size() == 0) {
             section("") {
@@ -1678,10 +1681,10 @@ def protocolOverridePage() {
 
         // ── State Attribute Overrides ─────────────────────────────
         section("") {
-            paragraph "<hr style='border:none; border-top:2px solid #e0e0e0; margin:8px 0;'>" +
-                      "<b style='font-size:15px;'>📌 State Attribute Overrides</b><br>" +
-                      "<span style='color:#94a3b8;font-size:12px;'>Pin a specific attribute per device when the app picks the wrong one to display in the Current State column. " +
-                      "Only devices with more than one meaningful attribute are listed.</span>"
+            paragraph "<div style='background-color:#fdf4ff; border-left:4px solid #a855f7; padding:10px 12px; border-radius:3px; margin-top:8px;'>" +
+                      "<span style='font-size:15px; font-weight:bold; color:#4a1772;'>📌 State Attribute Overrides</span><br>" +
+                      "<span style='color:#475569;font-size:12px;'>Pin a specific attribute per device when the app picks the wrong one to display in the Current State column. " +
+                      "Only devices with more than one meaningful attribute are listed.</span></div>"
         }
         if (!stateDevList || stateDevList.size() == 0) {
             section("") {
@@ -1696,10 +1699,10 @@ def protocolOverridePage() {
                     def attrs            = getMeaningfulAttributes(device)
                     def options          = ["Auto-detect"] + attrs
                     def currentDisplay   = currentOverride == "Auto-detect"
-                        ? "auto: ${currentLabel}"
-                        : "override: ${currentOverride}"
+                        ? "<span style='color:#475569;'>Current State: ${currentLabel}</span>"
+                        : "<span style='color:#a855f7; font-weight:bold;'>⚙️ Override Active: ${currentOverride}</span>"
                     input "stateAttrOverride_${device.id}", "enum",
-                          title: "<b>${device.displayName}</b> — showing: <span style='color:#94a3b8;'>${currentDisplay}</span>",
+                          title: "<b>${device.displayName}</b> — ${currentDisplay}",
                           options: options,
                           defaultValue: currentOverride,
                           required: false, width: 6
