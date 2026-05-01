@@ -7,7 +7,7 @@ definition(
     importUrl: "",
     iconUrl: "",
     iconX2Url: "",
-    version: "1.0.2-plus",
+    version: "1.0.3-plus",
     doNotFocus: true
 )
 
@@ -938,7 +938,7 @@ def mainPage() {
         def notifOn           = settings?.enablePush != false
         def notifSectionTitle = "<b>Notifications</b> — <span style='color:${notifOn ? "blue" : "red"};'>${notifOn ? "ON" : "OFF"}</span>"
         section(notifSectionTitle, hideable: true, hidden: true) {
-            input "enablePush", "bool", title: "Enable notifications", defaultValue: true, submitOnChange: true
+            input "enablePush", "bool", title: "Enable notifications", defaultValue: false, submitOnChange: true
             if (settings?.enablePush != false) {
                 input "reportFrequency", "enum",
                       title: "Notification Frequency:",
@@ -1004,7 +1004,7 @@ def mainPage() {
             input "debugMode", "bool",
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor Plus v1.0.2-plus</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor Plus v1.0.3-plus</span>"
         }
     }
 }
@@ -1669,8 +1669,12 @@ def protocolOverridePage() {
                 protocolDevList.each { device ->
                     def currentProtocol = getProtocol(device)
                     def currentOverride = settings["protocolOverride_${device.id}"] ?: "Auto-detect"
+                    def isOverridden    = currentOverride != "Auto-detect"
+                    def statusDisplay   = isOverridden
+                        ? "<span style='color:#1565c0; font-weight:bold;'>⚙️ Override Active: ${currentProtocol}</span>"
+                        : "<span style='color:#475569;'>Auto-detected: <span style='color:${getProtocolColor(currentProtocol)};'>${currentProtocol}</span></span>"
                     input "protocolOverride_${device.id}", "enum",
-                          title: "<b>${device.displayName}</b> — currently: <span style='color:${getProtocolColor(currentProtocol)};'>${currentProtocol}</span>",
+                          title: "<b>${device.displayName}</b> — ${statusDisplay}",
                           options: ["Auto-detect", "Zigbee", "Z-Wave", "Matter",
                                     "Hub Mesh (Zigbee)", "Hub Mesh (Z-Wave)", "Hub Mesh (Matter)", "Hub Mesh",
                                     "LAN", "Virtual", "Hub Variable"],
