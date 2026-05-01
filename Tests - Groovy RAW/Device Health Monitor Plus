@@ -7,7 +7,7 @@ definition(
     importUrl: "",
     iconUrl: "",
     iconX2Url: "",
-    version: "1.0.7-plus",
+    version: "1.0.8-plus",
     doNotFocus: true
 )
 
@@ -1004,7 +1004,7 @@ def mainPage() {
             input "debugMode", "bool",
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor Plus v1.0.7-plus</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor Plus v1.0.8-plus</span>"
         }
     }
 }
@@ -1325,15 +1325,15 @@ def formatStateDisplay(stateInfo) {
     def color = stateInfo.color
     switch (color) {
         case "#c62828":
-            return "<span style='background:#fee2e2; color:#b91c1c; padding:1px 7px; border-radius:10px; font-weight:700; font-size:12px;'>${label}</span>"
+            return "<span style='background:#fee2e2; color:#b91c1c; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${label}</span>"
         case "#e65100":
-            return "<span style='background:#fff3e0; color:#c2410c; padding:1px 7px; border-radius:10px; font-weight:700; font-size:12px;'>${label}</span>"
+            return "<span style='background:#fff3e0; color:#c2410c; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${label}</span>"
         case "#1565c0":
-            return "<span style='color:#0ea5e9; font-weight:700;'>${label}</span>"
+            return "<span style='background:#dbeafe; color:#1d4ed8; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${label}</span>"
         case "#8b5cf6":
-            return "<span style='color:#7c3aed; font-weight:600;'>${label}</span>"
+            return "<span style='background:#f3e8ff; color:#7c3aed; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${label}</span>"
         case "#16a34a":
-            return "<span style='color:#16a34a; font-weight:600;'>${label}</span>"
+            return "<span style='background:#dcfce7; color:#15803d; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${label}</span>"
         default:
             return "<span style='color:#94a3b8;'>${label}</span>"
     }
@@ -2072,4 +2072,3 @@ def infoPage(Map params = [:]) {
         }
     }
 }
-
