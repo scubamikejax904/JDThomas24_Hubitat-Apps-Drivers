@@ -7,7 +7,7 @@ definition(
     importUrl: "",
     iconUrl: "",
     iconX2Url: "",
-    version: "1.0.5-plus",
+    version: "1.0.6-plus",
     doNotFocus: true
 )
 
@@ -1004,7 +1004,7 @@ def mainPage() {
             input "debugMode", "bool",
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor Plus v1.0.5-plus</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor Plus v1.0.6-plus</span>"
         }
     }
 }
@@ -1347,13 +1347,13 @@ def activitySummaryPage() {
 
             def table = "<table id='activityTable' style='width:100%; border-collapse: collapse; border: 1px solid #ccc;'>"
             table += "<thead><tr style='font-weight:bold; background-color:#f0f0f0;'>"
-            table += "<th style='padding:4px; border:1px solid #ccc;'>Device</th>"
-            table += "<th style='padding:4px; border:1px solid #ccc;'>Protocol</th>"
-            table += "<th style='padding:4px; border:1px solid #ccc;' title='Health rating based on check-in frequency. Shows sample progress while learning.'>Health</th>"
-            table += "<th style='padding:4px; border:1px solid #ccc;' title='Current reported state of the device'>Current State</th>"
-            table += "<th style='padding:4px; border:1px solid #ccc;' title='How long ago this state last changed. Updates on each scan cycle, not in real time.'>State Changed</th>"
-            table += "<th style='padding:4px; border:1px solid #ccc;' title='How long ago the device last sent any activity to the hub'>Last Check-in</th>"
-            table += "<th style='padding:4px; border:1px solid #ccc;'>Avg Check-in</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc; text-align:center;'>Device</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc; text-align:center;'>Protocol</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc; text-align:center;' title='Health rating based on check-in frequency. Shows sample progress while learning.'>Health</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc; text-align:center;' title='Current reported state of the device'>Current State</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc; text-align:center;' title='How long ago this state last changed. Updates on each scan cycle, not in real time.'>State Changed</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc; text-align:center;' title='How long ago the device last sent any activity to the hub'>Last Check-in</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc; text-align:center;'>Avg Check-in</th>"
             table += "</tr></thead><tbody>"
 
             def rowNum = 0
@@ -1486,12 +1486,12 @@ def hubMeshSummaryPage() {
 
             def table = "<table style='width:100%; border-collapse: collapse; border: 1px solid #ccc;'>"
             table += "<tr style='font-weight:bold; background-color:#f0f0f0;'>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Device</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Source Hub</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Protocol</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Health</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;' title='Current reported state'>State</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;' title='How long ago the device last sent any activity to the hub'>Last Check-in</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;'>Device</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;'>Source Hub</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;'>Protocol</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;'>Health</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;' title='Current reported state'>State</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;' title='How long ago the device last sent any activity to the hub'>Last Check-in</td>"
             table += "</tr>"
 
             def sorted = devList.sort { a, b ->
@@ -1571,13 +1571,13 @@ def problemDevicesPage() {
 
             def table = "<table style='width:100%; border-collapse: collapse; border: 1px solid #ccc;'>"
             table += "<tr style='font-weight:bold; background-color:#f0f0f0;'>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Device</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Protocol</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Health</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;' title='Current reported state of the device'>State</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;' title='How long ago this state last changed. Updates on each scan cycle, not in real time.'>State Changed</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;' title='How long ago the device last sent any activity to the hub'>Last Check-in</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;'>Avg Check-in</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;'>Device</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;'>Protocol</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;'>Health</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;' title='Current reported state of the device'>State</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;' title='How long ago this state last changed. Updates on each scan cycle, not in real time.'>State Changed</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;' title='How long ago the device last sent any activity to the hub'>Last Check-in</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;'>Avg Check-in</td>"
             table += "</tr>"
 
             def rowNum = 0
