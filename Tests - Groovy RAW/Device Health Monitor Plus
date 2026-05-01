@@ -7,7 +7,7 @@ definition(
     importUrl: "",
     iconUrl: "",
     iconX2Url: "",
-    version: "1.0.0-plus",
+    version: "1.0.1-plus",
     doNotFocus: true
 )
 
@@ -249,12 +249,9 @@ def isLowActivity(deviceId) {
 }
 
 // ============================================================
-// ===================== NEW: STATE TRACKING =================
+// ===================== STATE TRACKING ======================
 // ============================================================
 
-// Returns a list of attribute names that have meaningful state values
-// for a given device — used to populate the state attribute override dropdown.
-// Only includes attributes with non-null, non-numeric, non-trivial values.
 def getMeaningfulAttributes(device) {
     def known = [
         "switch", "contact", "motion", "lock", "presence", "water",
@@ -270,7 +267,6 @@ def getMeaningfulAttributes(device) {
             if (!s?.name || s?.value == null) return
             def val = s.value.toString().trim()
             if (val in ["", "null", "0"]) return
-            // Include known state attrs + any non-numeric attr not in skip list
             def skipAttrs = ["battery", "batteryLastReplaced", "lastCheckin",
                              "temperature", "humidity", "illuminance", "pressure",
                              "carbonDioxide", "energy", "power", "voltage",
@@ -286,13 +282,10 @@ def getMeaningfulAttributes(device) {
     return found.sort()
 }
 
-// Returns true if a device has more than one meaningful attribute
-// (used to decide whether to show it on the overrides page)
 def hasMultipleMeaningfulAttributes(device) {
     return getMeaningfulAttributes(device).size() > 1
 }
 
-// Returns the display result for a manual attribute override
 def getOverrideStateDisplay(device, attrName) {
     try {
         def val = device.currentValue(attrName)
@@ -301,7 +294,6 @@ def getOverrideStateDisplay(device, attrName) {
         if (vs in ["", "null"]) return null
         def vl = vs.toLowerCase()
 
-        // Known attributes — apply proper color/label logic
         switch (attrName) {
             case "switch":
                 def isOn = vl == "on"
@@ -348,7 +340,6 @@ def getOverrideStateDisplay(device, attrName) {
                               isError ? "#c62828" : "#c0c4cc"
                 return [label: vs.capitalize(), color: color, isAlert: isError, type: attrName]
             default:
-                // Unknown attribute — show raw value with semantic color guessing
                 def isActive = vl in ["on", "active", "connected", "online", "running",
                                       "enabled", "playing", "present", "open"]
                 def isAlert  = vl in ["offline", "disconnected", "error", "fault", "alarm",
@@ -362,22 +353,9 @@ def getOverrideStateDisplay(device, attrName) {
     return null
 }
 
-// Returns the current state for display across all common device types.
-// Return map: [label, color, isAlert, type]
-//   label   — human-readable display string
-//   color   — hex color for the state badge
-//   isAlert — true when state is "interesting" (wet, open, motion active, unlocked, etc.)
-//   type    — attribute name that matched
-//
-// Color convention:
-//   Blue  (#1565c0) — active/on/present/playing — bold, pops out
-//   Gray  (#c0c4cc) — inactive/off/closed/dry   — muted, recedes
-//   Red   (#c62828) — alert state (wet, smoke, CO, tamper)
-//   Orange(#e65100) — warning state (open contact, unlocked, open valve)
 def getCurrentStateDisplay(device) {
     try {
         // ── Manual state attribute override ──────────────────────
-        // Check settings first — user can pin any attribute on this page
         def attrOverride = settings["stateAttrOverride_${device.id}"]
         if (attrOverride && attrOverride != "Auto-detect") {
             def overrideResult = getOverrideStateDisplay(device, attrOverride)
@@ -387,11 +365,6 @@ def getCurrentStateDisplay(device) {
         def driverName = (device.typeName ?: "").toLowerCase()
 
         // ── Capability-first devices ─────────────────────────────
-        // Some drivers (e.g. Xiaomi/Aqara contact sensors) add a
-        // presence attribute as a keep-alive heartbeat mechanism.
-        // Always use the device's PRIMARY capability first when the
-        // driver name makes the intent unambiguous — presence should
-        // never win over contact, motion, or lock on these devices.
         def isContactDevice = driverName.contains("contact") ||
                               driverName.contains("door sensor") ||
                               driverName.contains("window sensor")
@@ -433,8 +406,6 @@ def getCurrentStateDisplay(device) {
         }
 
         // ── Presence-first devices ────────────────────────────────
-        // Life360, mobile presence, and arrival sensors report both
-        // switch and presence — always use presence for these.
         def isPresenceDevice = driverName.contains("life360") ||
                                driverName.contains("presence") ||
                                driverName.contains("arrival") ||
@@ -451,8 +422,6 @@ def getCurrentStateDisplay(device) {
         }
 
         // ── 3D Printer / Octoprint / Bambu / Prusa / Moonraker ──
-        // Check printer-specific status attributes before switch.
-        // Moonraker Klipper driver uses "printState" attribute.
         def isPrinter = driverName.contains("moonraker") ||
                         driverName.contains("klipper") ||
                         driverName.contains("octoprint") ||
@@ -461,8 +430,6 @@ def getCurrentStateDisplay(device) {
                         driverName.contains("3d print") ||
                         driverName.contains("printer")
         if (isPrinter) {
-            // Moonraker Klipper driver uses "printState"
-            // Octoprint / other community drivers use "currentStatus", "printerStatus", or "status"
             def printerStatus = device.currentValue("printState") ?:
                                 device.currentValue("currentStatus") ?:
                                 device.currentValue("printerStatus") ?:
@@ -483,7 +450,6 @@ def getCurrentStateDisplay(device) {
         }
 
         // ── Water / Moisture ──────────────────────────────────────
-        // Checked before switch — water sensors often also have a switch attribute
         def water = device.currentValue("water")
         if (water != null) {
             def isWet = water.toString().toLowerCase() == "wet"
@@ -494,7 +460,6 @@ def getCurrentStateDisplay(device) {
         }
 
         // ── Smoke ─────────────────────────────────────────────────
-        // Checked before switch for same reason
         def smoke = device.currentValue("smoke")
         if (smoke != null) {
             def isDetected = smoke.toString().toLowerCase() == "detected"
@@ -534,7 +499,7 @@ def getCurrentStateDisplay(device) {
                     type: "presence"]
         }
 
-        // ── Contact (door/window sensors) ─────────────────────────
+        // ── Contact ───────────────────────────────────────────────
         def contact = device.currentValue("contact")
         if (contact != null) {
             def isOpen = contact.toString().toLowerCase() == "open"
@@ -563,13 +528,6 @@ def getCurrentStateDisplay(device) {
                     isAlert: isUnlocked,
                     type: "lock"]
         }
-
-        // ── Carbon Dioxide ────────────────────────────────────────
-        // Intentionally skipped — CO2 is a measurement (numeric ppm),
-        // not a meaningful state label. Devices like Air Things radon
-        // sensors expose this but showing "594.0 ppm" as state is
-        // more confusing than useful. Falls through to LAN fallback
-        // which will find a better attribute if one exists.
 
         // ── Tamper ────────────────────────────────────────────────
         def tamper = device.currentValue("tamper")
@@ -632,12 +590,16 @@ def getCurrentStateDisplay(device) {
         }
 
         // ── LAN / Cloud integration smart fallback ────────────────
-        // For LAN devices that didn't match any standard attribute above,
-        // inspect all current states and pick the most meaningful one.
-        // This handles Shelly, Govee, Ecobee, Nest, Tesla, Lutron,
-        // Sonos, Denon, Roku, and any other LAN/cloud driver.
-        def lanResult = getLANStateDisplay(device)
-        if (lanResult != null) return lanResult
+        // Only called for LAN, Hub Mesh, and unresolved protocols.
+        // Applying LAN-specific attribute heuristics to Zigbee/Z-Wave
+        // devices could produce misleading state labels.
+        def protocol = getProtocol(device)
+        def isLANType = protocol in ["LAN", "Hub Mesh", "Hub Mesh (Zigbee)",
+                                     "Hub Mesh (Z-Wave)", "Hub Mesh (Matter)", "Unknown"]
+        if (isLANType) {
+            def lanResult = getLANStateDisplay(device)
+            if (lanResult != null) return lanResult
+        }
 
     } catch (e) {
         if (debugEnabled()) log.debug "getCurrentStateDisplay error for ${device.displayName}: ${e.message}"
@@ -648,11 +610,9 @@ def getCurrentStateDisplay(device) {
 // ── LAN / Cloud smart attribute inspector ────────────────────
 // Inspects all current states on a device and returns the most
 // meaningful one based on a priority-ranked attribute list.
-// Called as a last resort for devices that didn't match any
-// standard capability check above.
+// Only called for LAN, Hub Mesh, and unresolved protocol devices.
 def getLANStateDisplay(device) {
     try {
-        // Get all attribute names currently reporting values on this device
         def currentStates = device.currentStates
         if (!currentStates) return null
         def stateMap = [:]
@@ -663,7 +623,7 @@ def getLANStateDisplay(device) {
 
         def driverName = (device.typeName ?: "").toLowerCase()
 
-        // ── Thermostat / HVAC (Ecobee, Nest, Honeywell, Sinope) ──
+        // ── Thermostat / HVAC ─────────────────────────────────────
         def isThermostat = driverName.contains("thermostat") ||
                            driverName.contains("ecobee") ||
                            driverName.contains("nest") ||
@@ -694,7 +654,7 @@ def getLANStateDisplay(device) {
             }
         }
 
-        // ── Media / AV (Sonos, Denon, Yamaha, Roku, Apple TV) ────
+        // ── Media / AV ────────────────────────────────────────────
         def isMedia = driverName.contains("sonos") ||
                       driverName.contains("denon") ||
                       driverName.contains("yamaha") ||
@@ -711,12 +671,10 @@ def getLANStateDisplay(device) {
                            stateMap["status"]
             if (playback) {
                 def isPlaying = playback.toLowerCase() in ["playing", "play"]
-                def isPaused  = playback.toLowerCase() in ["paused", "pause", "stopped", "stop"]
                 def color     = isPlaying ? "#1565c0" : "#c0c4cc"
                 def track     = stateMap["trackDescription"] ?: stateMap["trackData"] ?: ""
                 def label     = playback.capitalize()
                 if (track && track.length() > 0 && track != "null") {
-                    // Truncate long track names
                     label += ": " + (track.length() > 20 ? track[0..19] + "…" : track)
                 }
                 return [label: label, color: color, isAlert: false, type: "media"]
@@ -752,8 +710,6 @@ def getLANStateDisplay(device) {
                        stateMap.containsKey("power") ||
                        stateMap.containsKey("energy")
         if (isShelly && stateMap.containsKey("switch")) {
-            // Already handled by switch check above — shouldn't reach here,
-            // but if it does, show switch + power if available
             def sw    = stateMap["switch"]
             def isOn  = sw?.toLowerCase() == "on"
             def power = stateMap["power"]
@@ -772,29 +728,20 @@ def getLANStateDisplay(device) {
         }
 
         // ── Generic ranked fallback ───────────────────────────────
-        // Try each attribute in priority order — return first non-null,
-        // non-numeric, non-trivial value found.
         if (debugEnabled()) log.debug "getLANStateDisplay: ${device.displayName} — available attrs: ${stateMap.keySet().sort().join(', ')}"
         def rankedAttrs = [
-            // Status-type strings that are meaningful on their own
             "status", "deviceStatus", "healthStatus", "connectionStatus",
             "systemStatus", "operatingState", "currentState",
-            // Boolean-style
             "active", "enabled", "connected", "running",
-            // Catch-all meaningful strings
             "mode", "level", "speed", "inputSource"
         ]
         for (attr in rankedAttrs) {
             def val = stateMap[attr]
             if (val == null) continue
             def vl = val.toLowerCase().trim()
-            // Skip useless or ambiguous values
             if (vl in ["unknown", "null", "", "none", "0", "false", "true"]) continue
-            // Skip pure numbers — they're measurements, not state labels
             if (val.isNumber()) continue
-            // Skip values over 30 chars — likely an automation message or description, not a state
             if (val.length() > 30) continue
-            // Skip values containing sentence-like patterns (colon-space, multiple words with capitals)
             if (val.contains(": ")) continue
             def isActive = vl in ["on", "active", "connected", "online", "running",
                                    "enabled", "open", "playing", "present", "idle",
@@ -814,7 +761,6 @@ def getLANStateDisplay(device) {
     return null
 }
 
-// Tracks last time device state actually changed
 def updateStateTracking(device) {
     try {
         def id         = device.id
@@ -833,33 +779,24 @@ def updateStateTracking(device) {
         }
 
         if (tracked.lastValue != currentVal) {
-            // State changed — reset the clock
             state.stateHistory[id] = [
                 lastValue:   currentVal,
                 lastChanged: now()
             ]
             if (debugEnabled()) log.debug "${device.displayName}: state changed to ${currentVal}"
         }
-        // If same value, lastChanged stays as-is (we don't update it)
     } catch (e) {
         if (debugEnabled()) log.debug "updateStateTracking error for ${device.displayName}: ${e.message}"
     }
 }
 
-
-
 // ============================================================
 // ===================== HUB MESH GROUPING ===================
 // ============================================================
-
-// Attempt to identify the source hub label for Hub Mesh devices.
-// Hubitat does not expose the source hub directly, so we group by
-// the hub data value if present, then fall back to "Remote Hub".
 def getHubMeshSourceHub(device) {
     try {
         def hubName = device.getDataValue("hubName") ?: device.getDataValue("HubName")
         if (hubName) return hubName
-        // Some implementations store it in the device network ID prefix
         def dni = device.deviceNetworkId ?: ""
         if (dni.contains(":")) {
             def prefix = dni.split(":")[0]
@@ -869,7 +806,6 @@ def getHubMeshSourceHub(device) {
     return "Remote Hub"
 }
 
-// Build a summary map of Hub Mesh devices grouped by source hub
 def buildHubMeshSummary() {
     def devList  = getAllMonitoredDevices().findAll { p ->
         def proto = getProtocol(p)
@@ -935,7 +871,7 @@ def mainPage() {
             section("") {
                 paragraph "Zigbee: <b><span style='color:#3b82f6;'>${zigbeeCount}</span></b> | " +
                           "Z-Wave: <b><span style='color:#8b5cf6;'>${zwaveCount}</span></b> | " +
-                          "Matter: <b><span style='color:#f97316;'>${matterCount}</span></b> | " +
+                          "Matter: <b><span style='color:#e65100;'>${matterCount}</span></b> | " +
                           "Hub Mesh: <b><span style='color:#06b6d4;'>${hubMeshCount}</span></b> | " +
                           "LAN: <b><span style='color:#14b8a6;'>${lanCount}</span></b> | " +
                           "Virtual: <b><span style='color:#ec4899;'>${virtualCount}</span></b> | " +
@@ -987,7 +923,6 @@ def mainPage() {
                 input "snoozeDurationHours", "number", title: "Snooze duration (hours):",
                       defaultValue: 24, required: true, submitOnChange: true
             }
-
 
             paragraph "<b>Mode Restriction</b> — optionally restrict notifications to specific hub modes."
             input "enableModeRestriction", "bool", title: "Enable mode restriction for notifications",
@@ -1067,7 +1002,7 @@ def mainPage() {
             input "debugMode", "bool",
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor Plus v1.0.0-plus</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor Plus v1.0.1-plus</span>"
         }
     }
 }
@@ -1145,7 +1080,6 @@ def scanAllDevices() {
             }
         }
     }
-    // Also purge orphaned snooze entries
     if (state.snoozed instanceof Map) {
         def staleSnoozed = state.snoozed.keySet().findAll { !(it in activeIds) }
         if (staleSnoozed) {
@@ -1300,34 +1234,41 @@ def getHealthDisplay(device) {
         return "😴 <span style='color:#94a3b8;'>Snoozed (${remaining})</span>"
     }
     if (h == "Pending") {
-        return "<span style='color:#94a3b8;'>⏳ Pending (${samples}/3)</span>"
+        return "<span style='color:#94a3b8;'>⏳ Pending (${samples}/3 samples)</span>"
     }
     if (h in ["Poor", "Offline"]) {
         def baseDisplay = h == "Poor"
             ? "🔴 Poor"
             : "💀 <span style='color:#991b1b;font-weight:bold;'>Offline</span>"
+
+        // FIX: Low Activity Device shown on Poor/Offline only — not on Excellent/Good
+        def lowActivity = isLowActivity(device.id as String)
+        def lowSuffix   = lowActivity ? " <span style='color:#94a3b8;font-size:10px;'>ℹ️ Low Activity Device</span>" : ""
+
         def verifyMethod = state.verifying?.get(device.id)
-        if (verifyMethod == null) return baseDisplay
+        if (verifyMethod == null) return "${baseDisplay}${lowSuffix}"
         switch (verifyMethod) {
-            case "refresh":           return "${baseDisplay} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (refresh sent)</span>"
-            case "ping":              return "${baseDisplay} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (ping sent)</span>"
-            case "hue_bridge":        return "${baseDisplay} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (Hue Bridge refresh sent)</span>"
-            case "hue_no_bridge":     return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — add Hue Bridge to monitored devices</span>"
-            case "hue_bridge_failed": return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Hue Bridge refresh failed</span>"
-            case "virtual":           return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — virtual device</span>"
-            case "none":              return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — device does not support ping or refresh</span>"
-            case "failed":            return "${baseDisplay} <span style='color:#94a3b8;font-size:11px;'>⚠ Verification attempted but command failed</span>"
-            default:                  return baseDisplay
+            case "refresh":           return "${baseDisplay}${lowSuffix} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (refresh sent)</span>"
+            case "ping":              return "${baseDisplay}${lowSuffix} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (ping sent)</span>"
+            case "hue_bridge":        return "${baseDisplay}${lowSuffix} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (Hue Bridge refresh sent)</span>"
+            case "hue_no_bridge":     return "${baseDisplay}${lowSuffix} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — add Hue Bridge to monitored devices</span>"
+            case "hue_bridge_failed": return "${baseDisplay}${lowSuffix} <span style='color:#94a3b8;font-size:11px;'>⚠ Hue Bridge refresh failed</span>"
+            case "virtual":           return "${baseDisplay}${lowSuffix} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — virtual device</span>"
+            case "none":              return "${baseDisplay}${lowSuffix} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — device does not support ping or refresh</span>"
+            case "failed":            return "${baseDisplay}${lowSuffix} <span style='color:#94a3b8;font-size:11px;'>⚠ Verification attempted but command failed</span>"
+            default:                  return "${baseDisplay}${lowSuffix}"
         }
     }
-    // Append Low Activity flag to rated devices that qualify
-    def lowActivity = isLowActivity(device.id as String)
-    def lowSuffix   = lowActivity ? " <span style='color:#f97316;font-size:10px;'>⚠ Low Activity</span>" : ""
+    // FIX: Low Activity Device only shown on Fair — not on Excellent/Good
+    // A device checking in on schedule cannot meaningfully also be flagged as low activity
     switch (h) {
-        case "Excellent": return "🟢 Excellent${lowSuffix}"
-        case "Good":      return "🟢 Good${lowSuffix}"
-        case "Fair":      return "🟠 Fair${lowSuffix}"
-        default:          return "${h}${lowSuffix}"
+        case "Excellent": return "🟢 Excellent"
+        case "Good":      return "🟢 Good"
+        case "Fair":
+            def lowActivity = isLowActivity(device.id as String)
+            def lowSuffix   = lowActivity ? " <span style='color:#94a3b8;font-size:10px;'>ℹ️ Low Activity Device</span>" : ""
+            return "🟠 Fair${lowSuffix}"
+        default: return "${h}"
     }
 }
 
@@ -1400,7 +1341,7 @@ def activitySummaryPage() {
                 return a.displayName.trim() <=> b.displayName.trim()
             }
 
-            def hubIp    = location?.hub?.localIP ?: ""
+            def hubIp = location?.hub?.localIP ?: ""
 
             def table = "<table id='activityTable' style='width:100%; border-collapse: collapse; border: 1px solid #ccc;'>"
             table += "<thead><tr style='font-weight:bold; background-color:#f0f0f0;'>"
@@ -1408,7 +1349,7 @@ def activitySummaryPage() {
             table += "<th style='padding:4px; border:1px solid #ccc;'>Protocol</th>"
             table += "<th style='padding:4px; border:1px solid #ccc;' title='Health rating based on check-in frequency. Shows sample progress while learning.'>Health</th>"
             table += "<th style='padding:4px; border:1px solid #ccc;' title='Current reported state of the device'>Current State</th>"
-            table += "<th style='padding:4px; border:1px solid #ccc;' title='How long ago this state last changed'>State Changed</th>"
+            table += "<th style='padding:4px; border:1px solid #ccc;' title='How long ago this state last changed. Updates on each scan cycle, not in real time.'>State Changed</th>"
             table += "<th style='padding:4px; border:1px solid #ccc;' title='How long ago the device last sent any activity to the hub'>Last Check-in</th>"
             table += "<th style='padding:4px; border:1px solid #ccc;'>Avg Check-in</th>"
             table += "</tr></thead><tbody>"
@@ -1446,7 +1387,6 @@ def activitySummaryPage() {
                     stateOrderVal = stateInfo.label.toLowerCase()
                 }
 
-                // State changed display
                 def tracked          = state.stateHistory?.get(device.id as String)
                 def lastChangedMs    = tracked?.lastChanged ? (tracked.lastChanged as Long) : 0
                 def lastChangedStr   = lastChangedMs ? formatTimeAgo(lastChangedMs) : "—"
@@ -1513,10 +1453,13 @@ def hubMeshSummaryPage() {
                 return
             }
 
-            def groups  = buildHubMeshSummary()
-            def hubIp   = location?.hub?.localIP ?: ""
+            def groups = buildHubMeshSummary()
+            def hubIp  = location?.hub?.localIP ?: ""
 
-            // Banner summary per hub
+            // Source hub detection note — shown at top since all devices will show "Remote Hub"
+            // on current Hubitat firmware. Better to set expectations immediately.
+            paragraph rawHtml: true, "<div style='background-color:#f8f0ff; border-left:3px solid #8b5cf6; padding:6px 10px; border-radius:0; font-size:12px; color:#6d28d9; margin-bottom:8px;'>ℹ️ Source hub detection is not supported on current Hubitat firmware (tested on C-8 Pro v2.5.0.126–128). All Hub Mesh devices show as \"Remote Hub\" — this does not affect health monitoring. Grouping will improve if Hubitat exposes hub name data in a future firmware release.</div>"
+
             def bannerHtml = ""
             groups.each { srcHub, counts ->
                 def worstColor = counts.offline > 0 ? "#991b1b" :
@@ -1539,7 +1482,6 @@ def hubMeshSummaryPage() {
 
             paragraph rawHtml: true, bannerHtml
 
-            // Full device table for Hub Mesh devices
             def table = "<table style='width:100%; border-collapse: collapse; border: 1px solid #ccc;'>"
             table += "<tr style='font-weight:bold; background-color:#f0f0f0;'>"
             table += "<td style='padding:4px; border:1px solid #ccc;'>Device</td>"
@@ -1596,8 +1538,6 @@ def hubMeshSummaryPage() {
                 paragraph "<span style='color:#94a3b8;font-size:11px;'>⚠ Device links are accessible on your local network only.</span>"
             }
             paragraph "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>"
-
-            paragraph "<span style='color:#94a3b8;font-size:11px;'>ℹ️ Source hub detection has been confirmed as unsupported on current Hubitat firmware (tested on C-8 Pro v2.5.0.126–128). All Hub Mesh devices will show as \"Remote Hub\" — this does not affect health monitoring. Hub grouping will improve automatically if Hubitat exposes this data in a future firmware release.</span>"
         }
     }
 }
@@ -1633,7 +1573,7 @@ def problemDevicesPage() {
             table += "<td style='padding:4px; border:1px solid #ccc;'>Protocol</td>"
             table += "<td style='padding:4px; border:1px solid #ccc;'>Health</td>"
             table += "<td style='padding:4px; border:1px solid #ccc;' title='Current reported state of the device'>State</td>"
-            table += "<td style='padding:4px; border:1px solid #ccc;' title='How long ago this state last changed'>State Changed</td>"
+            table += "<td style='padding:4px; border:1px solid #ccc;' title='How long ago this state last changed. Updates on each scan cycle, not in real time.'>State Changed</td>"
             table += "<td style='padding:4px; border:1px solid #ccc;' title='How long ago the device last sent any activity to the hub'>Last Check-in</td>"
             table += "<td style='padding:4px; border:1px solid #ccc;'>Avg Check-in</td>"
             table += "</tr>"
@@ -1658,8 +1598,6 @@ def problemDevicesPage() {
                 def lastChangedMs  = tracked?.lastChanged ? (tracked.lastChanged as Long) : 0
                 def lastChangedStr = lastChangedMs ? formatTimeAgo(lastChangedMs) : "—"
 
-                def healthDisplay  = getHealthDisplay(device)
-
                 rowNum++
                 def deviceLink = hubIp
                     ? "<a href='http://${hubIp}/device/edit/${device.id}' target='_blank'>${device.displayName}</a>"
@@ -1668,7 +1606,7 @@ def problemDevicesPage() {
                 table += "<tr style='background-color:${rowBg};'>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${deviceLink}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'><span style='color:${getProtocolColor(protocol)};font-weight:bold;'>${protocol}</span></td>"
-                table += "<td style='padding:4px; border:1px solid #ccc;'>${healthDisplay}</td>"
+                table += "<td style='padding:4px; border:1px solid #ccc;'>${getHealthDisplay(device)}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc; text-align:center;'>${stateDisplay}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${lastChangedStr}</td>"
                 table += "<td style='padding:4px; border:1px solid #ccc;'>${lastSeen}</td>"
@@ -1691,8 +1629,6 @@ def problemDevicesPage() {
 def protocolOverridePage() {
     def allDevices = getAllMonitoredDevices()
 
-    // Protocol override candidates — Hub Mesh, LAN, Virtual, Hub Variable
-    // or devices with an existing protocol override set
     def protocolDevList = allDevices
         .findAll { device ->
             def hasOverride = settings["protocolOverride_${device.id}"] &&
@@ -1702,8 +1638,6 @@ def protocolOverridePage() {
         }
         .sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
 
-    // State attribute override candidates — devices with more than one
-    // meaningful attribute, or devices with an existing state override set
     def stateDevList = allDevices
         .findAll { device ->
             def hasOverride = settings["stateAttrOverride_${device.id}"] &&
@@ -1727,6 +1661,8 @@ def protocolOverridePage() {
             }
         } else {
             section("<b>Unidentified / Overridden Devices (${protocolDevList.size()})</b>") {
+                paragraph "Devices listed here auto-detected as <b>Hub Mesh</b>, <b>LAN</b>, <b>Virtual</b>, or <b>Hub Variable</b>, " +
+                          "or have an active manual override set. Use this page to correct any misdetected protocol."
                 protocolDevList.each { device ->
                     def currentProtocol = getProtocol(device)
                     def currentOverride = settings["protocolOverride_${device.id}"] ?: "Auto-detect"
@@ -1759,12 +1695,9 @@ def protocolOverridePage() {
                     def currentLabel     = autoResult ? autoResult.label : "—"
                     def attrs            = getMeaningfulAttributes(device)
                     def options          = ["Auto-detect"] + attrs
-
-                    // Show what it's currently displaying so user knows if it needs fixing
                     def currentDisplay   = currentOverride == "Auto-detect"
                         ? "auto: ${currentLabel}"
                         : "override: ${currentOverride}"
-
                     input "stateAttrOverride_${device.id}", "enum",
                           title: "<b>${device.displayName}</b> — showing: <span style='color:#94a3b8;'>${currentDisplay}</span>",
                           options: options,
@@ -1927,6 +1860,8 @@ def resetHistoryConfirmPage() {
                 resetHistoryDevices.each { deviceId ->
                     def device = devList.find { it.id == deviceId }
                     if (device) {
+                        // FIX: seed block matches Plus's trimmed history structure
+                        // (no lastCheckin or missedCheckins — those fields were retired in Plus)
                         state.history[device.id] = [
                             lastSeen:     now(),
                             samples:      [],
@@ -2022,7 +1957,7 @@ def scheduledSummary() {
         if (!isDeviceSnoozed(device.id as String)) {
             def h = state.health?.get(device.id) ?: "Pending"
             if (sections.containsKey(h)) {
-                // Include current state in notification name for actionable context
+                // FIX: only include state brackets when state is available
                 def stateInfo = getCurrentStateDisplay(device)
                 def stateStr  = stateInfo ? " [${stateInfo.label}]" : ""
                 def lastStr   = state.history?.get(device.id)?.lastSeen
@@ -2030,11 +1965,11 @@ def scheduledSummary() {
                     : ""
                 sections[h].list << "${device.displayName.trim()}${stateStr}${lastStr}"
             }
-
         }
     }
 
-    if (suppressEmptyReport != null ? suppressEmptyReport : false) {
+    // FIX: use settings?.suppressEmptyReport instead of bare variable reference
+    if (settings?.suppressEmptyReport) {
         def hasContent = sections.any { h, data -> data.enabled && data.list }
         if (!hasContent) return
     }
@@ -2069,12 +2004,25 @@ def infoPage(Map params = [:]) {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
                       "<b>Device Health Monitor Plus</b> adds four enhancements on top of DHM v1.3.12:<br><br>" +
                       "1. <b>State Column</b> — Activity Summary now shows each device's current ON/OFF/motion/contact/lock/presence state inline, color-coded for quick scanning.<br><br>" +
-                      "2. <b>State Changed Column</b> — Shows how long ago the device last changed state, separate from Last Seen. A motion sensor can check in frequently but still be stuck reporting the same state.<br><br>" +
-
+                      "2. <b>State Changed Column</b> — Shows how long ago the device last changed state, separate from Last Seen. A motion sensor can check in frequently but still be stuck reporting the same state. Note: updates on each scan cycle, not in real time.<br><br>" +
                       "3. <b>Hub Mesh Overview</b> — A dedicated page grouping Hub Mesh devices by their source hub with per-hub health banners. Useful when you have many Hub Mesh devices across multiple linked hubs.<br><br>" +
                       "4. <b>Richer Notifications</b> — Alert messages now include each device's current state and last-seen time inline, making them more actionable without needing to open the app.</div>"
         }
 
+        section("<b>🔑 Health Ratings</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "<div style='overflow-x:auto;'><table style='width:100%; border-collapse: collapse;'>" +
+                      "<tr style='font-weight:bold;'><td>Health</td><td>Meaning</td></tr>" +
+                      "<tr><td>⏳ Pending (n/3 samples)</td><td>Learning — sample count shown inline until 3 are collected</td></tr>" +
+                      "<tr><td>🟢 Excellent</td><td>Checking in within 1.2x of baseline</td></tr>" +
+                      "<tr><td>🟢 Good</td><td>Checking in within 2x of baseline</td></tr>" +
+                      "<tr><td>🟠 Fair</td><td>Checking in within 3x of baseline</td></tr>" +
+                      "<tr><td>🔴 Poor</td><td>Checking in beyond 3x of baseline</td></tr>" +
+                      "<tr><td>💀 Offline</td><td>No activity for ${settings?.offlineThresholdHours ?: 72}h (hard threshold)</td></tr>" +
+                      "<tr><td>😴 Snoozed</td><td>Excluded from notifications for a set duration</td></tr>" +
+                      "<tr><td>ℹ️ Low Activity Device</td><td>Monitored 7+ days with fewer than 3 samples — normal for devices that are used infrequently (lights, switches, garage doors). Only shown on Fair, Poor, and Offline ratings where it provides context for the lower score.</td></tr>" +
+                      "</table></div></div>"
+        }
 
         section("<b>🔗 Hub Mesh Source Hub Detection</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
@@ -2082,31 +2030,18 @@ def infoPage(Map params = [:]) {
                       "1. <b>hubName data value</b> — some Hubitat versions populate this on linked devices<br>" +
                       "2. <b>Device Network ID prefix</b> — some integrations encode the hub name in the DNI<br>" +
                       "3. <b>Fallback: \"Remote Hub\"</b> — if neither is available<br><br>" +
-                      "If all your Hub Mesh devices show as \"Remote Hub\", the source hub name is not being transmitted through Hub Mesh. " +
-                      "This is a platform-level limitation and does not affect health monitoring — all devices are still fully tracked. " +
-                      "You can use Protocol Overrides to add a custom label if needed in a future version.</div>"
-        }
-
-        section("<b>🔑 Health Ratings</b>") {
-            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "<div style='overflow-x:auto;'><table style='width:100%; border-collapse: collapse;'>" +
-                      "<tr style='font-weight:bold;'><td>Health</td><td>Meaning</td></tr>" +
-                      "<tr><td>⏳ Pending (n/3)</td><td>Learning — sample count shown inline until 3 are collected</td></tr>" +
-                      "<tr><td>🟢 Excellent</td><td>Checking in within 1.2x of baseline</td></tr>" +
-                      "<tr><td>🟢 Good</td><td>Checking in within 2x of baseline</td></tr>" +
-                      "<tr><td>🟠 Fair</td><td>Checking in within 3x of baseline</td></tr>" +
-                      "<tr><td>🔴 Poor</td><td>Checking in beyond 3x of baseline</td></tr>" +
-                      "<tr><td>💀 Offline</td><td>No activity for ${settings?.offlineThresholdHours ?: 72}h (hard threshold)</td></tr>" +
-
-                      "<tr><td>😴 Snoozed</td><td>Excluded from notifications for a set duration</td></tr>" +
-                      "</table></div></div>"
+                      "Source hub detection has been confirmed as unsupported on current Hubitat firmware (tested on C-8 Pro v2.5.0.126–128). " +
+                      "All Hub Mesh devices will show as \"Remote Hub\" — this does not affect health monitoring. " +
+                      "Hub grouping will improve automatically if Hubitat exposes this data in a future firmware release.</div>"
         }
 
         section("<b>💡 Tips for Best Results</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "• The Activity Summary reflects the state at the last scan — device states do not update live in the browser. Use <b>Force Scan</b> to refresh. This is by design; live updates would require a fundamentally different and heavier architecture that conflicts with DHM's lightweight polling approach.<br>" +
-                      "• Hub Mesh Overview is most useful when you have 10+ Hub Mesh devices — for smaller setups the Activity Summary is sufficient<br>" +
-                      "• Notifications now include [state] and last-seen time — if you use Pushover, the extra context makes alerts much more actionable</div>"
+                      "• The Activity Summary reflects the state at the last scan — device states do not update live in the browser. Use <b>Force Scan</b> to refresh.<br>" +
+                      "• The State Changed column updates on each scan cycle, not in real time — a state change between scans will be captured on the next scan.<br>" +
+                      "• Hub Mesh Overview is most useful when you have 10+ Hub Mesh devices — for smaller setups the Activity Summary is sufficient.<br>" +
+                      "• Notifications now include [state] and last-seen time for devices where a state is detectable — if no state is available the device name and last-seen time are shown without brackets.<br>" +
+                      "• <b>ℹ️ Low Activity Device</b> on a Fair, Poor, or Offline rating means the device checks in infrequently by nature — not that something is broken. Common on lights, switches, and garage doors.</div>"
         }
     }
 }
