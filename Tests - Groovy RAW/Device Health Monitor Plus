@@ -7,7 +7,7 @@ definition(
     importUrl: "",
     iconUrl: "",
     iconX2Url: "",
-    version: "1.0.3-plus",
+    version: "1.0.4-plus",
     doNotFocus: true
 )
 
@@ -1004,7 +1004,7 @@ def mainPage() {
             input "debugMode", "bool",
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor Plus v1.0.3-plus</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor Plus v1.0.4-plus</span>"
         }
     }
 }
@@ -1664,14 +1664,12 @@ def protocolOverridePage() {
             }
         } else {
             section("<b>Unidentified / Overridden Devices (${protocolDevList.size()})</b>") {
-                paragraph "Devices listed here auto-detected as <b>Hub Mesh</b>, <b>LAN</b>, <b>Virtual</b>, or <b>Hub Variable</b>, " +
-                          "or have an active manual override set. Use this page to correct any misdetected protocol."
                 protocolDevList.each { device ->
                     def currentProtocol = getProtocol(device)
                     def currentOverride = settings["protocolOverride_${device.id}"] ?: "Auto-detect"
                     def isOverridden    = currentOverride != "Auto-detect"
                     def statusDisplay   = isOverridden
-                        ? "<span style='color:#1565c0; font-weight:bold;'>⚙️ Override Active: ${currentProtocol}</span>"
+                        ? "<span style='color:#a855f7; font-weight:bold;'>⚙️ Override Active: ${currentProtocol}</span>"
                         : "<span style='color:#475569;'>Auto-detected: <span style='color:${getProtocolColor(currentProtocol)};'>${currentProtocol}</span></span>"
                     input "protocolOverride_${device.id}", "enum",
                           title: "<b>${device.displayName}</b> — ${statusDisplay}",
