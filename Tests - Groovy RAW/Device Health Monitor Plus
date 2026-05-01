@@ -7,7 +7,7 @@ definition(
     importUrl: "",
     iconUrl: "",
     iconX2Url: "",
-    version: "1.0.4-plus",
+    version: "1.0.5-plus",
     doNotFocus: true
 )
 
@@ -1004,7 +1004,7 @@ def mainPage() {
             input "debugMode", "bool",
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor Plus v1.0.4-plus</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor Plus v1.0.5-plus</span>"
         }
     }
 }
@@ -1652,8 +1652,8 @@ def protocolOverridePage() {
 
         // ── Protocol Overrides ────────────────────────────────────
         section("") {
-            paragraph "<div style='background-color:#eef2ff; border-left:4px solid #3b82f6; padding:10px 12px; border-radius:3px;'>" +
-                      "<span style='font-size:15px; font-weight:bold; color:#1e3a5f;'>🔀 Protocol Overrides</span><br>" +
+            paragraph "<div style='background-color:#fdf4ff; border-left:4px solid #a855f7; padding:10px 12px; border-radius:3px;'>" +
+                      "<span style='font-size:15px; font-weight:bold; color:#4a1772;'>🔀 Protocol Overrides</span><br>" +
                       "<span style='color:#475569;font-size:12px;'>Some Hub Mesh linked devices and LAN devices cannot be automatically identified. " +
                       "Set the correct protocol manually — override always takes priority. " +
                       "Set back to <b>Auto-detect</b> to restore automatic detection.</span></div>"
