@@ -7,7 +7,7 @@ definition(
     importUrl: "",
     iconUrl: "",
     iconX2Url: "",
-    version: "1.0.8-plus",
+    version: "1.0.9-plus",
     doNotFocus: true
 )
 
@@ -601,6 +601,25 @@ def getCurrentStateDisplay(device) {
             if (lanResult != null) return lanResult
         }
 
+        // ── Measurement fallback ──────────────────────────────────
+        // Only reached for devices with no standard capability attributes —
+        // pure temp/humidity/CO2/air quality sensors land here.
+        // Primary capabilities (motion, contact, switch, etc.) always win above.
+        // Showing a measurement is more useful than an empty "—" column.
+        def temp = device.currentValue("temperature")
+        if (temp != null) {
+            def unit = location?.temperatureScale ?: "F"
+            return [label: "${temp}°${unit}", color: "#c0c4cc", isAlert: false, type: "temperature"]
+        }
+        def humidity = device.currentValue("humidity")
+        if (humidity != null) {
+            return [label: "${humidity}% RH", color: "#c0c4cc", isAlert: false, type: "humidity"]
+        }
+        def co2 = device.currentValue("carbonDioxide")
+        if (co2 != null) {
+            return [label: "${co2} ppm CO₂", color: "#c0c4cc", isAlert: false, type: "carbonDioxide"]
+        }
+
     } catch (e) {
         if (debugEnabled()) log.debug "getCurrentStateDisplay error for ${device.displayName}: ${e.message}"
     }
@@ -1004,7 +1023,7 @@ def mainPage() {
             input "debugMode", "bool",
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor Plus v1.0.8-plus</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor Plus v1.0.9-plus</span>"
         }
     }
 }
