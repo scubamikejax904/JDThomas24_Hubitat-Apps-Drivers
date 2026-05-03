@@ -6,7 +6,7 @@
   "description": "Monitor device check-in health across Zigbee, Z-Wave, Matter, Hub Mesh, LAN, Virtual and Hub Variable — learns each device's normal pattern and alerts you when something goes quiet.",
   "dateReleased": "4/28/26",
   "minimumHEVersion": "2.3.0",
-  "releaseNotes": "v1.4.0 - Added Current State column with color-coded pill badges, State Changed column, and Hub Mesh Overview page. Temperature/humidity sensors now show readings in the state column. Notifications include device state and last-seen time inline. Override pages redesigned for clarity. Low Activity Device label and bug fixes.⚠ After updating: open the app and tap Done once to initialize new state tracking, then Force Scan twice to populate the State Changed column..",
+  "releaseNotes": "v1.4.0 - Added Current State column with color-coded pill badges, State Changed column, and Hub Mesh Overview page. Temperature/humidity sensors now show readings in the state column. Notifications include device state and last-seen time inline. Override pages redesigned for clarity. Low Activity Device label and bug fixes. ⚠ After updating: open the app and tap Done once, then Force Scan twice to populate the State Changed column.",
   "apps": [
     {
       "id": "a045ac2b-5fe0-4159-830b-8550899d9553",
