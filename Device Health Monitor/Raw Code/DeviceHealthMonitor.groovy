@@ -1800,7 +1800,7 @@ def protocolOverridePage() {
                     def overrideStateResult = currentOverride != "Auto-detect" ? getOverrideStateDisplay(device, currentOverride) : null
                     def overrideValueDisplay = overrideStateResult ? formatStateDisplay(overrideStateResult) : "<span style='color:#1f2937;font-weight:600;font-size:13px;'>${currentOverride}</span>"
                     def currentDisplay   = currentOverride == "Auto-detect"
-                        ? "<span style='color:#374151;font-size:13px;font-weight:500;'>Auto-detected: <span style='color:#1f2937;font-weight:600;font-size:13px;'>${currentLabel}</span></span>"
+                        ? "<span style='color:#374151;font-size:13px;font-weight:500;'>Auto-detected: ${autoResult ? formatStateDisplay(autoResult) : "<span style='color:#1f2937;font-weight:600;font-size:13px;'>${currentLabel}</span>"}</span>"
                         : "<span style='color:#a855f7; font-weight:bold;'>⚙️ Override Active: ${overrideValueDisplay}</span>"
                     input "stateAttrOverride_${device.id}", "enum",
                           title: "<b>${device.displayName}</b> — ${currentDisplay}",
