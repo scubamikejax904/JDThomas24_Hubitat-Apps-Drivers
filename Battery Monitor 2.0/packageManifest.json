@@ -6,7 +6,7 @@
   "description": "Advanced Hubitat battery monitoring with analytics, trends and replacement tracking. Recurring scan schedule, confidence-weighted health, EWMA smoothing.",
   "dateReleased": "4/8/26",
   "minimumHEVersion": "2.3.0",
-  "releaseNotes": "v2.4.19 - Bugfix: firstSeenDate migration was silently failing to persist due to Groovy nested map mutation behavior in Hubitat state storage. Fixed using explicit HashMap copy — Days progress bar will now correctly advance after updating.",
+  "releaseNotes": "v2.4.20 - Added orphaned replacement history cleanup: when a device is removed from the monitored list, its replacement history entries are now automatically purged on the next settings save. Prevents stale entries accumulating when devices are swapped out. Also confirmed doNotFocus: true in app definition to prevent hub UI focus stealing after installs and updates.",
   "apps": [
     {
       "name": "Battery Monitor 2.0",
