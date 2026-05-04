@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.19",
+    version: "2.4.20",
     doNotFocus: true
 )
 
@@ -34,6 +34,17 @@ def updated() {
         state.history.remove(removedId)
         state.trend?.remove(removedId)
         if (debugMode) log.debug "Cleaned up removed device: ${removedId}"
+    }
+
+    // v2.4.20: purge orphaned replacement history entries for devices no longer monitored
+    // Prevents stale entries accumulating when devices are replaced and removed from BM
+    if (state.replacements) {
+        def before = state.replacements.size()
+        state.replacements = state.replacements.findAll { r ->
+            r.deviceId ? currentIds.contains(r.deviceId) : true
+        }
+        def pruned = before - state.replacements.size()
+        if (pruned > 0 && debugMode) log.debug "Purged ${pruned} orphaned replacement history entr${pruned == 1 ? 'y' : 'ies'}"
     }
 
     // v2.4.19: fixed firstSeenDate migration — use explicit HashMap copy to ensure
@@ -300,7 +311,7 @@ def mainPage() {
 
         section("<b>Diagnostics</b>") {
             input "debugMode", "bool", title: "Debug Logging (auto-disables after 30 min)", defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Battery Monitor v2.4.19</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Battery Monitor v2.4.20</span>"
         }
     }
 }
