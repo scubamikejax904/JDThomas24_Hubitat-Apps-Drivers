@@ -1767,7 +1767,7 @@ def protocolOverridePage() {
                     def isOverridden    = currentOverride != "Auto-detect"
                     def statusDisplay   = isOverridden
                         ? "<span style='color:#a855f7; font-weight:bold;'>⚙️ Override Active: ${currentProtocol}</span>"
-                        : "<span style='color:#374151;font-size:12px;font-weight:500;'>Auto-detected: <span style='background:${getProtocolColor(currentProtocol)}33; color:${getProtocolColor(currentProtocol)}; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${currentProtocol}</span></span>"
+                        : "<span style='color:#374151;font-size:13px;font-weight:500;'>Auto-detected: <span style='color:${getProtocolColor(currentProtocol)};font-weight:700;font-size:13px;'>${currentProtocol}</span></span>"
                     input "protocolOverride_${device.id}", "enum",
                           title: "<b>${device.displayName}</b> — ${statusDisplay}",
                           options: ["Auto-detect", "Zigbee", "Z-Wave", "Matter",
@@ -1798,7 +1798,7 @@ def protocolOverridePage() {
                     def attrs            = getMeaningfulAttributes(device)
                     def options          = ["Auto-detect"] + attrs
                     def currentDisplay   = currentOverride == "Auto-detect"
-                        ? "<span style='color:#374151;font-size:12px;font-weight:500;'>Auto-detected: ${autoResult ? formatStateDisplayOverride(autoResult) : "<span style='color:#6b7280;font-size:12px;'>—</span>"}</span>"
+                        ? "<span style='color:#374151;font-size:13px;font-weight:500;'>Auto-detected: <span style='color:#1f2937;font-weight:600;font-size:13px;'>${currentLabel}</span></span>"
                         : "<span style='color:#a855f7; font-weight:bold;'>⚙️ Override Active: ${currentOverride}</span>"
                     input "stateAttrOverride_${device.id}", "enum",
                           title: "<b>${device.displayName}</b> — ${currentDisplay}",
