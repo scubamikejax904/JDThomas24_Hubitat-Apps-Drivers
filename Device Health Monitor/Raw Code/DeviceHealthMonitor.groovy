@@ -1378,15 +1378,15 @@ def formatStateDisplay(stateInfo) {
     def color = stateInfo.color
     switch (color) {
         case "#c62828":
-            return "<span style='background:#fee2e2; color:#b91c1c; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${label}</span>"
+            return "<span style='background:#fee2e2; color:#b91c1c; padding:3px 10px; border-radius:10px; font-weight:700; font-size:13px; display:inline-block;'>${label}</span>"
         case "#e65100":
-            return "<span style='background:#fff3e0; color:#c2410c; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${label}</span>"
+            return "<span style='background:#fff3e0; color:#c2410c; padding:3px 10px; border-radius:10px; font-weight:700; font-size:13px; display:inline-block;'>${label}</span>"
         case "#1565c0":
-            return "<span style='background:#dbeafe; color:#1d4ed8; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${label}</span>"
+            return "<span style='background:#dbeafe; color:#1d4ed8; padding:3px 10px; border-radius:10px; font-weight:700; font-size:13px; display:inline-block;'>${label}</span>"
         case "#8b5cf6":
-            return "<span style='background:#f3e8ff; color:#7c3aed; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${label}</span>"
+            return "<span style='background:#f3e8ff; color:#7c3aed; padding:3px 10px; border-radius:10px; font-weight:700; font-size:13px; display:inline-block;'>${label}</span>"
         case "#16a34a":
-            return "<span style='background:#dcfce7; color:#15803d; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${label}</span>"
+            return "<span style='background:#dcfce7; color:#15803d; padding:3px 10px; border-radius:10px; font-weight:700; font-size:13px; display:inline-block;'>${label}</span>"
         default:
             return "<span style='color:#94a3b8;'>${label}</span>"
     }
@@ -1797,9 +1797,11 @@ def protocolOverridePage() {
                     def currentLabel     = autoResult ? autoResult.label : "—"
                     def attrs            = getMeaningfulAttributes(device)
                     def options          = ["Auto-detect"] + attrs
+                    def overrideStateResult = currentOverride != "Auto-detect" ? getOverrideStateDisplay(device, currentOverride) : null
+                    def overrideValueDisplay = overrideStateResult ? formatStateDisplay(overrideStateResult) : "<span style='color:#1f2937;font-weight:600;font-size:13px;'>${currentOverride}</span>"
                     def currentDisplay   = currentOverride == "Auto-detect"
                         ? "<span style='color:#374151;font-size:13px;font-weight:500;'>Auto-detected: <span style='color:#1f2937;font-weight:600;font-size:13px;'>${currentLabel}</span></span>"
-                        : "<span style='color:#a855f7; font-weight:bold;'>⚙️ Override Active: ${currentOverride}</span>"
+                        : "<span style='color:#a855f7; font-weight:bold;'>⚙️ Override Active: ${overrideValueDisplay}</span>"
                     input "stateAttrOverride_${device.id}", "enum",
                           title: "<b>${device.displayName}</b> — ${currentDisplay}",
                           options: options,
