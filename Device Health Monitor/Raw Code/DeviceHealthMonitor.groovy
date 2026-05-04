@@ -265,27 +265,32 @@ def getMeaningfulAttributes(device) {
     // Device-type specific numeric attributes that are meaningful as state options.
     // Added per device type to avoid polluting multi-sensors (motion+temp etc.)
     // with measurement attributes they don't need in the override list.
-    def driverName = (device.typeName ?: "").toLowerCase()
+    // Check both typeName and device.name — Hub Mesh linked devices may report a
+    // generic typeName while preserving the original device name.
+    def driverName  = (device.typeName ?: "").toLowerCase()
+    def deviceName  = (device.name ?: "").toLowerCase()
+    def displayName = (device.displayName ?: "").toLowerCase()
+    def nameCheck   = "${driverName} ${deviceName} ${displayName}"
 
-    def isPrinter = driverName.contains("moonraker") || driverName.contains("klipper") ||
-                    driverName.contains("octoprint") || driverName.contains("bambu") ||
-                    driverName.contains("prusa") || driverName.contains("3d print") ||
-                    driverName.contains("printer")
+    def isPrinter = nameCheck.contains("moonraker") || nameCheck.contains("klipper") ||
+                    nameCheck.contains("octoprint") || nameCheck.contains("bambu") ||
+                    nameCheck.contains("prusa") || nameCheck.contains("3d print") ||
+                    nameCheck.contains("printer")
     if (isPrinter) known += ["progress", "currentLayer", "printTime", "remainingTime",
                               "printTimeLeft", "totalLayers", "fileName"]
 
-    def isThermostat = driverName.contains("thermostat") || driverName.contains("ecobee") ||
-                       driverName.contains("nest") || driverName.contains("honeywell") ||
-                       driverName.contains("sinope")
+    def isThermostat = nameCheck.contains("thermostat") || nameCheck.contains("ecobee") ||
+                       nameCheck.contains("nest") || nameCheck.contains("honeywell") ||
+                       nameCheck.contains("sinope")
     if (isThermostat) known += ["heatingSetpoint", "coolingSetpoint", "thermostatSetpoint",
                                  "temperature", "humidity"]
 
-    def isEV = driverName.contains("tesla") || driverName.contains("electric vehicle")
+    def isEV = nameCheck.contains("tesla") || nameCheck.contains("electric vehicle")
     if (isEV) known += ["battery", "batteryLevel", "chargingState", "range", "odometer"]
 
-    def isMedia = driverName.contains("sonos") || driverName.contains("denon") ||
-                  driverName.contains("yamaha") || driverName.contains("roku") ||
-                  driverName.contains("apple tv") || driverName.contains("media player")
+    def isMedia = nameCheck.contains("sonos") || nameCheck.contains("denon") ||
+                  nameCheck.contains("yamaha") || nameCheck.contains("roku") ||
+                  nameCheck.contains("apple tv") || nameCheck.contains("media player")
     if (isMedia) known += ["trackDescription", "trackData", "mediaPlaybackStatus",
                             "transportStatus", "volume", "level"]
 
@@ -1387,6 +1392,29 @@ def formatStateDisplay(stateInfo) {
     }
 }
 
+// Renders state for the override page — always uses a pill, even for inactive/gray states.
+// This ensures OFF/Inactive/Locked are clearly readable in the override list context.
+def formatStateDisplayOverride(stateInfo) {
+    if (!stateInfo) return "—"
+    def label = stateInfo.label
+    def color = stateInfo.color
+    switch (color) {
+        case "#c62828":
+            return "<span style='background:#fee2e2; color:#b91c1c; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${label}</span>"
+        case "#e65100":
+            return "<span style='background:#fff3e0; color:#c2410c; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${label}</span>"
+        case "#1565c0":
+            return "<span style='background:#dbeafe; color:#1d4ed8; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${label}</span>"
+        case "#8b5cf6":
+            return "<span style='background:#f3e8ff; color:#7c3aed; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${label}</span>"
+        case "#16a34a":
+            return "<span style='background:#dcfce7; color:#15803d; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${label}</span>"
+        default:
+            // Gray inactive states — give them a visible pill in the override context
+            return "<span style='background:#f1f5f9; color:#475569; padding:2px 9px; border-radius:10px; font-weight:600; font-size:12px; display:inline-block;'>${label}</span>"
+    }
+}
+
 // ============================================================
 // ===================== ACTIVITY SUMMARY PAGE ===============
 // ============================================================
@@ -1771,7 +1799,7 @@ def protocolOverridePage() {
                     def attrs            = getMeaningfulAttributes(device)
                     def options          = ["Auto-detect"] + attrs
                     def currentDisplay   = currentOverride == "Auto-detect"
-                        ? "<span style='color:#374151;font-size:12px;font-weight:500;'>Auto-detected: ${autoResult ? formatStateDisplay(autoResult) : "<span style='color:#94a3b8;'>—</span>"}</span>"
+                        ? "<span style='color:#374151;font-size:12px;font-weight:500;'>Auto-detected: ${autoResult ? formatStateDisplayOverride(autoResult) : "<span style='color:#6b7280;font-size:12px;'>—</span>"}</span>"
                         : "<span style='color:#a855f7; font-weight:bold;'>⚙️ Override Active: ${currentOverride}</span>"
                     input "stateAttrOverride_${device.id}", "enum",
                           title: "<b>${device.displayName}</b> — ${currentDisplay}",
