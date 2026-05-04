@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "",
     iconX2Url: "",
-    version: "1.4.1",
+    version: "1.4.2",
     doNotFocus: true
 )
 
@@ -1057,7 +1057,7 @@ def mainPage() {
             input "debugMode", "bool",
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.4.1</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.4.2</span>"
         }
     }
 }
@@ -1780,7 +1780,7 @@ def protocolOverridePage() {
                     def currentOverride = settings["protocolOverride_${device.id}"] ?: "Auto-detect"
                     def isOverridden    = currentOverride != "Auto-detect"
                     def statusDisplay   = isOverridden
-                        ? "<span style='color:#a855f7; font-weight:bold;'>⚙️ Override Active: ${currentProtocol}</span>"
+                        ? "<span style='color:#a855f7; font-weight:bold;'>⚙️ Override Active: <span style='background:${getProtocolColor(currentProtocol)}22;color:${getProtocolColor(currentProtocol)};font-weight:700;font-size:13px;padding:2px 8px;border-radius:8px;'>${currentProtocol}</span></span>"
                         : "<span style='color:#374151;font-size:13px;font-weight:500;'>Auto-detected: <span style='background:${getProtocolColor(currentProtocol)}22;color:${getProtocolColor(currentProtocol)};font-weight:700;font-size:13px;padding:2px 8px;border-radius:8px;'>${currentProtocol}</span></span>"
                     input "protocolOverride_${device.id}", "enum",
                           title: "<b>${device.displayName}</b> — ${statusDisplay}",
@@ -2120,7 +2120,7 @@ def infoPage(Map params = [:]) {
 
         section("<b>📡 What's New in DHM Plus</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "<b>Device Health Monitor v1.4.1</b> adds four enhancements introduced since v1.3.12:<br><br>" +
+                      "<b>Device Health Monitor v1.4.2</b> adds four enhancements introduced since v1.3.12:<br><br>" +
                       "1. <b>State Column</b> — Activity Summary now shows each device's current ON/OFF/motion/contact/lock/presence state inline, color-coded for quick scanning.<br><br>" +
                       "2. <b>State Changed Column</b> — Shows how long ago the device last changed state, separate from Last Seen. A motion sensor can check in frequently but still be stuck reporting the same state. Note: updates on each scan cycle, not in real time.<br><br>" +
                       "3. <b>Hub Mesh Overview</b> — A dedicated page grouping Hub Mesh devices by their source hub with per-hub health banners. Useful when you have many Hub Mesh devices across multiple linked hubs.<br><br>" +
