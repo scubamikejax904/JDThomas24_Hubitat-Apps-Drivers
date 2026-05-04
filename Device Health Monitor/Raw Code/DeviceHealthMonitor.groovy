@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "",
     iconX2Url: "",
-    version: "1.4.0",
+    version: "1.4.1",
     doNotFocus: true
 )
 
@@ -261,18 +261,47 @@ def getMeaningfulAttributes(device) {
         "currentStatus", "printerStatus", "status", "deviceStatus",
         "healthStatus", "connectionStatus", "operatingState", "mode"
     ]
+
+    // Device-type specific numeric attributes that are meaningful as state options.
+    // Added per device type to avoid polluting multi-sensors (motion+temp etc.)
+    // with measurement attributes they don't need in the override list.
+    def driverName = (device.typeName ?: "").toLowerCase()
+
+    def isPrinter = driverName.contains("moonraker") || driverName.contains("klipper") ||
+                    driverName.contains("octoprint") || driverName.contains("bambu") ||
+                    driverName.contains("prusa") || driverName.contains("3d print") ||
+                    driverName.contains("printer")
+    if (isPrinter) known += ["progress", "currentLayer", "printTime", "remainingTime",
+                              "printTimeLeft", "totalLayers", "fileName"]
+
+    def isThermostat = driverName.contains("thermostat") || driverName.contains("ecobee") ||
+                       driverName.contains("nest") || driverName.contains("honeywell") ||
+                       driverName.contains("sinope")
+    if (isThermostat) known += ["heatingSetpoint", "coolingSetpoint", "thermostatSetpoint",
+                                 "temperature", "humidity"]
+
+    def isEV = driverName.contains("tesla") || driverName.contains("electric vehicle")
+    if (isEV) known += ["battery", "batteryLevel", "chargingState", "range", "odometer"]
+
+    def isMedia = driverName.contains("sonos") || driverName.contains("denon") ||
+                  driverName.contains("yamaha") || driverName.contains("roku") ||
+                  driverName.contains("apple tv") || driverName.contains("media player")
+    if (isMedia) known += ["trackDescription", "trackData", "mediaPlaybackStatus",
+                            "transportStatus", "volume", "level"]
+
     def found = []
     try {
         device.currentStates?.each { s ->
             if (!s?.name || s?.value == null) return
             def val = s.value.toString().trim()
             if (val in ["", "null", "0"]) return
+            // Global skip list — always excluded unless device type explicitly adds them to known
             def skipAttrs = ["battery", "batteryLastReplaced", "lastCheckin",
                              "temperature", "humidity", "illuminance", "pressure",
                              "carbonDioxide", "energy", "power", "voltage",
                              "current", "frequency", "rssi", "lqi", "driver",
                              "notPresentCounter", "restoredCounter", "firmware"]
-            if (s.name in skipAttrs) return
+            if (s.name in skipAttrs && !(s.name in known)) return
             if (val.isNumber() && !(s.name in known)) return
             found << s.name
         }
@@ -1023,7 +1052,7 @@ def mainPage() {
             input "debugMode", "bool",
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.4.0</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.4.1</span>"
         }
     }
 }
@@ -1742,7 +1771,7 @@ def protocolOverridePage() {
                     def attrs            = getMeaningfulAttributes(device)
                     def options          = ["Auto-detect"] + attrs
                     def currentDisplay   = currentOverride == "Auto-detect"
-                        ? "<span style='color:#475569;'>Current State: ${currentLabel}</span>"
+                        ? "<span style='color:#94a3b8;'>Auto-detected: <span style='color:${autoResult ? autoResult.color : '#94a3b8'};font-weight:500;'>${currentLabel}</span></span>"
                         : "<span style='color:#a855f7; font-weight:bold;'>⚙️ Override Active: ${currentOverride}</span>"
                     input "stateAttrOverride_${device.id}", "enum",
                           title: "<b>${device.displayName}</b> — ${currentDisplay}",
@@ -2048,7 +2077,7 @@ def infoPage(Map params = [:]) {
 
         section("<b>📡 What's New in DHM Plus</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "<b>Device Health Monitor v1.4.0</b> adds four enhancements introduced since v1.3.12:<br><br>" +
+                      "<b>Device Health Monitor v1.4.1</b> adds four enhancements introduced since v1.3.12:<br><br>" +
                       "1. <b>State Column</b> — Activity Summary now shows each device's current ON/OFF/motion/contact/lock/presence state inline, color-coded for quick scanning.<br><br>" +
                       "2. <b>State Changed Column</b> — Shows how long ago the device last changed state, separate from Last Seen. A motion sensor can check in frequently but still be stuck reporting the same state. Note: updates on each scan cycle, not in real time.<br><br>" +
                       "3. <b>Hub Mesh Overview</b> — A dedicated page grouping Hub Mesh devices by their source hub with per-hub health banners. Useful when you have many Hub Mesh devices across multiple linked hubs.<br><br>" +
