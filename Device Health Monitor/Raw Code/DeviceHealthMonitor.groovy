@@ -1388,7 +1388,7 @@ def formatStateDisplay(stateInfo) {
         case "#16a34a":
             return "<span style='background:#dcfce7; color:#15803d; padding:3px 10px; border-radius:10px; font-weight:700; font-size:13px; display:inline-block;'>${label}</span>"
         default:
-            return "<span style='color:#94a3b8;'>${label}</span>"
+            return "<span style='color:#4b5563;font-weight:600;font-size:13px;'>${label}</span>"
     }
 }
 
@@ -1781,7 +1781,7 @@ def protocolOverridePage() {
                     def isOverridden    = currentOverride != "Auto-detect"
                     def statusDisplay   = isOverridden
                         ? "<span style='color:#a855f7; font-weight:bold;'>⚙️ Override Active: ${currentProtocol}</span>"
-                        : "<span style='color:#374151;font-size:13px;font-weight:500;'>Auto-detected: <span style='color:${getProtocolColor(currentProtocol)};font-weight:700;font-size:13px;'>${currentProtocol}</span></span>"
+                        : "<span style='color:#374151;font-size:13px;font-weight:500;'>Auto-detected: <span style='background:${getProtocolColor(currentProtocol)}22;color:${getProtocolColor(currentProtocol)};font-weight:700;font-size:13px;padding:2px 8px;border-radius:8px;'>${currentProtocol}</span></span>"
                     input "protocolOverride_${device.id}", "enum",
                           title: "<b>${device.displayName}</b> — ${statusDisplay}",
                           options: ["Auto-detect", "Zigbee", "Z-Wave", "Matter",
