@@ -1394,6 +1394,20 @@ def formatStateDisplay(stateInfo) {
 
 // Renders state for the override page — always uses a pill, even for inactive/gray states.
 // This ensures OFF/Inactive/Locked are clearly readable in the override list context.
+def formatStateDisplayInput(stateInfo) {
+    if (!stateInfo) return "—"
+    def label = stateInfo.label
+    def color = stateInfo.color
+    switch (color) {
+        case "#c62828": return "<b><span style='color:#b91c1c;font-size:13px;'>${label}</span></b>"
+        case "#e65100": return "<b><span style='color:#c2410c;font-size:13px;'>${label}</span></b>"
+        case "#1565c0": return "<b><span style='color:#1d4ed8;font-size:13px;'>${label}</span></b>"
+        case "#8b5cf6": return "<b><span style='color:#7c3aed;font-size:13px;'>${label}</span></b>"
+        case "#16a34a": return "<b><span style='color:#15803d;font-size:13px;'>${label}</span></b>"
+        default:        return "<b><span style='color:#1f2937;font-size:13px;'>${label}</span></b>"
+    }
+}
+
 def formatStateDisplayOverride(stateInfo) {
     if (!stateInfo) return "—"
     def label = stateInfo.label
