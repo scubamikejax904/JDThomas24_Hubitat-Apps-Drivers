@@ -2,8 +2,8 @@
  *  Moonraker / Klipper 3D Printer Driver for Hubitat
  *
  *  Author:  jdthomas24
- *  Version: 1.0.45
- *  Date:    2026-04-29
+ *  Version: 1.0.46
+ *  Date:    2026-05-04
  *
  *  Copyright 2026
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
@@ -39,7 +39,7 @@
  *    marcolivierarsenault - moonraker-home-assistant
  *    Arksine - Moonraker
  */
-public static String version() { return "1.0.45" }
+public static String version() { return "1.0.46" }
 
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
@@ -113,6 +113,9 @@ preferences {
           defaultValue: "C", required: true, width: 4)
     input(name: "deviceInfoDisable",  type: "bool", title: "Disable Info logging:",  defaultValue: false, width: 4)
     input(name: "deviceDebugEnable",  type: "bool", title: "Enable Debug logging:", description: "<i>Auto-disables after 30 minutes.</i>", defaultValue: false, width: 4)
+    input(name: "suppressPollLogs",   type: "bool", title: "Suppress routine poll logs:",
+          description: "<i>Suppresses the 'printer is online' heartbeat log during printing and standby. Critical events (print complete, error, filament runout, state changes) always log regardless.</i>",
+          defaultValue: true, width: 4)
 }
 
 // ============================================================
@@ -643,11 +646,17 @@ void commandCallback(resp, data) {
 //  HELPERS
 // ============================================================
 void setOnline() {
-    if (device.currentValue("healthStatus") != "online") logInfo "printer is online"
+    if (device.currentValue("healthStatus") != "online") {
+        sendEvent(name: "healthStatus", value: "online")
+        if (!(settings?.suppressPollLogs != false)) logInfo "printer is online"
+    }
 }
 
 void setOffline() {
-    if (device.currentValue("healthStatus") != "offline") logWarn "printer is offline"
+    if (device.currentValue("healthStatus") != "offline") {
+        sendEvent(name: "healthStatus", value: "offline")
+        logWarn "printer is offline"
+    }
     sendEventX(name: "klipperState", value: "disconnected")
 }
 
