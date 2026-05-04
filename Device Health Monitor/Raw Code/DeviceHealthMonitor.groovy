@@ -1740,7 +1740,7 @@ def protocolOverridePage() {
                     def isOverridden    = currentOverride != "Auto-detect"
                     def statusDisplay   = isOverridden
                         ? "<span style='color:#a855f7; font-weight:bold;'>⚙️ Override Active: ${currentProtocol}</span>"
-                        : "<span style='color:#475569;font-size:12px;'>Auto-detected: <span style='background:${getProtocolColor(currentProtocol)}22; color:${getProtocolColor(currentProtocol)}; padding:1px 7px; border-radius:10px; font-weight:600; font-size:11px;'>${currentProtocol}</span></span>"
+                        : "<span style='color:#374151;font-size:12px;font-weight:500;'>Auto-detected: <span style='background:${getProtocolColor(currentProtocol)}33; color:${getProtocolColor(currentProtocol)}; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${currentProtocol}</span></span>"
                     input "protocolOverride_${device.id}", "enum",
                           title: "<b>${device.displayName}</b> — ${statusDisplay}",
                           options: ["Auto-detect", "Zigbee", "Z-Wave", "Matter",
@@ -1771,7 +1771,7 @@ def protocolOverridePage() {
                     def attrs            = getMeaningfulAttributes(device)
                     def options          = ["Auto-detect"] + attrs
                     def currentDisplay   = currentOverride == "Auto-detect"
-                        ? "<span style='color:#475569;font-size:12px;'>Auto-detected: ${autoResult ? formatStateDisplay(autoResult) : "<span style='color:#94a3b8;'>—</span>"}</span>"
+                        ? "<span style='color:#374151;font-size:12px;font-weight:500;'>Auto-detected: ${autoResult ? formatStateDisplay(autoResult) : "<span style='color:#94a3b8;'>—</span>"}</span>"
                         : "<span style='color:#a855f7; font-weight:bold;'>⚙️ Override Active: ${currentOverride}</span>"
                     input "stateAttrOverride_${device.id}", "enum",
                           title: "<b>${device.displayName}</b> — ${currentDisplay}",
