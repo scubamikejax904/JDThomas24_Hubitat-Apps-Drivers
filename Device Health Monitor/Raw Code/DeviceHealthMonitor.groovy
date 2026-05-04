@@ -1400,18 +1400,17 @@ def formatStateDisplayOverride(stateInfo) {
     def color = stateInfo.color
     switch (color) {
         case "#c62828":
-            return "<span style='background:#fee2e2; color:#b91c1c; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${label}</span>"
+            return "<b><span style='color:#b91c1c;'>[${label}]</span></b>"
         case "#e65100":
-            return "<span style='background:#fff3e0; color:#c2410c; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${label}</span>"
+            return "<b><span style='color:#c2410c;'>[${label}]</span></b>"
         case "#1565c0":
-            return "<span style='background:#dbeafe; color:#1d4ed8; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${label}</span>"
+            return "<b><span style='color:#1d4ed8;'>[${label}]</span></b>"
         case "#8b5cf6":
-            return "<span style='background:#f3e8ff; color:#7c3aed; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${label}</span>"
+            return "<b><span style='color:#7c3aed;'>[${label}]</span></b>"
         case "#16a34a":
-            return "<span style='background:#dcfce7; color:#15803d; padding:2px 9px; border-radius:10px; font-weight:700; font-size:12px; display:inline-block;'>${label}</span>"
+            return "<b><span style='color:#15803d;'>[${label}]</span></b>"
         default:
-            // Gray inactive states — give them a visible pill in the override context
-            return "<span style='background:#f1f5f9; color:#475569; padding:2px 9px; border-radius:10px; font-weight:600; font-size:12px; display:inline-block;'>${label}</span>"
+            return "<b><span style='color:#374151;'>[${label}]</span></b>"
     }
 }
 
