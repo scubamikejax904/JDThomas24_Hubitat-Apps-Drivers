@@ -104,16 +104,14 @@ preferences {
     input(name: "pollInterval",   type: "enum",     title: "<b>Poll Interval:</b>",
           options: ["10": "10 Seconds", "30": "30 Seconds", "60": "1 Minute", "300": "5 Minutes"],
           defaultValue: "30", required: true, width: 4,
-          description: "<i>Standby poll rate — how often to check when the printer is idle.<br>While printing or paused, the driver automatically switches to 30s regardless of this setting.</i>")
+          description: "<i>Standby poll rate — how often to check when the printer is idle.<br>While printing or paused, the driver automatically switches to 30s regardless of this setting.<br><b>Always logged:</b> print started, complete, paused, cancelled, error, filament runout, going offline.</i>")
     input(name: "recentFilesLimit", type: "number",  title: "<b>Recent Files Limit:</b> (Top 20 Recommended)",
           description: "<i>Max number of recent files to show in <b>filesList</b>. Sorted most recent first, folder paths stripped.<br>Use <b>startPrint</b> command with the full path if your file is not in the list.</i>",
           defaultValue: 20, required: true, width: 4)
     input(name: "tempUnit",       type: "enum",     title: "<b>Temperature Unit:</b>",
           options: ["F": "Fahrenheit (°F)", "C": "Celsius (°C)"],
           defaultValue: "C", required: true, width: 4)
-    input(name: "deviceDebugEnable",  type: "bool", title: "Enable Debug logging:",
-          description: "<i>Auto-disables after 30 minutes.<br><b>Always logged (info):</b> print started, complete, paused, cancelled.<br><b>Always logged (warn):</b> print error, filament runout, going offline.</i>",
-          defaultValue: false, width: 4)
+    input(name: "deviceDebugEnable",  type: "bool", title: "Enable Debug logging:", description: "<i>Auto-disables after 30 minutes.</i>", defaultValue: false, width: 4)
 }
 
 // ============================================================
