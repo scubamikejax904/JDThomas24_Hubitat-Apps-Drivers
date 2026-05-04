@@ -111,11 +111,7 @@ preferences {
     input(name: "tempUnit",       type: "enum",     title: "<b>Temperature Unit:</b>",
           options: ["F": "Fahrenheit (°F)", "C": "Celsius (°C)"],
           defaultValue: "C", required: true, width: 4)
-    input(name: "deviceInfoDisable",  type: "bool", title: "Disable Info logging:",  defaultValue: false, width: 4)
     input(name: "deviceDebugEnable",  type: "bool", title: "Enable Debug logging:", description: "<i>Auto-disables after 30 minutes.</i>", defaultValue: false, width: 4)
-    input(name: "suppressPollLogs",   type: "bool", title: "Suppress routine poll logs:",
-          description: "<i>Suppresses the 'printer is online' heartbeat log during printing and standby. Critical events (print complete, error, filament runout, state changes) always log regardless.</i>",
-          defaultValue: true, width: 4)
 }
 
 // ============================================================
@@ -174,11 +170,25 @@ def initialize() {
 }
 
 void schedulePoll() {
+    unschedule("refresh")
     Integer interval = (settings?.pollInterval ?: "30").toInteger()
-    if (interval == 10)  { runEvery10Minutes(refresh); schedule("0/${interval} * * * * ?", refresh) }
+    if (interval == 10)  { schedule("0/10 * * * * ?", refresh) }
     else if (interval == 30) { schedule("0/30 * * * * ?", refresh) }
     else if (interval == 60) { runEvery1Minute(refresh) }
     else                     { runEvery5Minutes(refresh) }
+}
+
+void scheduleActivePoll() {
+    // Called when printing/paused — overrides standby interval with 30s
+    unschedule("refresh")
+    schedule("0/30 * * * * ?", refresh)
+    logDebug "switched to active poll (30s)"
+}
+
+void scheduleStandbyPoll() {
+    // Called when print ends — restores user-configured standby interval
+    schedulePoll()
+    logDebug "switched to standby poll"
 }
 
 // ============================================================
@@ -304,13 +314,13 @@ void discoverCallback(resp, data) {
         List objects = json?.result?.objects ?: []
         // Find filament sensor
         String filament = objects.find{ it.startsWith("filament_switch_sensor") }
-        if (filament) { state.filamentSensorName = filament; logInfo "found filament sensor: $filament" }
+        if (filament) { state.filamentSensorName = filament; logDebug "found filament sensor: $filament" }
         // Find chamber temp sensor
         String chamber = objects.find{ it.startsWith("temperature_sensor") && it.toLowerCase().contains("chamber") }
-        if (chamber) { state.chamberSensorName = chamber; logInfo "found chamber sensor: $chamber" }
+        if (chamber) { state.chamberSensorName = chamber; logDebug "found chamber sensor: $chamber" }
         // Find MCU temp sensor
         String mcu = objects.find{ it.startsWith("temperature_sensor") && (it.toLowerCase().contains("mcu") || it.toLowerCase().contains("rpi") || it.toLowerCase().contains("host")) }
-        if (mcu) { state.mcuSensorName = mcu; logInfo "found MCU sensor: $mcu" }
+        if (mcu) { state.mcuSensorName = mcu; logDebug "found MCU sensor: $mcu" }
     } catch (e) {
         logWarn "discoverCallback() parse error: $e"
     }
@@ -372,11 +382,24 @@ void statusCallback(resp, data) {
         // LOG: only on state change - complete, error get extra attention
         String prevPrintState = device.currentValue("printState") ?: ""
         if (prevPrintState != printState) {
-            if (printState == "complete") { logInfo "*** PRINT COMPLETE: ${device.currentValue('filename')} ***"; runIn(5, "refreshFileList") }
-            else if (printState == "error") logWarn "*** PRINT ERROR on ${device.displayName} ***"
-            else if (printState == "printing") { logInfo "print started: ${printStats?.filename ?: 'unknown'}"; runIn(5, "refreshFileList") }
-            else if (printState == "paused")   logInfo "print paused"
-            else if (printState == "cancelled") logInfo "print cancelled"
+            if (printState == "complete") {
+                logInfo "*** PRINT COMPLETE: ${device.currentValue('filename')} ***"
+                runIn(5, "refreshFileList")
+                scheduleStandbyPoll()
+            } else if (printState == "error") {
+                logWarn "*** PRINT ERROR on ${device.displayName} ***"
+                scheduleStandbyPoll()
+            } else if (printState == "printing") {
+                logInfo "print started: ${printStats?.filename ?: 'unknown'}"
+                runIn(5, "refreshFileList")
+                scheduleActivePoll()
+            } else if (printState == "paused") {
+                logInfo "print paused"
+                scheduleActivePoll()
+            } else if (printState == "cancelled") {
+                logInfo "print cancelled"
+                scheduleStandbyPoll()
+            }
         }
         sendEventX(name: "printState", value: printState,
                    logLevel: (printState == "error" ? "warn" : null))
@@ -648,7 +671,6 @@ void commandCallback(resp, data) {
 void setOnline() {
     if (device.currentValue("healthStatus") != "online") {
         sendEvent(name: "healthStatus", value: "online")
-        if (!(settings?.suppressPollLogs != false)) logInfo "printer is online"
     }
 }
 
@@ -682,7 +704,7 @@ void sendEventX(Map x) {
 //  FILE MANAGEMENT
 // ============================================================
 void refreshFileList() {
-    logInfo "refreshing file list from print history"
+    logDebug "refreshing file list from print history"
     Integer limit = (settings?.recentFilesLimit ?: 20).toInteger()
     // Use history API — returns jobs sorted most recent first, gives us actual print order
     // Request extra to account for duplicates we'll deduplicate
@@ -812,7 +834,7 @@ void filesCallback(resp, data) {
         html.append("<div style=\"color:#888;font-size:9px;margin-top:4px;text-align:center;\">Use number with startPrint command</div>")
         html.append("</div>")
         sendEventX(name: "filesListTile", value: html.toString())
-        logInfo "found $totalCount gcode files — showing ${displayList.size()} most recent"
+        logDebug "found $totalCount gcode files — showing ${displayList.size()} most recent"
     } catch (e) {
         logWarn "filesCallback() parse error: $e"
     }
@@ -868,7 +890,7 @@ def startLastPrint() {
 // ============================================================
 //  LOG HELPERS
 // ============================================================
-def logInfo(msg)  { if (!deviceInfoDisable)  log.info  "${device.displayName} ${msg}" }
+def logInfo(msg)  { log.info  "${device.displayName} ${msg}" }
 def logDebug(msg) { if (deviceDebugEnable)   log.debug "${device.displayName} ${msg}" }
 def logWarn(msg)  {                           log.warn  "${device.displayName} ${msg}" }
 def logError(msg) {                           log.error "${device.displayName} ${msg}" }
