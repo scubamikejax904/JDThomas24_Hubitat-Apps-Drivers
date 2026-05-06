@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.20",
+    version: "2.4.21",
     doNotFocus: true
 )
 
@@ -37,7 +37,6 @@ def updated() {
     }
 
     // v2.4.20: purge orphaned replacement history entries for devices no longer monitored
-    // Prevents stale entries accumulating when devices are replaced and removed from BM
     if (state.replacements) {
         def before = state.replacements.size()
         state.replacements = state.replacements.findAll { r ->
@@ -47,9 +46,7 @@ def updated() {
         if (pruned > 0 && debugMode) log.debug "Purged ${pruned} orphaned replacement history entr${pruned == 1 ? 'y' : 'ies'}"
     }
 
-    // v2.4.19: fixed firstSeenDate migration — use explicit HashMap copy to ensure
-    // nested map mutation persists correctly in Hubitat's state storage.
-    // Previous versions used in-place mutation which silently failed to persist.
+    // v2.4.19: fixed firstSeenDate migration
     def migrationDirty = false
     state.history?.each { id, data ->
         if (data && !data.firstSeenDate) {
@@ -63,8 +60,6 @@ def updated() {
     if (migrationDirty) state.history = state.history
 
     // v2.4.15: one-time migration — add deviceId to existing replacement history entries
-    // Matches on displayName against currently selected devices. Entries for deleted devices
-    // will not match and remain name-only — these will show as orphaned in the history page.
     def didMigrate = false
     state.replacements?.each { r ->
         if (!r.deviceId) {
@@ -135,7 +130,6 @@ def mainPage() {
                 title: "",
                 install: true, uninstall: true) {
 
-        // v2.4.15: App Display Name always shows current label in header
         def currentLabel  = app.label ?: "Battery Monitor 2.0"
         def appNameTitle  = "<b>App Display Name</b> — <span style='color:blue;'>${currentLabel}</span>"
         section(appNameTitle, hideable: true, hidden: true) {
@@ -146,7 +140,6 @@ def mainPage() {
                   required: false
         }
 
-        // v2.4.14: device count in section header — eliminates separate summary paragraph
         def devicesSelected = (autoDevices?.size() ?: 0) > 0
         def devSectionTitle = devicesSelected
             ? "<b>Selected Monitored Devices</b> — <span style='color:blue;'>${autoDevices.size()} selected</span>"
@@ -199,7 +192,6 @@ def mainPage() {
         // ── Notification Snooze ──────────────────────────────
         def snoozed = state.notifSnoozedUntil && state.notifSnoozedUntil >= now()
         def snoozeHoursLeft = snoozed ? Math.ceil((state.notifSnoozedUntil - now()) / 3600000).toInteger() : 0
-        // v2.4.15: snooze status in section header — snoozed in orange, off in red
         def snoozeSectionTitle = snoozed
             ? "<b>Notification Snooze</b> — <span style='color:orange;'>😴 ${snoozeHoursLeft}h remaining</span>"
             : "<b>Notification Snooze</b> — <span style='color:red;'>Off</span>"
@@ -311,7 +303,7 @@ def mainPage() {
 
         section("<b>Diagnostics</b>") {
             input "debugMode", "bool", title: "Debug Logging (auto-disables after 30 min)", defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Battery Monitor v2.4.20</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Battery Monitor v2.4.21</span>"
         }
     }
 }
@@ -446,11 +438,9 @@ def scheduledSummary() {
         }
     }
 
-    // v2.4.10: timestamp on header line
     def timestamp = new Date().format("MM/dd HH:mm", location.timeZone)
     def body = "${prefix}🔋 Battery Summary — ${timestamp}\n"
 
-    // v2.4.10: build stale list with clean "inactive Xd/Xh" format (no redundant "ago")
     def staleDevices = devList.findAll { isStale(it) }.collect {
         def last        = getLastActivityTime(it)
         def inactiveStr = last ? formatInactive(last) : "unknown"
@@ -503,7 +493,6 @@ def scheduledSummary() {
     if (deadBatteryList) {
         body += "\n🪫 Dead Batteries:\n"
         deadBatteryList.each { dev ->
-            // v2.4.15: look up by deviceId if available
             def foundDev = dev.deviceId
                 ? devList.find { it.id == dev.deviceId }
                 : devList.find { it.displayName.trim() == dev.name }
@@ -563,14 +552,14 @@ def updateBattery(device, level) {
             lastLevel:     level != null ? level : 100,
             lastDate:      now(),
             lastScanDate:  now(),
-            firstSeenDate: now(),  // v2.4.13: stable anchor for days gate — never overwritten except on replacement
+            firstSeenDate: now(),
             drain:         0.3,
             samples:       [],
             justReplaced:  false,
             zeroCount:     0
         ]
         state.trend[device.id] = "Stable"
-        // v2.4.9: force persist on seed
+        // force persist on seed
         state.history = state.history
         data = state.history[device.id]
     }
@@ -585,7 +574,6 @@ def updateBattery(device, level) {
     if (isBatteryDead(device)) {
         data.lastLevel    = level
         data.lastScanDate = now()
-        // v2.4.9: force persist
         state.history[device.id] = data
         state.history = state.history
         if (debugMode) log.debug "${device.displayName}: battery confirmed dead (${data.zeroCount} consecutive 0% readings)"
@@ -619,25 +607,41 @@ def updateBattery(device, level) {
         def validSample  = (rawDrain > 0) || (rawDrain == 0 && hours >= 24)
 
         if (validSample) {
-            def alpha      = 0.3
-            def prevSmooth = (data.samples && data.samples.size() > 0) ? data.samples[-1] : clampedDrain
-            def smoothed   = alpha * clampedDrain + (1 - alpha) * prevSmooth
-            data.samples << smoothed
-            if (data.samples.size() > 10) data.samples.remove(0)
-            data.lastDate = now()
-        }
+            // FIX v2.4.21: outlier rejection — skip samples that are 4x the rolling average.
+            // Only applied once we have >= 3 samples to establish a reliable baseline.
+            // This prevents a single bad reading (signal dropout, driver glitch, firmware quirk)
+            // from skewing the EWMA for several cycles. Existing samples are never touched —
+            // only the new candidate sample is evaluated before being added.
+            def isOutlier = false
+            if (data.samples && data.samples.size() >= 3) {
+                def rollingAvg = data.samples.sum() / data.samples.size()
+                if (rollingAvg > 0 && clampedDrain > rollingAvg * 4) {
+                    isOutlier = true
+                    if (debugMode) log.debug "${device.displayName}: outlier sample rejected — clampedDrain=${clampedDrain}, rollingAvg=${rollingAvg}"
+                }
+            }
 
-        if (data.samples && data.samples.size() > 0) {
-            def avg = data.samples.sum() / data.samples.size()
-            data.drain = Math.min(avg, 3.0)
-            updateTrend(device, data.drain)
+            if (!isOutlier) {
+                def alpha      = 0.3
+                def prevSmooth = (data.samples && data.samples.size() > 0) ? data.samples[-1] : clampedDrain
+                def smoothed   = alpha * clampedDrain + (1 - alpha) * prevSmooth
+                data.samples << smoothed
+                if (data.samples.size() > 10) data.samples.remove(0)
+                data.lastDate = now()
+            }
+
+            if (data.samples && data.samples.size() > 0) {
+                def avg = data.samples.sum() / data.samples.size()
+                data.drain = Math.min(avg, 3.0)
+                updateTrend(device, data.drain)
+            }
         }
     }
 
     data.lastLevel    = level
     data.lastScanDate = now()
 
-    // v2.4.9: force persist after every mutation
+    // force persist after every mutation
     state.history[device.id] = data
     state.history = state.history
 }
@@ -650,7 +654,6 @@ def isBatteryDead(device) {
     if (!data) return false
     def level     = device.currentValue("battery")
     def zeroCount = data.zeroCount ?: 0
-    // v2.4.16: treat 1% same as 0% — 3 consecutive readings at 0% or 1% confirms dead
     return (level != null && level.toInteger() <= 1 && zeroCount >= 3)
 }
 
@@ -698,8 +701,6 @@ def updateTrend(device, drain) {
 
     def devType      = (device?.name ?: device?.typeName ?: "").toLowerCase()
     def isLock       = devType.contains("lock")
-    // v2.4.12: split sensor types — contact/motion report frequently (standard gate)
-    //          smoke/CO report rarely (slow reporter gate, higher sample requirement)
     def isSensor     = devType.contains("contact") || devType.contains("motion")
     def isSlowSensor = devType.contains("smoke")   || devType.contains("carbonmonoxide")
 
@@ -765,22 +766,17 @@ def health(device) {
 
     def devType      = (device?.name ?: device?.typeName ?: "").toLowerCase()
     def isLock       = devType.contains("lock")
-    // v2.4.12: split sensor types
     def isSensor     = devType.contains("contact") || devType.contains("motion")
     def isSlowSensor = devType.contains("smoke")   || devType.contains("carbonmonoxide")
 
-    // v2.4.12: only locks and slow sensors (smoke/CO) require 7 samples
-    //          contact/motion sensors use standard 5-sample gate
     def minSamples = (isLock || isSlowSensor) ? 7 : 5
 
     def daysSinceReplaced = 999
     if (hist?.replacedTime) {
         daysSinceReplaced = (now() - (hist.replacedTime as Long)) / (1000 * 60 * 60 * 24)
     } else if (hist?.firstSeenDate) {
-        // v2.4.19: explicit Long cast to ensure correct arithmetic on deserialized state values
         daysSinceReplaced = (now() - (hist.firstSeenDate as Long)) / (1000 * 60 * 60 * 24)
     } else if (hist?.lastDate) {
-        // legacy fallback for devices seeded before 2.4.13
         daysSinceReplaced = (now() - (hist.lastDate as Long)) / (1000 * 60 * 60 * 24)
     }
 
@@ -808,14 +804,12 @@ def getHealthDisplay(device) {
 
     def devType      = (device?.name ?: device?.typeName ?: "").toLowerCase()
     def isLock       = devType.contains("lock")
-    // v2.4.12: split sensor types
     def isSensor     = devType.contains("contact") || devType.contains("motion")
     def isSlowSensor = devType.contains("smoke")   || devType.contains("carbonmonoxide")
 
     def minSamples = (isLock || isSlowSensor) ? 7 : 5
 
     if (h == "Pending") {
-        // v2.4.19: use explicit Long cast to ensure correct arithmetic on deserialized state values
         def daysSinceReplaced = 0
         if (hist?.replacedTime) {
             daysSinceReplaced = ((now() - (hist.replacedTime as Long)) / (1000 * 60 * 60 * 24)).toInteger()
@@ -829,7 +823,6 @@ def getHealthDisplay(device) {
         def samplePct = Math.min(100, (samples / minSamples * 100).toInteger())
         def daysPct   = Math.min(100, (daysSinceReplaced / minDays * 100).toInteger())
 
-        // v2.4.12: HTML progress bar — clean render in Hubitat UI
         def bar = { int pct ->
             "<div style='background:#e2e8f0; border-radius:3px; width:80px; display:inline-block; height:8px; vertical-align:middle;'>" +
             "<div style='background:#1a73e8; width:${pct}%; height:8px; border-radius:3px;'></div></div>"
@@ -884,7 +877,6 @@ def getCatalogBatteryInfo(device) {
     def battCount = settings["battCount_${device.id}"]
     if (battType && battType != "" && !battType.startsWith("_sep")) {
         def count = (battCount != null && battCount.toString().trim() != "") ? battCount.toString().trim() : "1"
-        // v2.4.12: resolve "Other" to the custom free text entry
         def resolvedType = (battType == "Other")
             ? (settings["battCustomType_${device.id}"]?.trim() ?: "Other")
             : battType
@@ -995,7 +987,7 @@ def logReplacement(device, newLevel, manual = false) {
     data.lastLevel    = newLevel
     data.lastDate     = now()
     data.lastScanDate = now()
-    data.firstSeenDate = now()  // v2.4.13: reset anchor on replacement — new battery = fresh gate
+    data.firstSeenDate = now()
     data.justReplaced = true
     data.replacedTime = now()
     data.zeroCount    = 0
@@ -1004,7 +996,7 @@ def logReplacement(device, newLevel, manual = false) {
 
     state.replacements = state.replacements?.findAll { it.device != device.displayName } ?: []
     state.replacements << [
-        deviceId: device.id,          // v2.4.15: store ID as primary key
+        deviceId: device.id,
         device:   device.displayName,
         level:    newLevel,
         date:     new Date().format("yyyy-MM-dd HH:mm", location.timeZone),
@@ -1362,25 +1354,28 @@ def resetDrainConfirmPage() {
                 resetDrainDevices.each { deviceId ->
                     def device = devList.find { it.id == deviceId }
                     if (device) {
-                        if (!state.history[device.id]) {
-                            state.history[device.id] = [
-                                lastLevel:    device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : 100,
-                                lastDate:     now(),
-                                lastScanDate: now(),
-                                drain:        0.3,
-                                samples:      [],
-                                justReplaced: false,
-                                zeroCount:    0
-                            ]
-                        } else {
-                            state.history[device.id].drain        = 0.3
-                            state.history[device.id].samples      = []
-                            state.history[device.id].lastDate     = now()
-                            state.history[device.id].lastScanDate = now()
-                            state.history[device.id].zeroCount    = 0
-                        }
-                        state.trend[device.id] = "Stable"
+                        def existing = state.history[device.id] ?: [:]
+
+                        // FIX v2.4.21: build complete data object first, assign in one shot.
+                        // Prevents partial state if an exception occurs mid-mutation.
+                        // IMPORTANT: firstSeenDate and lastLevel are intentionally preserved
+                        // from existing data — this is a drain reset, not a replacement.
+                        // Users' accumulated history is not affected.
+                        def resetData = [
+                            lastLevel:     existing.lastLevel     ?: (device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : 100),
+                            lastDate:      now(),
+                            lastScanDate:  now(),
+                            firstSeenDate: existing.firstSeenDate ?: existing.replacedTime ?: existing.lastDate ?: now(),
+                            replacedTime:  existing.replacedTime,
+                            justReplaced:  existing.justReplaced  ?: false,
+                            drain:         0.3,
+                            samples:       [],
+                            zeroCount:     0
+                        ]
+                        state.history[device.id] = resetData
+                        state.trend[device.id]   = "Stable"
                         state.history = state.history
+
                         resetNames << device.displayName
                         successCount++
                         if (debugMode) log.debug "Reset drain history for ${device.displayName}"
@@ -1426,7 +1421,6 @@ def historyPage() {
                 def typeTag = r.type == "manual" ? "<span style='color:blue;'>M</span>" :
                               r.type == "auto"   ? "<span style='color:green;'>A</span>" : "?"
 
-                // v2.4.15: look up by deviceId first, fall back to name for legacy entries
                 def dev = r.deviceId
                     ? autoDevices?.find { it.id == r.deviceId }
                     : autoDevices?.find { it.displayName == r.device }
@@ -1435,7 +1429,6 @@ def historyPage() {
                 def info     = dev ? getCatalogBatteryInfo(dev) : null
                 def infoStr  = info ? "${info}" : ""
 
-                // v2.4.15: use current device name if found (handles renames), else use stored name
                 def displayName = dev ? dev.displayName : r.device
                 def nameDisplay = orphaned
                     ? "<span style='color:#94a3b8;'>${displayName} <em>(device removed)</em></span>"
@@ -1577,37 +1570,33 @@ def manualReplacementConfirmPage() {
                     if (device) {
                         def level = device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : 100
 
-                        if (!state.history[device.id]) {
-                            state.history[device.id] = [
-                                lastLevel: level,
-                                lastDate:  now(),
-                                drain:     0.3,
-                                samples:   [],
-                                zeroCount: 0
-                            ]
-                        }
+                        // FIX v2.4.21: build complete replacement data object first, assign in one shot.
+                        // Prevents partial state if an exception occurs mid-mutation.
+                        // firstSeenDate = now() is correct here — this IS a replacement,
+                        // so the pending gate resets from today for the fresh battery.
+                        def replacementData = [
+                            lastLevel:     level,
+                            lastDate:      now(),
+                            lastScanDate:  now(),
+                            firstSeenDate: now(),
+                            drain:         0.3,
+                            samples:       [],
+                            zeroCount:     0,
+                            justReplaced:  true,
+                            replacedTime:  now()
+                        ]
+                        state.history[device.id] = replacementData
+                        state.trend[device.id]   = "Stable"
 
                         state.replacements = state.replacements?.findAll { it.device != device.displayName } ?: []
                         state.replacements << [
-                            deviceId: device.id,          // v2.4.15: store ID as primary key
+                            deviceId: device.id,
                             device:   device.displayName,
                             level:    level,
                             date:     new Date().format("yyyy-MM-dd HH:mm", location.timeZone),
                             type:     "manual"
                         ]
                         state.replacements = state.replacements.sort { a, b -> b.date <=> a.date }
-
-                        state.history[device.id].drain         = 0.3
-                        state.history[device.id].samples       = []
-                        state.history[device.id].zeroCount     = 0
-                        state.trend[device.id]                 = "Stable"
-                        state.history[device.id].lastLevel     = level
-                        state.history[device.id].lastDate      = now()
-                        state.history[device.id].lastScanDate  = now()
-                        state.history[device.id].firstSeenDate = now()  // v2.4.13: reset anchor on manual replacement
-                        state.history[device.id].justReplaced  = true
-                        state.history[device.id].replacedTime  = now()
-
                         state.history = state.history
                         successCount++
                     }
@@ -1774,7 +1763,6 @@ def batteryCatalogPage() {
                           required: false,
                           defaultValue: settings["battType_${device.id}"] ?: "",
                           submitOnChange: true
-                    // v2.4.12: show free text input when "Other" is selected
                     if (settings["battType_${device.id}"] == "Other") {
                         input "battCustomType_${device.id}",
                               "text",
@@ -1800,6 +1788,16 @@ def batteryCatalogPage() {
 // ============================================================
 def infoPage(Map params = [:]) {
     dynamicPage(name: "infoPage", title: "App Guide & Reference", install: false) {
+
+        section("<b>📡 What's New in v2.4.21</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "<b>Battery Monitor v2.4.21</b> — internal reliability improvements. No user-facing changes.<br><br>" +
+                      "<b>What changed:</b><br>" +
+                      "• <b>Outlier rejection</b> — the drain model now ignores single bad readings that are 4× the rolling average (signal dropout, driver glitch, firmware quirk). Only applied once 3+ baseline samples exist. Existing samples are never touched — only the incoming candidate is evaluated.<br>" +
+                      "• <b>Reset Drain History</b> — history is now built as a complete object and written in one atomic operation, preventing partial state if an exception occurs mid-reset. <code>firstSeenDate</code> and <code>lastLevel</code> are preserved — this is a drain reset, not a replacement.<br>" +
+                      "• <b>Manual Replacement</b> — same atomic write pattern applied. All replacement fields are set together in one assignment.<br><br>" +
+                      "All existing device history, samples, health scores, replacement logs, and settings are fully preserved — no re-learning required.</div>"
+        }
 
         section("<b>🔑 Battery Level Ranges</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Battery level colors reflect current charge percentage. " +
