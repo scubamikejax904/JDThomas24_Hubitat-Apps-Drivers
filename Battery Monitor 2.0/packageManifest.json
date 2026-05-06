@@ -6,7 +6,7 @@
   "description": "Advanced Hubitat battery monitoring with analytics, trends and replacement tracking. Recurring scan schedule, confidence-weighted health, EWMA smoothing.",
   "dateReleased": "4/8/26",
   "minimumHEVersion": "2.3.0",
-  "releaseNotes": "v2.4.20 - Added orphaned replacement history cleanup: when a device is removed from the monitored list, its replacement history entries are now automatically purged on the next settings save. Prevents stale entries accumulating when devices are swapped out. Also confirmed doNotFocus: true in app definition to prevent hub UI focus stealing after installs and updates.",
+  "releaseNotes": "v2.4.21 - Maintenance release: internal reliability improvements. No user-facing changes. Outlier rejection added to the drain model — single bad readings that are 4× the rolling average are now silently skipped before being added to the EWMA. Only active once 3+ baseline samples exist; existing samples are never touched. Reset Drain History and Manual Replacement now write state atomically (full object built first, assigned in one shot) to prevent partial state if an exception occurs mid-operation. firstSeenDate and lastLevel are preserved on drain resets — samples start fresh but accumulated timing data is kept. All existing device history, samples, health scores, replacement logs, and settings are fully preserved — no re-learning required.",
   "apps": [
     {
       "name": "Battery Monitor 2.0",
