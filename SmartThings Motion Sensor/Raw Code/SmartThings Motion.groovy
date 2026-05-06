@@ -1,7 +1,7 @@
 /*
 SmartThings Motion Sensor Enhanced
 
-Version: 1.7.6
+Version: 1.7.7
 Author: jdthomas24
 Namespace: jdthomas24
 
@@ -21,6 +21,17 @@ Enhancements:
 - Debug logging auto-disables after 30 minutes
 - Temperature logging suppressed when enableTemp is off
 
+Changes in 1.7.7:
+- configure() now only fires when enableTemp or batteryReportMinutes change —
+  not on every updated() save, which could interrupt the device reporting cycle
+- Toggling enableTemp off sends a null temperature event with isStateChange: true
+  so dashboards and apps see the attribute clear immediately
+- Toggling enableTemp on calls configure() + refresh() so temperature populates
+  immediately without waiting for the next natural device report
+- batteryVoltage event now only fires on change, consistent with battery %
+- Removed presenceTimeoutCheck() stub — safe to drop now that all devices
+  running v1.7.4 will have saved preferences and cleared the stale timer
+
 Changes in 1.7.6:
 - Removed presence detection — was causing interference with device reporting
   due to aggressive runIn() scheduling on every parse event
@@ -28,8 +39,6 @@ Changes in 1.7.6:
 - Removed zigbeeHealth and missedCheckins — were presence-driven, no data source
 - Tightened battery voltage curve to 5% increments for cleaner reporting
 - Temperature events fully suppressed (no log, no event) when enableTemp is off
-- configure() no longer called on every updated() save — only on relevant
-  settings changes to avoid interrupting device reporting cycle
 - Fixed driverVersion() returning "1.7.5" (was mismatched with header)
 - Added isStateChange: true to temperature sendEvent so repeated identical
   readings are still logged — prevents gaps in home page temperature graphs
@@ -38,7 +47,7 @@ Changes in 1.7.6:
 import hubitat.zigbee.clusters.iaszone.ZoneStatus
 import hubitat.zigbee.zcl.DataType
 
-def driverVersion() { return "1.7.6" }
+def driverVersion() { return "1.7.7" }
 
 metadata {
     definition(
@@ -97,24 +106,57 @@ def initialize() {
 def updated() {
     log.info "${device.displayName}: Updated driver v${driverVersion()}"
 
-    // v1.7.5: clear ALL scheduled jobs on update — removes any stale timers
-    // from previous driver versions (e.g. presenceTimeoutCheck from v1.7.4)
     unschedule()
 
-    // v1.7.5: clear stale attributes from previous driver versions
+    // Clear stale attributes from pre-1.7.6 driver versions
     ["presence", "lastCheckin", "checkinInterval", "presenceTimeout",
      "missedCheckins", "zigbeeHealth"].each { attr ->
         device.deleteCurrentState(attr)
     }
 
-    // v1.7.5: clear stale state variables from presence logic
+    // Clear stale state variables from pre-1.7.6 presence logic
     state.remove("lastCheckin")
     state.remove("checkinHistory")
     state.remove("avgCheckin")
     state.remove("missed")
 
     scheduleDebugAutoOff()
-    configure()
+
+    // v1.7.7: configure() only fires when settings that affect Zigbee reporting
+    // actually change — avoids interrupting the device reporting cycle on every save
+    def prevTemp    = state.prevEnableTemp
+    def prevBattInt = state.prevBatteryReportMinutes
+    def tempChanged = (prevTemp    != null && prevTemp    != enableTemp)
+    def battChanged = (prevBattInt != null && prevBattInt != batteryReportMinutes)
+
+    // Always configure on first save (no previous state recorded)
+    def firstSave = (prevTemp == null)
+
+    if (firstSave || tempChanged || battChanged) {
+        if (debugLogging) log.debug "${device.displayName}: configure() triggered — firstSave:${firstSave} tempChanged:${tempChanged} battChanged:${battChanged}"
+        configure()
+    } else {
+        if (debugLogging) log.debug "${device.displayName}: Skipping configure() — no relevant settings changed"
+    }
+
+    // v1.7.7: handle enableTemp toggle
+    if (tempChanged) {
+        if (enableTemp) {
+            // Toggled on — refresh immediately so attribute populates without
+            // waiting for the next natural device report (up to 30 min)
+            if (infoLogging) log.info "${device.displayName}: Temperature reporting enabled — refreshing"
+            runIn(2, refresh)
+        } else {
+            // Toggled off — clear attribute immediately so dashboards and apps
+            // see it go blank rather than showing a stale reading indefinitely
+            if (infoLogging) log.info "${device.displayName}: Temperature reporting disabled — clearing attribute"
+            sendEvent(name: "temperature", value: null, isStateChange: true)
+        }
+    }
+
+    // Record current settings for comparison on next save
+    state.prevEnableTemp            = enableTemp
+    state.prevBatteryReportMinutes  = batteryReportMinutes
 }
 
 def configure() {
@@ -160,13 +202,6 @@ def disableDebugLogging() {
 // ============================================================
 // ===================== HEALTH CHECK ========================
 // ============================================================
-
-// v1.7.5: stub to silently absorb stale scheduled calls from v1.7.4
-// Safe to remove in a future version once all devices have saved preferences
-def presenceTimeoutCheck() {
-    if (debugLogging) log.debug "${device.displayName}: presenceTimeoutCheck() — stale timer from v1.7.4, ignoring"
-}
-
 def ping() {
     if (debugLogging) log.debug "${device.displayName}: ping() — refreshing device state"
     refresh()
@@ -193,7 +228,10 @@ def parse(String description) {
     if (descMap?.cluster == "0001" && descMap?.attrId == "0020") {
         def rawVolts = Integer.parseInt(descMap.value, 16) / 10.0
         def volts    = smoothBattery(rawVolts)
-        sendEvent(name: "batteryVoltage", value: volts, unit: "V")
+        // v1.7.7: only fire event if voltage changed — consistent with battery %
+        if (device.currentValue("batteryVoltage") != volts) {
+            sendEvent(name: "batteryVoltage", value: volts, unit: "V")
+        }
         def pct = calculateBattery(volts)
         if (device.currentValue("battery") != pct) {
             if (infoLogging) log.info "${device.displayName}: Battery ${pct}% (${volts}V)"
@@ -207,13 +245,13 @@ def parse(String description) {
     if (!evt) return
 
     if (evt.name == "temperature") {
-        // v1.7.5: fully suppressed when enableTemp is off — no log, no event
+        // Fully suppressed when enableTemp is off — no log, no event
         if (!enableTemp) return
         Double offset = tempAdj ?: 0
         def temp = (evt.value + offset).round(2)
         if (infoLogging) log.info "${device.displayName}: Temperature ${temp}°${evt.unit}"
-        // v1.7.6: isStateChange: true ensures repeated identical readings are still
-        // logged as events — prevents gaps in home page temperature graphs
+        // isStateChange: true ensures repeated identical readings are still logged
+        // as events — prevents gaps in home page temperature graphs
         sendEvent(name: "temperature", value: temp, unit: evt.unit, isStateChange: true)
         return
     }
@@ -234,7 +272,7 @@ def processMotion(ZoneStatus status) {
         def resetTime = (motionReset ?: 30).toInteger()
         if (resetTime > 0) runIn(resetTime, motionInactive)
     } else {
-        // v1.7.5: hardware inactive message ignored — motionReset timer controls
+        // Hardware inactive message ignored — motionReset timer controls
         // when motion goes inactive so the user-configured hold time is respected
         if (debugLogging) log.debug "${device.displayName}: Hardware inactive received — waiting for motionReset timer (${motionReset ?: 30}s)"
     }
@@ -261,8 +299,8 @@ def updateRouteHealth(Integer lqi) {
 // ============================================================
 
 /**
- * v1.7.5: Tightened voltage-to-percentage curve for CR2450/CR2477 coin cells.
- * 5% increments for cleaner battery reporting.
+ * Voltage-to-percentage curve for CR2450/CR2477 coin cells.
+ * 5% increments for cleaner reporting.
  * These batteries hold voltage well between 3.0-2.8V then drop steeply below 2.7V.
  */
 def calculateBattery(Double voltage) {
@@ -303,4 +341,3 @@ void sendZigbeeCommands(List cmds) {
     if (!cmds) return
     sendHubCommand(new hubitat.device.HubMultiAction(cmds, hubitat.device.Protocol.ZIGBEE))
 }
-
