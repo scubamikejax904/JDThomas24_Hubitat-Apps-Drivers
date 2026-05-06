@@ -88,13 +88,13 @@ def snoozeDevice(deviceId) {
     def until = now() + (hours * 3600000)
     if (!state.snoozed) state.snoozed = [:]
     state.snoozed[deviceId] = until
-    // FIX 1.4.3: force top-level reassignment so Hubitat persists the change
+    // FIX 1.4.4: force top-level reassignment so Hubitat persists the change
     state.snoozed = state.snoozed
 }
 
 def unsnoozeDevice(deviceId) {
     state.snoozed?.remove(deviceId)
-    // FIX 1.4.3: force top-level reassignment so Hubitat persists the removal
+    // FIX 1.4.4: force top-level reassignment so Hubitat persists the removal
     state.snoozed = state.snoozed ?: [:]
 }
 
@@ -103,7 +103,7 @@ def isDeviceSnoozed(deviceId) {
     def until = state.snoozed?.get(deviceId)
     if (!until) return false
     if (until >= now()) return true
-    // FIX 1.4.3: expired snooze — remove and reassign
+    // FIX 1.4.4: expired snooze — remove and reassign
     def s = state.snoozed ?: [:]
     s.remove(deviceId)
     state.snoozed = s
@@ -787,7 +787,7 @@ def updateStateTracking(device) {
         if (!stateInfo) return
 
         def currentVal = stateInfo.label
-        // FIX 1.4.3: pull a local copy, mutate, then reassign to top level
+        // FIX 1.4.4: pull a local copy, mutate, then reassign to top level
         def sh         = state.stateHistory ?: [:]
         def tracked    = sh[id]
 
@@ -1025,7 +1025,7 @@ def mainPage() {
             input "debugMode", "bool",
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.4.3</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.4.4</span>"
         }
     }
 }
@@ -1092,7 +1092,7 @@ def scanAllDevices() {
 
     def activeIds = devList.collect { it.id as String } as Set
 
-    // FIX 1.4.3: purge orphaned entries using local copy + top-level reassignment
+    // FIX 1.4.4: purge orphaned entries using local copy + top-level reassignment
     ["history", "health", "verifying", "stateHistory"].each { stateKey ->
         def map = state[stateKey]
         if (map instanceof Map) {
@@ -1105,7 +1105,7 @@ def scanAllDevices() {
         }
     }
 
-    // FIX 1.4.3: purge orphaned snoozes using local copy + top-level reassignment
+    // FIX 1.4.4: purge orphaned snoozes using local copy + top-level reassignment
     if (state.snoozed instanceof Map) {
         def snoozedCopy = state.snoozed
         def staleSnoozed = snoozedCopy.keySet().findAll { !(it in activeIds) }
@@ -1938,7 +1938,7 @@ def resetHistoryConfirmPage() {
                 resetHistoryDevices.each { deviceId ->
                     def device = devList.find { it.id == deviceId }
                     if (device) {
-                        // FIX 1.4.3: use remove() instead of null assignment to keep stateHistory clean
+                        // FIX 1.4.4: use remove() instead of null assignment to keep stateHistory clean
                         def h = state.history ?: [:]
                         h[device.id] = [
                             lastSeen:     now(),
@@ -1953,7 +1953,7 @@ def resetHistoryConfirmPage() {
                         health[device.id] = "Pending"
                         state.health = health
 
-                        // FIX 1.4.3: remove instead of null-assigning to prevent map pollution
+                        // FIX 1.4.4: remove instead of null-assigning to prevent map pollution
                         def sh = state.stateHistory ?: [:]
                         sh.remove(device.id)
                         state.stateHistory = sh
@@ -2085,9 +2085,9 @@ def scheduledSummary() {
 def infoPage(Map params = [:]) {
     dynamicPage(name: "infoPage", title: "App Guide & Reference", install: false) {
 
-        section("<b>📡 What's New in v1.4.3</b>") {
+        section("<b>📡 What's New in v1.4.4</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "<b>Device Health Monitor v1.4.3</b> — internal reliability improvements. No user-facing changes.<br><br>" +
+                      "<b>Device Health Monitor v1.4.4</b> — internal reliability improvements. No user-facing changes.<br><br>" +
                       "<b>State persistence fixes (maintenance release):</b><br>" +
                       "• Snooze add/remove/expiry now uses correct top-level state reassignment — snoozes are guaranteed to persist across hub reboots and app updates<br>" +
                       "• Orphaned snooze cleanup during scans now correctly reassigns the snoozed map<br>" +
