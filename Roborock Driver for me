@@ -1327,51 +1327,175 @@ Integer qSize() {
 void updateTile() {
     if (!settings?.tileEnable) return
 
-    Closure a   = { String n -> def v=device.currentValue(n); if(v==null)return null; def s=v.toString().trim(); (s==""||s=="null")?null:s }
-    Closure aNum= { String n -> def v=a(n); if(v==null)return null; try{return v.toDouble()}catch(e){return null} }
-
-    String nm  = a("name")    ?: device.displayName
-    String st  = a("state")
-    String hs  = a("healthStatus")
-    String err = a("error")
-    Double bat = aNum("battery")
-    Double ct  = aNum("cleanTime (min)")
-    Double ca  = aNum("cleanArea (sq ft)")
-    Double fp  = aNum("remainingFilter (%)")
-    Double mp  = aNum("remainingMainBrush (%)")
-    Double sp  = aNum("remainingSideBrush (%)")
-    String du  = a("dustCollection")
-
-    boolean on  = (hs=="online")
-    boolean act = st in ["cleaning","spot cleaning","room clean","zone clean","go to","mapping"]
-    boolean dok = st in ["charged","charging","docking","returning dock","emptying dust bin","washing the mop"]
-    boolean err2= err && err!="no error"
-
-    String sbc = act?"#0d3060":dok?"#0d2a1a":"#162032"
-    String slc = act?"#60a5fa":dok?"#4ade80":"#94a3b8"
-    String sd  = st?st.capitalize():"Unknown"
-    String bl  = bat!=null?" · ${bat.toInteger()}%":""
-
-    Closure bar = { Double p, String l ->
-        int pv=Math.max(0,Math.min(100,p.toInteger()))
-        String c=pv>=50?"#4ade80":pv>=25?"#fbbf24":"#f87171"
-        String t=pv>=50?"#0d2a1a":pv>=25?"#2a1a05":"#2a0a0a"
-        String b=pv>=50?"#16a34a":pv>=25?"#d97706":"#dc2626"
-        "<tr><td style='color:#64748b;font-size:11px'>${l}</td><td style='padding:0 6px'><div style='background:${t};border-radius:3px;height:5px'><div style='background:${b};height:5px;width:${pv}%'></div></div></td><td style='color:${c};font-size:11px;text-align:right'>${pv}%</td></tr>"
+    // Safe readers — null if attribute missing, empty, or never populated
+    Closure a = { String n ->
+        def v = device.currentValue(n)
+        if (v == null) return null
+        def s = v.toString().trim()
+        (s == "" || s == "null") ? null : s
+    }
+    Closure aNum = { String n ->
+        def v = a(n); if (v == null) return null
+        try { return v.toDouble() } catch(e) { return null }
     }
 
-    String bars=""
-    if(fp!=null)bars+=bar(fp,"Filter")
-    if(mp!=null)bars+=bar(mp,"Main")
-    if(sp!=null)bars+=bar(sp,"Side")
+    // Read all attributes — null = not supported on this model, silently skipped
+    String  nameVal    = a("name")                          ?: device.displayName
+    String  stateVal   = a("state")
+    String  healthVal  = a("healthStatus")
+    String  errorVal   = a("error")
+    Double  battVal    = aNum("battery")
+    Double  cleanTime  = aNum("cleanTime (min)")
+    Double  cleanArea  = aNum("cleanArea (sq ft)")
+    Double  cleanPct   = aNum("cleanPercent (%)")
+    Double  filterPct  = aNum("remainingFilter (%)")
+    Double  mainPct    = aNum("remainingMainBrush (%)")
+    Double  sidePct    = aNum("remainingSideBrush (%)")
+    String  dustVal    = a("dustCollection")
+    String  roomsVal   = a("roomsList")
 
-    List pts=[]
-    if(ct!=null)pts<<"${ct.toInteger()} min"
-    if(ca!=null)pts<<"${ca.toInteger()} sq ft"
-    String stats=pts?"<div style='font-size:11px;color:#64748b'>${act?'Now':'Last'}: ${pts.join(' · ')}</div>":""
+    // Pre-compute all conditional values — no ternaries inside GString blocks
+    String stateDisp  = stateVal ? stateVal.capitalize() : "Unknown"
+    boolean online    = (healthVal == "online")
+    boolean hasError  = errorVal && errorVal != "no error"
+    boolean isCleaning = stateVal in ["cleaning", "spot cleaning", "room clean", "zone clean", "go to", "mapping"]
+    boolean isDocked   = stateVal in ["charged", "charging", "docking", "returning dock", "emptying dust bin", "washing the mop"]
 
-    String html="<div style='background:#0a1628;border-radius:10px;padding:9px;font-family:sans-serif'>${err2?"<div style='background:#4a1515;color:#fca5a5;border-radius:5px;padding:3px 7px;font-size:11px;margin-bottom:4px'>&#9888; ${err.capitalize()}</div>":""}<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:5px'><b style='color:#e2e8f0;font-size:13px'>${nm}${du?"<span style='font-size:10px;background:${du=='on'?'#1a3a6e':'#1a2535'};color:${du=='on'?'#60a5fa':'#475569'};padding:1px 6px;border-radius:7px;margin-left:4px'>Dust:${du}</span>":""}</b><span style='font-size:10px;background:${on?'#1a4731':'#4a1515'};color:${on?'#4ade80':'#f87171'};padding:1px 8px;border-radius:9px'>${on?'Online':'Offline'}</span></div><div style='background:${sbc};border-radius:6px;padding:6px 8px;border-left:3px solid ${slc};margin-bottom:${bars?'6':'0'}px'><b style='color:#f1f5f9;font-size:14px'>${sd}${bl}</b>${stats}</div>${bars?"<table style='width:100%;border-collapse:collapse;padding-top:4px'>${bars}</table>":""}</div>"
+    // Online badge colors
+    String dotBg    = online ? "#1a4731" : "#4a1515"
+    String dotColor = online ? "#4ade80" : "#f87171"
+    String dotLabel = online ? "Online"  : "Offline"
 
-    logDebug "tile chars: ${html.length()}"
-    sendEvent(name:"html", value:html, isStateChange:true)
+    // State accent color — green when active, amber when returning, gray when idle
+    String stateBg   = isCleaning ? "#0d3060" : isDocked ? "#0d2a1a" : "#162032"
+    String stateColor = isCleaning ? "#60a5fa" : isDocked ? "#4ade80" : "#94a3b8"
+
+    // Battery line
+    String battLine = battVal != null ? " &nbsp;&#183;&nbsp; ${battVal.toInteger()}%" : ""
+
+    // Dust collection indicator
+    String dustHtml = ""
+    if (dustVal != null) {
+        String dustBg    = dustVal == "on" ? "#1a3a6e" : "#1a2535"
+        String dustColor = dustVal == "on" ? "#60a5fa" : "#475569"
+        dustHtml = "<span style='font-size:10px;background:${dustBg};color:${dustColor};padding:2px 8px;border-radius:8px;margin-left:6px;'>Dust: ${dustVal}</span>"
+    }
+
+    // Error banner
+    String errorHtml = ""
+    if (hasError) {
+        errorHtml = """<tr><td colspan='2' style='padding:0 12px 6px 12px;'>
+  <div style='background:#4a1515;color:#fca5a5;border-radius:6px;padding:5px 9px;font-size:11px;'>&#9888; ${errorVal.capitalize()}</div>
+</td></tr>"""
+    }
+
+    // Clean progress bar — only shown during active cleaning
+    String progressHtml = ""
+    if (isCleaning && cleanPct != null) {
+        int cp = Math.max(0, Math.min(100, cleanPct.toInteger()))
+        progressHtml = """<tr><td colspan='2' style='padding:6px 12px 0 12px;'>
+  <table style='width:100%;border-collapse:collapse;'>
+  <tr>
+    <td style='font-size:10px;color:#64748b;width:1%;white-space:nowrap;padding-right:8px;'>Progress</td>
+    <td style='padding:0;'>
+      <div style='background:#1e3a5f;border-radius:3px;height:6px;'>
+        <div style='background:#3b82f6;border-radius:3px;height:6px;width:${cp}%;'></div>
+      </div>
+    </td>
+    <td style='font-size:11px;color:#60a5fa;font-weight:bold;width:1%;white-space:nowrap;padding-left:8px;'>${cp}%</td>
+  </tr>
+  </table>
+</td></tr>"""
+    }
+
+    // Last clean stats — time + area
+    String statsHtml = ""
+    if (cleanTime != null || cleanArea != null) {
+        String cleaningLabel = isCleaning ? "Current" : "Last"
+        List parts = []
+        if (cleanTime != null) parts << "${cleanTime.toInteger()} min"
+        if (cleanArea != null) parts << "${cleanArea.toInteger()} sq ft"
+        statsHtml = "<div style='font-size:11px;color:#64748b;margin-top:3px;'>${cleaningLabel}: ${parts.join(" &nbsp;&#183;&nbsp; ")}</div>"
+    }
+
+    // Consumable bars — only rows with actual values
+    Closure bar = { Double pct, String label ->
+        int p = Math.max(0, Math.min(100, pct.toInteger()))
+        String bc    = p >= 50 ? "#16a34a" : p >= 25 ? "#d97706" : "#dc2626"
+        String track = p >= 50 ? "#0d2a1a" : p >= 25 ? "#2a1a05" : "#2a0a0a"
+        String pc    = p >= 50 ? "#4ade80" : p >= 25 ? "#fbbf24" : "#f87171"
+        String bold  = p < 25 ? "font-weight:bold;" : ""
+        """<tr>
+  <td style='font-size:11px;color:#64748b;padding:3px 8px 3px 0;white-space:nowrap;width:1%;'>${label}</td>
+  <td style='padding:3px 0;'>
+    <div style='background:${track};border-radius:3px;height:5px;'>
+      <div style='background:${bc};border-radius:3px;height:5px;width:${p}%;'></div>
+    </div>
+  </td>
+  <td style='font-size:11px;color:${pc};padding:3px 0 3px 8px;white-space:nowrap;width:1%;text-align:right;${bold}'>${p}%</td>
+</tr>"""
+    }
+
+    boolean hasBars = (filterPct != null || mainPct != null || sidePct != null)
+    String barsHtml = ""
+    if (hasBars) {
+        String rows = ""
+        if (filterPct != null) rows += bar(filterPct, "Filter")
+        if (mainPct   != null) rows += bar(mainPct,   "Main brush")
+        if (sidePct   != null) rows += bar(sidePct,   "Side brush")
+        barsHtml = """<tr><td colspan='2' style='padding:8px 12px 0 12px;border-top:1px solid #1e3a5f;margin-top:4px;'>
+  <table style='width:100%;border-collapse:collapse;'>${rows}</table>
+</td></tr>"""
+    }
+
+    // Rooms — show first 5 only, append "+N more" if truncated
+    String roomsHtml = ""
+    if (roomsVal) {
+        List allRooms = roomsVal.split("\\|").collect { it.trim() }
+        int extra     = allRooms.size() - 5
+        List shown    = allRooms.take(5)
+        String suffix = extra > 0 ? " <span style='color:#334d6e;'>+${extra} more</span>" : ""
+        String roomsFormatted = shown.join(" &nbsp;&#183;&nbsp; ") + suffix
+        roomsHtml = """<tr><td colspan='2' style='padding:6px 12px 0 12px;border-top:1px solid #1e3a5f;'>
+  <div style='font-size:10px;color:#64748b;line-height:1.6;'>${roomsFormatted}</div>
+</td></tr>"""
+    }
+
+    String ts = new Date().format("MM/dd HH:mm", location.timeZone)
+
+    String html = """<table style='width:100%;border-collapse:collapse;font-family:sans-serif;background:#0a1628;border-radius:10px;'>
+${errorHtml}
+<tr><td colspan='2' style='padding:10px 12px 6px 12px;'>
+  <table style='width:100%;border-collapse:collapse;'>
+  <tr>
+    <td style='font-size:13px;font-weight:bold;color:#e2e8f0;'>${nameVal}${dustHtml}</td>
+    <td style='text-align:right;'><span style='font-size:10px;background:${dotBg};color:${dotColor};padding:2px 9px;border-radius:10px;font-weight:bold;'>${dotLabel}</span></td>
+  </tr>
+  </table>
+</td></tr>
+<tr><td colspan='2' style='padding:0 12px 6px 12px;'>
+  <div style='background:${stateBg};border-radius:7px;padding:8px 10px;border-left:3px solid ${stateColor};'>
+    <div style='font-size:15px;font-weight:bold;color:#f1f5f9;'>${stateDisp}${battLine}</div>
+    ${statsHtml}
+  </div>
+</td></tr>
+${progressHtml}
+${barsHtml}
+${roomsHtml}
+<tr><td colspan='2' style='padding:6px 12px 8px 12px;text-align:right;font-size:10px;color:#1e3a5f;'>${ts}</td></tr>
+</table>"""
+
+    logInfo "HTML tile length: ${html.length()} chars"
+    sendEvent(name: "html", value: html, isStateChange: true)
+    logDebug "HTML tile updated"
 }
+
+
+/* ============================================================
+ *  LOG HELPERS
+ * ============================================================ */
+def logInfo(msg)  { if(!deviceInfoDisable) log.info "${device.displayName} ${msg}" }
+def logDebug(msg) { if(deviceDebugEnable)  log.debug "${device.displayName} ${msg}" }
+def logTrace(msg) { if(deviceTraceEnable)  log.trace "${device.displayName} ${msg}" }
+def logWarn(msg)  { log.warn "${device.displayName} ${msg}" }
+def logError(msg) { log.error "${device.displayName} ${msg}" }
