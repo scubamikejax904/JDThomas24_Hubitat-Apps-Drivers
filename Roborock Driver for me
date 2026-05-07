@@ -1510,22 +1510,21 @@ void updateXxTile() {
     String bl=bat!=null?" · ${bat.toInteger()}%":""
     Closure pc={ Double p -> p>=50?"#4ade80":p>=25?"#fbbf24":"#f87171" }
     List pts=[]; if(ct!=null)pts<<"${ct.toInteger()}m"; if(ca!=null)pts<<"${ca.toInteger()}sf"
-    String stats=pts?"<div style='font-size:11px;color:#64748b'>${act?'Now':'Last'}: ${pts.join(' · ')}</div>":""
-    String duH=du?"<span style='font-size:10px;background:${du=='on'?'#1a3a6e':'#1a2535'};color:${du=='on'?'#60a5fa':'#475569'};padding:1px 5px;border-radius:6px;margin-left:3px'>D:${du}</span>":""
-    String erH=er?"<div style='background:#4a1515;color:#fca5a5;border-radius:4px;padding:2px 6px;font-size:11px;margin-bottom:3px'>&#9888; ${err.capitalize()}</div>":""
-    // When cleaning: progress bar. When docked/idle: consumables
+    String stats=pts?"<div style='font-size:12px;color:#64748b;margin-top:3px'>${act?'Now':'Last'}: ${pts.join(' · ')}</div>":""
+    String duH=du?"<span style='font-size:11px;background:${du=='on'?'#1a3a6e':'#1a2535'};color:${du=='on'?'#60a5fa':'#475569'};padding:2px 7px;border-radius:6px;margin-left:4px'>D:${du}</span>":""
+    String erH=er?"<div style='background:#4a1515;color:#fca5a5;border-radius:4px;padding:3px 7px;font-size:11px;margin-bottom:4px'>&#9888; ${err.capitalize()}</div>":""
     String bottom=""
-    if(act && cp!=null) {
+    if(act && cp!=null && !er) {
         int cpv=Math.max(0,Math.min(100,cp.toInteger()))
-        bottom="<div style='margin-top:3px;font-size:10px;color:#64748b'>Progress <b style='color:#60a5fa'>${cpv}%</b><div style='background:#1e3a5f;border-radius:3px;height:4px;margin-top:2px'><div style='background:#3b82f6;height:4px;width:${cpv}%'></div></div></div>"
+        bottom="<div style='margin-top:5px;font-size:11px;color:#64748b'>Progress <b style='color:#60a5fa'>${cpv}%</b><div style='background:#1e3a5f;border-radius:3px;height:5px;margin-top:3px'><div style='background:#3b82f6;height:5px;width:${cpv}%'></div></div></div>"
     } else if(fp!=null||mp!=null||sp!=null) {
-        bottom="<div style='font-size:11px;margin-top:4px;display:flex;gap:10px'>"
+        bottom="<div style='font-size:12px;margin-top:8px;display:flex;gap:12px'>"
         if(fp!=null)bottom+="<span style='color:#64748b'>Flt:<b style='color:${pc(fp)}'>${fp.toInteger()}%</b></span>"
         if(mp!=null)bottom+="<span style='color:#64748b'>Main:<b style='color:${pc(mp)}'>${mp.toInteger()}%</b></span>"
         if(sp!=null)bottom+="<span style='color:#64748b'>Side:<b style='color:${pc(sp)}'>${sp.toInteger()}%</b></span>"
         bottom+="</div>"
     }
-    String html="${erH}<div style='background:#0a1628;border-radius:10px;padding:8px;font-family:sans-serif'><div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:4px'><b style='color:#e2e8f0;font-size:13px'>${nm}${duH}</b><span style='font-size:10px;background:${on?'#1a4731':'#4a1515'};color:${on?'#4ade80':'#f87171'};padding:1px 7px;border-radius:8px'>${on?'Online':'Offline'}</span></div><div style='background:${sbc};border-radius:6px;padding:5px 8px;border-left:3px solid ${slc};'><b style='color:#f1f5f9;font-size:13px'>${sd}${bl}</b>${stats}</div>${bottom}</div>"
+    String html="${erH}<div style='background:#0a1628;border-radius:10px;padding:12px;font-family:sans-serif'><div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'><b style='color:#e2e8f0;font-size:14px'>${nm}${duH}</b><span style='font-size:11px;background:${on?'#1a4731':'#4a1515'};color:${on?'#4ade80':'#f87171'};padding:2px 9px;border-radius:8px'>${on?'Online':'Offline'}</span></div><div style='background:${sbc};border-radius:8px;padding:8px 10px;border-left:3px solid ${slc};'><b style='color:#f1f5f9;font-size:15px'>${sd}${bl}</b>${stats}</div>${bottom}</div>"
     logDebug "xxTile chars: ${html.length()}"
     sendEvent(name:"xxTile", value:html, isStateChange:true)
 }
