@@ -1327,72 +1327,51 @@ Integer qSize() {
 void updateTile() {
     if (!settings?.tileEnable) return
 
-    Closure a = { String n -> def v = device.currentValue(n); if(v==null) return null; def s=v.toString().trim(); (s==""||s=="null")?null:s }
-    Closure aNum = { String n -> def v=a(n); if(v==null) return null; try{return v.toDouble()}catch(e){return null} }
+    Closure a   = { String n -> def v=device.currentValue(n); if(v==null)return null; def s=v.toString().trim(); (s==""||s=="null")?null:s }
+    Closure aNum= { String n -> def v=a(n); if(v==null)return null; try{return v.toDouble()}catch(e){return null} }
 
-    String  nameVal   = a("name")    ?: device.displayName
-    String  stateVal  = a("state")
-    String  healthVal = a("healthStatus")
-    String  errorVal  = a("error")
-    Double  battVal   = aNum("battery")
-    Double  cleanTime = aNum("cleanTime (min)")
-    Double  cleanArea = aNum("cleanArea (sq ft)")
-    Double  filterPct = aNum("remainingFilter (%)")
-    Double  mainPct   = aNum("remainingMainBrush (%)")
-    Double  sidePct   = aNum("remainingSideBrush (%)")
-    String  dustVal   = a("dustCollection")
+    String nm  = a("name")    ?: device.displayName
+    String st  = a("state")
+    String hs  = a("healthStatus")
+    String err = a("error")
+    Double bat = aNum("battery")
+    Double ct  = aNum("cleanTime (min)")
+    Double ca  = aNum("cleanArea (sq ft)")
+    Double fp  = aNum("remainingFilter (%)")
+    Double mp  = aNum("remainingMainBrush (%)")
+    Double sp  = aNum("remainingSideBrush (%)")
+    String du  = a("dustCollection")
 
-    boolean online     = (healthVal == "online")
-    boolean hasError   = errorVal && errorVal != "no error"
-    boolean isCleaning = stateVal in ["cleaning","spot cleaning","room clean","zone clean","go to","mapping"]
-    boolean isDocked   = stateVal in ["charged","charging","docking","returning dock","emptying dust bin","washing the mop"]
+    boolean on  = (hs=="online")
+    boolean act = st in ["cleaning","spot cleaning","room clean","zone clean","go to","mapping"]
+    boolean dok = st in ["charged","charging","docking","returning dock","emptying dust bin","washing the mop"]
+    boolean err2= err && err!="no error"
 
-    String dotBg    = online    ? "#1a4731" : "#4a1515"
-    String dotClr   = online    ? "#4ade80" : "#f87171"
-    String dotLbl   = online    ? "Online"  : "Offline"
-    String stateBg  = isCleaning? "#0d3060" : isDocked ? "#0d2a1a" : "#162032"
-    String stateClr = isCleaning? "#60a5fa" : isDocked ? "#4ade80" : "#94a3b8"
-    String stateDisp = stateVal ? stateVal.capitalize() : "Unknown"
-    String battLine  = battVal != null ? " · ${battVal.toInteger()}%" : ""
+    String sbc = act?"#0d3060":dok?"#0d2a1a":"#162032"
+    String slc = act?"#60a5fa":dok?"#4ade80":"#94a3b8"
+    String sd  = st?st.capitalize():"Unknown"
+    String bl  = bat!=null?" · ${bat.toInteger()}%":""
 
-    String dustHtml = dustVal ? "<span style='font-size:10px;background:${dustVal=='on'?'#1a3a6e':'#1a2535'};color:${dustVal=='on'?'#60a5fa':'#475569'};padding:2px 7px;border-radius:8px;margin-left:5px;'>Dust: ${dustVal}</span>" : ""
-
-    String errorHtml = hasError ? "<div style='background:#4a1515;color:#fca5a5;border-radius:6px;padding:4px 8px;font-size:11px;margin-bottom:5px;'>&#9888; ${errorVal.capitalize()}</div>" : ""
-
-    List statsParts = []
-    if (cleanTime != null) statsParts << "${cleanTime.toInteger()} min"
-    if (cleanArea != null) statsParts << "${cleanArea.toInteger()} sq ft"
-    String statsHtml = statsParts ? "<div style='font-size:11px;color:#64748b;margin-top:2px;'>${isCleaning?'Current':'Last'}: ${statsParts.join(' · ')}</div>" : ""
-
-    Closure bar = { Double pct, String lbl ->
-        int p = Math.max(0, Math.min(100, pct.toInteger()))
-        String bc = p>=50?"#16a34a":p>=25?"#d97706":"#dc2626"
-        String tk = p>=50?"#0d2a1a":p>=25?"#2a1a05":"#2a0a0a"
-        String pc = p>=50?"#4ade80":p>=25?"#fbbf24":"#f87171"
-        "<tr><td style='font-size:11px;color:#64748b;padding:2px 6px 2px 0;white-space:nowrap;'>${lbl}</td><td style='padding:2px 0;'><div style='background:${tk};border-radius:3px;height:5px;'><div style='background:${bc};border-radius:3px;height:5px;width:${p}%;'></div></div></td><td style='font-size:11px;color:${pc};padding:2px 0 2px 6px;white-space:nowrap;text-align:right;'>${p}%</td></tr>"
+    Closure bar = { Double p, String l ->
+        int pv=Math.max(0,Math.min(100,p.toInteger()))
+        String c=pv>=50?"#4ade80":pv>=25?"#fbbf24":"#f87171"
+        String t=pv>=50?"#0d2a1a":pv>=25?"#2a1a05":"#2a0a0a"
+        String b=pv>=50?"#16a34a":pv>=25?"#d97706":"#dc2626"
+        "<tr><td style='color:#64748b;font-size:11px'>${l}</td><td style='padding:0 6px'><div style='background:${t};border-radius:3px;height:5px'><div style='background:${b};height:5px;width:${pv}%'></div></div></td><td style='color:${c};font-size:11px;text-align:right'>${pv}%</td></tr>"
     }
 
-    String barsHtml = ""
-    if (filterPct!=null || mainPct!=null || sidePct!=null) {
-        String rows = ""
-        if (filterPct!=null) rows += bar(filterPct,"Filter")
-        if (mainPct!=null)   rows += bar(mainPct,"Main")
-        if (sidePct!=null)   rows += bar(sidePct,"Side")
-        barsHtml = "<div style='border-top:1px solid #1e3a5f;margin-top:6px;padding-top:6px;'><table style='width:100%;border-collapse:collapse;'>${rows}</table></div>"
-    }
+    String bars=""
+    if(fp!=null)bars+=bar(fp,"Filter")
+    if(mp!=null)bars+=bar(mp,"Main")
+    if(sp!=null)bars+=bar(sp,"Side")
 
-    String html = "<div style='width:100%;background:#0a1628;border-radius:10px;padding:10px;box-sizing:border-box;font-family:sans-serif;color:#e2e8f0;'>${errorHtml}<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;'><span style='font-size:13px;font-weight:bold;'>${nameVal}${dustHtml}</span><span style='font-size:10px;background:${dotBg};color:${dotClr};padding:2px 9px;border-radius:10px;font-weight:bold;'>${dotLbl}</span></div><div style='background:${stateBg};border-radius:7px;padding:7px 9px;border-left:3px solid ${stateClr};margin-bottom:6px;'><div style='font-size:14px;font-weight:bold;color:#f1f5f9;'>${stateDisp}${battLine}</div>${statsHtml}</div>${barsHtml}</div>"
+    List pts=[]
+    if(ct!=null)pts<<"${ct.toInteger()} min"
+    if(ca!=null)pts<<"${ca.toInteger()} sq ft"
+    String stats=pts?"<div style='font-size:11px;color:#64748b'>${act?'Now':'Last'}: ${pts.join(' · ')}</div>":""
 
-    logDebug "HTML tile length: ${html.length()} chars"
+    String html="<div style='background:#0a1628;border-radius:10px;padding:9px;font-family:sans-serif'>${err2?"<div style='background:#4a1515;color:#fca5a5;border-radius:5px;padding:3px 7px;font-size:11px;margin-bottom:4px'>&#9888; ${err.capitalize()}</div>":""}<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:5px'><b style='color:#e2e8f0;font-size:13px'>${nm}${du?"<span style='font-size:10px;background:${du=='on'?'#1a3a6e':'#1a2535'};color:${du=='on'?'#60a5fa':'#475569'};padding:1px 6px;border-radius:7px;margin-left:4px'>Dust:${du}</span>":""}</b><span style='font-size:10px;background:${on?'#1a4731':'#4a1515'};color:${on?'#4ade80':'#f87171'};padding:1px 8px;border-radius:9px'>${on?'Online':'Offline'}</span></div><div style='background:${sbc};border-radius:6px;padding:6px 8px;border-left:3px solid ${slc};margin-bottom:${bars?'6':'0'}px'><b style='color:#f1f5f9;font-size:14px'>${sd}${bl}</b>${stats}</div>${bars?"<table style='width:100%;border-collapse:collapse;padding-top:4px'>${bars}</table>":""}</div>"
+
+    logDebug "tile chars: ${html.length()}"
     sendEvent(name:"html", value:html, isStateChange:true)
 }
-
-
-/* ============================================================
- *  LOG HELPERS
- * ============================================================ */
-def logInfo(msg)  { if(!deviceInfoDisable) log.info "${device.displayName} ${msg}" }
-def logDebug(msg) { if(deviceDebugEnable)  log.debug "${device.displayName} ${msg}" }
-def logTrace(msg) { if(deviceTraceEnable)  log.trace "${device.displayName} ${msg}" }
-def logWarn(msg)  { log.warn "${device.displayName} ${msg}" }
-def logError(msg) { log.error "${device.displayName} ${msg}" }
