@@ -97,25 +97,47 @@ preferences {
     input(name:"username", type:"string", title: "<b>Roborock Username:</b>", required: true, width:4)
     input(name:"password", type:"password", title: "<b>Roborock Password:</b>", required: true, width:4)
     input(name:"regionUri", type:"enum", title: "<b>Account Region:</b>", options:["https://usiot.roborock.com":"US", "https://euiot.roborock.com":"EU", "https://cniot.roborock.com":"CN", "https://ruiot.roborock.com":"RU"], defaultValue: "https://usiot.roborock.com", required: true, width:4)
-    input(name:"allowLogin", type:"bool", title: "<b>Authorize Account User Login:</b>", defaultValue: true, width:4, description: "<i>Enable to re/attempt intial login with username and password.</i>")
-    input(name:"autoLogin", type: "enum", title: "<b>Auto Authorize Account User Login:</b>", options: [ "manual":"Manual Only", "900":"15 Minutes", "1800":"30 Minutes", "3600":"1 Hour", "10800":"3 Hours"], defaultValue: "1800", description: "<i>If device goes offline re/attempt intial login with username and password.</i>", required: true)
+    input(name:"allowLogin", type:"bool", title: "<b>Authorize Account User Login:</b>", defaultValue: true, width:4, description: "<i>Enable to re/attempt initial login with username and password.</i>")
+    input(name:"autoLogin", type: "enum", title: "<b>Auto Re-authorize if Offline:</b>", options: [ "manual":"Manual Only", "900":"15 Minutes", "1800":"30 Minutes", "3600":"1 Hour", "10800":"3 Hours"], defaultValue: "1800", required: true, width:4)
     input(name:"areaUnit", type:"enum", title: "<b>Device Area Unit:</b>", options:["0":"Square Foot (ft²)", "1":"Square Meter (m²)"], defaultValue: "0", required: true, width:4)
     input(name:"numberOfButtons", type: "number", title: "<b>Set Number of Buttons:</b>", range: "1...", defaultValue: 1, required: true, width:4)
-    input(name:"cleanAttributeDisable", type:"bool", title: "Disable chatty cleanPercent, cleanArea, cleanPercent events:", defaultValue: false, width:4)
-    input(name:"deviceInfoDisable", type:"bool", title: "Disable Info logging:", defaultValue: false, width:4)
-    input(name:"deviceDebugEnable", type:"bool", title: "Enable Debug logging:", defaultValue: false, width:4)
-    // ADDED: tile preferences
-    input(name:"tileEnable", type:"bool", title: "Enable HTML status tile (html attribute — device page):", defaultValue: false, width:4)
-    input(name:"xxTileEnable", type:"bool", title: "Enable compact dashboard tile (xxTile attribute — dashboard):", defaultValue: false, width:4)
-    //input(name:"deviceTraceEnable", type:"bool", title: "Enable Trace logging:", defaultValue: false, width:4)
+    input(name:"cleanAttributeDisable", type:"bool",
+          title: "<b>Reduce cleaning progress events:</b>",
+          description: "When ON: cleanPercent, cleanArea and cleanTime only update at cycle end — not every few seconds during cleaning. " +
+                       "Keeps hub event log clean. Turn OFF only if you need real-time cleaning progress in automations.",
+          defaultValue: true, width:4)
+    // Logging — combined enum so on/off + auto-disable are one setting. Default OFF.
+    input(name:"deviceLogging", type:"enum", title: "<b>Logging:</b>",
+          description: "Info logging auto-disables after selected time to prevent log spam. Errors and warnings always logged.",
+          options:["off":"Off (errors/warnings only)", "info30":"Info — auto-off after 30 min", "info60":"Info — auto-off after 60 min", "debug30":"Debug — auto-off after 30 min", "debug60":"Debug — auto-off after 60 min"],
+          defaultValue: "off", width:4)
+    // Tile preferences
+    input(name:"tileEnable", type:"bool", title: "<b>Enable full HTML tile</b> (html attribute — device page):", defaultValue: false, width:4)
+    input(name:"xxTileEnable", type:"bool", title: "<b>Enable dashboard tile</b> (xxTile attribute — dashboard):", defaultValue: false, width:4)
 }
 
+// ── Logging helpers ──────────────────────────────────────────────────────────
+// deviceLogging enum: off | info30 | info60 | debug30 | debug60
+// Errors and warnings ALWAYS log regardless of setting.
+// Auto-disable fires via logsOff() scheduled in updated().
+// initialize() uses unschedule() but we re-schedule logsOff immediately after.
+
+private Boolean isInfoEnabled()  { def s=settings?.deviceLogging?:"off"; return s.startsWith("info") || s.startsWith("debug") }
+private Boolean isDebugEnabled() { def s=settings?.deviceLogging?:"off"; return s.startsWith("debug") }
+
 def logsOff() {
-    device.updateSetting("deviceDebugEnable",[value:'false',type:"bool"])
-    device.updateSetting("deviceTraceEnable",[value:'false',type:"bool"])
-    logInfo "disabling debug logs"
+    log.info "${device.displayName} auto-disabling logging (timer expired)"
+    device.updateSetting("deviceLogging", [value:"off", type:"enum"])
 }
-Boolean autoLogsOff() { if ((Boolean)settings.deviceDebugEnable || (Boolean)settings.deviceTraceEnable) runIn(1800, "logsOff"); else unschedule('logsOff');}
+
+void scheduleLogsOff() {
+    unschedule('logsOff')
+    def s = settings?.deviceLogging ?: "off"
+    if (s == "off" || s == "manual") return
+    def minutes = s.endsWith("60") ? 60 : 30
+    log.info "${device.displayName} logging will auto-disable in ${minutes} minutes"
+    runIn(minutes * 60, "logsOff")
+}
 
 def installed() {
 	initialize()
@@ -123,12 +145,14 @@ def installed() {
 
 def updated() {
 	cleanStaleAttributes()
+	scheduleLogsOff()   // schedule BEFORE initialize() which calls unschedule()
 	initialize()
+	scheduleLogsOff()   // re-schedule AFTER initialize()'s unschedule() clears it
 }
 
 def initialize() {
     unschedule()
-    autoLogsOff()
+    scheduleLogsOff()   // restore after unschedule()
     sendEvent(name:"numberOfButtons", value: (settings?.numberOfButtons)?:1)
 
     if(settings?.allowLogin && settings?.username && settings?.password) {
@@ -584,7 +608,7 @@ void processEvent(String name, def value) {
     case "cleaning_info":
         break
     default:
-        if(settings?.deviceDebugEnable) logWarn "did not process name:$name with value:$value"     
+        if(isDebugEnabled()) logWarn "did not process name:$name with value:$value"     
     }
     if(descriptionText) logInfo descriptionText
 }
@@ -610,7 +634,7 @@ void processMsg(Map message) {
             }
             
             if(qPeek()?.id?.toInteger() != jsonValue?.id?.toInteger()) {
-                if(settings?.deviceDebugEnable) logWarn "message unknown: $jsonValue"
+                if(isDebugEnabled()) logWarn "message unknown: $jsonValue"
                 return
             }           
             // lets get our command that sent this request and we can start the queue up again.
@@ -629,9 +653,9 @@ void processMsg(Map message) {
                     logDebug "processing $result"
                     result?.each{ c,v -> processEvent(c,v) }
                 }
-                // ADDED: trigger tile updates after status/consumable response
-                if(settings?.tileEnable)   runIn(2, "updateTile")
-                if(settings?.xxTileEnable) runIn(3, "updateXxTile")
+                // ADDED: trigger tile updates after status/consumable response (throttled)
+                if(settings?.tileEnable)   scheduleTileUpdate()
+                if(settings?.xxTileEnable) scheduleXxTileUpdate()
             }
             else if(cmd?.command=="get_room_mapping") {
                 logDebug "command '$cmd.command' was accepted"
@@ -652,9 +676,9 @@ void processMsg(Map message) {
         else if(code!=null && value!=null) {            
             processEvent(code,value)
             scheduleRefresh()
-            // ADDED: trigger tile updates on live dps events
-            if(settings?.tileEnable)   runIn(2, "updateTile")
-            if(settings?.xxTileEnable) runIn(3, "updateXxTile")
+            // ADDED: trigger tile updates on live dps events (throttled)
+            if(settings?.tileEnable)   scheduleTileUpdate()
+            if(settings?.xxTileEnable) scheduleXxTileUpdate()
         }
         else {
             // this should never happen. if it does, clear the queue and wait for the normal 30min refresh to try again.
@@ -1475,7 +1499,8 @@ ${roomsHtml}
 <tr><td colspan='2' style='padding:6px 12px 8px 12px;text-align:right;font-size:10px;color:#1e3a5f;'>${ts}</td></tr>
 </table>"""
 
-    logInfo "html tile chars: ${html.length()}"
+    logDebug "html tile chars: ${html.length()}"
+    g_mLastTileTime[device.getIdAsLong()] = now()
     sendEvent(name: "html", value: html, isStateChange: true)
     logDebug "html tile updated"
 }
@@ -1510,32 +1535,65 @@ void updateXxTile() {
     String bl=bat!=null?" · ${bat.toInteger()}%":""
     Closure pc={ Double p -> p>=50?"#4ade80":p>=25?"#fbbf24":"#f87171" }
     List pts=[]; if(ct!=null)pts<<"${ct.toInteger()}m"; if(ca!=null)pts<<"${ca.toInteger()}sf"
-    String stats=pts?"<div style='font-size:13px;color:#64748b;margin-top:5px'>${act?'Now':'Last'}: ${pts.join(' · ')}</div>":""
+    String stats=pts?"<div style='font-size:13px;color:#64748b;margin-top:6px'>${act?'Now':'Last'}: ${pts.join(' · ')}</div>":""
     String duH=du?"<span style='font-size:11px;background:${du=='on'?'#1a3a6e':'#1a2535'};color:${du=='on'?'#60a5fa':'#475569'};padding:2px 7px;border-radius:6px;margin-left:4px'>D:${du}</span>":""
-    // error banner replaces bottom section to stay under 1024
     String erH=er?"<div style='background:#4a1515;color:#fca5a5;border-radius:4px;padding:3px 7px;font-size:11px;margin-bottom:4px'>&#9888; ${err.capitalize()}</div>":""
     String bottom=""
     if(!er) {
         if(act && cp!=null) {
             int cpv=Math.max(0,Math.min(100,cp.toInteger()))
-            bottom="<div style='margin-top:6px;font-size:11px;color:#64748b'>Progress <b style='color:#60a5fa'>${cpv}%</b><div style='background:#1e3a5f;border-radius:3px;height:6px;margin-top:3px'><div style='background:#3b82f6;height:6px;width:${cpv}%'></div></div></div>"
+            bottom="<div style='margin-top:7px;font-size:11px;color:#64748b'>Progress <b style='color:#60a5fa'>${cpv}%</b><div style='background:#1e3a5f;border-radius:3px;height:6px;margin-top:3px'><div style='background:#3b82f6;height:6px;width:${cpv}%'></div></div></div>"
         } else if(fp!=null||mp!=null||sp!=null) {
-            bottom="<div style='font-size:13px;margin-top:10px;display:flex;gap:14px'>"
+            bottom="<div style='font-size:13px;margin-top:12px;display:flex;gap:14px'>"
             if(fp!=null)bottom+="<span style='color:#64748b'>Flt:<b style='color:${pc(fp)}'>${fp.toInteger()}%</b></span>"
             if(mp!=null)bottom+="<span style='color:#64748b'>Main:<b style='color:${pc(mp)}'>${mp.toInteger()}%</b></span>"
             if(sp!=null)bottom+="<span style='color:#64748b'>Side:<b style='color:${pc(sp)}'>${sp.toInteger()}%</b></span>"
             bottom+="</div>"
         }
     }
-    String html="${erH}<div style='background:#0a1628;border-radius:10px;padding:14px;font-family:sans-serif'><div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'><b style='color:#e2e8f0;font-size:14px'>${nm}${duH}</b><span style='font-size:11px;background:${on?'#1a4731':'#4a1515'};color:${on?'#4ade80':'#f87171'};padding:2px 9px;border-radius:8px'>${on?'Online':'Offline'}</span></div><div style='background:${sbc};border-radius:8px;padding:10px 12px;border-left:3px solid ${slc};'><b style='color:#f1f5f9;font-size:16px'>${sd}${bl}</b>${stats}</div>${bottom}</div>"
+    String html="${erH}<div style='background:#0a1628;border-radius:10px;padding:16px;font-family:sans-serif'><div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px'><b style='color:#e2e8f0;font-size:14px'>${nm}${duH}</b><span style='font-size:11px;background:${on?'#1a4731':'#4a1515'};color:${on?'#4ade80':'#f87171'};padding:2px 9px;border-radius:8px'>${on?'Online':'Offline'}</span></div><div style='background:${sbc};border-radius:8px;padding:12px 14px;border-left:3px solid ${slc};'><b style='color:#f1f5f9;font-size:16px'>${sd}${bl}</b>${stats}</div>${bottom}</div>"
     logDebug "xxTile chars: ${html.length()}"
     sendEvent(name:"xxTile", value:html, isStateChange:true)
 }
+
+/* ============================================================
+ *  TILE THROTTLE HELPERS
+ *  Prevents tile re-renders more than once per minute.
+ *  During charging, battery % updates every ~2min which would
+ *  otherwise spam renderTile on every single MQTT message.
+ * ============================================================ */
+@Field volatile static Map<Long,Long> g_mLastTileTime   = [:]
+@Field volatile static Map<Long,Long> g_mLastXxTileTime = [:]
+
+void scheduleTileUpdate() {
+    Long last = g_mLastTileTime[device.getIdAsLong()] ?: 0
+    if ((now() - last) > 60000) {
+        g_mLastTileTime[device.getIdAsLong()] = now()
+        runIn(2, "updateTile")
+    } else {
+        // Already rendered recently — schedule a deferred update so we
+        // catch the latest values once the throttle window expires
+        runIn(65, "updateTile")
+    }
+}
+
+void scheduleXxTileUpdate() {
+    Long last = g_mLastXxTileTime[device.getIdAsLong()] ?: 0
+    if ((now() - last) > 60000) {
+        g_mLastXxTileTime[device.getIdAsLong()] = now()
+        runIn(3, "updateXxTile")
+    } else {
+        runIn(66, "updateXxTile")
+    }
+}
+
 /* ============================================================
  *  LOG HELPERS
+ *  Uses deviceLogging enum: off | info30 | info60 | debug30 | debug60
+ *  Errors and warnings always log regardless of setting.
  * ============================================================ */
-def logInfo(msg)  { if(!deviceInfoDisable) log.info "${device.displayName} ${msg}" }
-def logDebug(msg) { if(deviceDebugEnable)  log.debug "${device.displayName} ${msg}" }
-def logTrace(msg) { if(deviceTraceEnable)  log.trace "${device.displayName} ${msg}" }
-def logWarn(msg)  { log.warn "${device.displayName} ${msg}" }
+def logInfo(msg)  { if(isInfoEnabled())  log.info  "${device.displayName} ${msg}" }
+def logDebug(msg) { if(isDebugEnabled()) log.debug "${device.displayName} ${msg}" }
+def logTrace(msg) { if(isDebugEnabled()) log.trace "${device.displayName} ${msg}" }
+def logWarn(msg)  { log.warn  "${device.displayName} ${msg}" }
 def logError(msg) { log.error "${device.displayName} ${msg}" }
