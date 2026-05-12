@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "",
     iconX2Url: "",
-    version: "1.4.5",
+    version: "1.4.6",
     doNotFocus: true
 )
 
@@ -295,7 +295,21 @@ def getMeaningfulAttributes(device) {
     if (isMedia) known += ["trackDescription", "trackData", "mediaPlaybackStatus",
                             "transportStatus", "volume", "level"]
 
-    def found = []
+    // FIX 1: Scan declared capabilities so newly-paired devices whose currentStates
+    // hasn't fully populated yet still surface their attributes correctly.
+    // On a fresh hub many attributes return null/empty from currentStates and were
+    // being silently filtered out, causing devices to miss the override list.
+    def found = [] as Set
+    try {
+        device.capabilities?.each { cap ->
+            cap?.attributes?.each { attr ->
+                if (attr?.name && attr.name in known) found << attr.name
+            }
+        }
+    } catch (e) {
+        if (debugEnabled()) log.debug "getMeaningfulAttributes capability scan error for ${device.displayName}: ${e.message}"
+    }
+
     try {
         device.currentStates?.each { s ->
             if (!s?.name || s?.value == null) return
@@ -311,13 +325,49 @@ def getMeaningfulAttributes(device) {
             found << s.name
         }
     } catch (e) {
-        if (debugEnabled()) log.debug "getMeaningfulAttributes error for ${device.displayName}: ${e.message}"
+        if (debugEnabled()) log.debug "getMeaningfulAttributes currentStates error for ${device.displayName}: ${e.message}"
     }
-    return found.sort()
+    return found.toList().sort()
+}
+
+// FIX 2: shouldShowStateOverride() replaces the old size() > 1 gate.
+// Shows override option for: (a) multi-attribute devices as before,
+// (b) known single-primary-attribute types (presence/Life360, lock, water,
+// smoke, contact, motion, valve, etc.) where auto-detection could be wrong,
+// (c) newly paired devices before currentStates has fully populated.
+// hasMultipleMeaningfulAttributes() kept as alias so nothing else breaks.
+def shouldShowStateOverride(device) {
+    def attrs = getMeaningfulAttributes(device)
+    if (attrs.size() > 1) return true
+    if (attrs.size() == 0) return false
+
+    def driverName  = (device.typeName ?: "").toLowerCase()
+    def deviceName  = (device.name ?: "").toLowerCase()
+    def displayName = (device.displayName ?: "").toLowerCase()
+    def nameCheck   = "${driverName} ${deviceName} ${displayName}"
+
+    def knownSingleAttrTypes = [
+        "life360", "presence", "arrival", "mobile app",
+        "lock", "deadbolt",
+        "water", "leak",
+        "smoke", "carbon monoxide",
+        "contact", "door sensor", "window sensor",
+        "motion", "motion sensor", "pir",
+        "valve", "shock", "vibration", "tamper"
+    ]
+    if (knownSingleAttrTypes.any { nameCheck.contains(it) }) return true
+
+    def overrideCandidateAttrs = [
+        "presence", "lock", "water", "smoke", "carbonMonoxide",
+        "contact", "motion", "tamper", "shock", "valve", "door"
+    ]
+    if (attrs[0] in overrideCandidateAttrs) return true
+
+    return false
 }
 
 def hasMultipleMeaningfulAttributes(device) {
-    return getMeaningfulAttributes(device).size() > 1
+    return shouldShowStateOverride(device)
 }
 
 def getOverrideStateDisplay(device, attrName) {
@@ -865,9 +915,13 @@ def mainPage() {
             }
         }
 
+        // FIX 3: hidden: false so the section never collapses on re-render when
+        // enablePush is toggled — same pattern as Battery Monitor 2.0.
+        // submitOnChange kept on enablePush so sub-inputs show/hide correctly.
         def notifOn           = settings?.enablePush != false
         def notifSectionTitle = "<b>Notifications</b> — <span style='color:${notifOn ? "blue" : "red"};'>${notifOn ? "ON" : "OFF"}</span>"
-        section(notifSectionTitle, hideable: true, hidden: true) {
+        section(notifSectionTitle, hideable: true, hidden: false) {
+            paragraph "ℹ️ Enable the toggle below to reveal notification settings including frequency, timing, device targets, and which health groups to include in reports."
             input "enablePush", "bool", title: "Enable notifications", defaultValue: false, submitOnChange: true
             if (settings?.enablePush != false) {
                 input "reportFrequency", "enum",
@@ -934,7 +988,7 @@ def mainPage() {
             input "debugMode", "bool",
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.4.5</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.4.6</span>"
         }
     }
 }
@@ -1610,7 +1664,7 @@ def protocolOverridePage() {
         .findAll { device ->
             def hasOverride = settings["stateAttrOverride_${device.id}"] &&
                               settings["stateAttrOverride_${device.id}"] != "Auto-detect"
-            hasOverride || hasMultipleMeaningfulAttributes(device)
+            hasOverride || shouldShowStateOverride(device)
         }
         .sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
 
@@ -1650,14 +1704,14 @@ def protocolOverridePage() {
             paragraph "<div style='background-color:#fdf4ff; border-left:4px solid #a855f7; padding:10px 12px; border-radius:3px; margin-top:8px;'>" +
                       "<span style='font-size:15px; font-weight:bold; color:#4a1772;'>📌 State Attribute Overrides</span><br>" +
                       "<span style='color:#475569;font-size:12px;'>Pin a specific attribute per device when the app picks the wrong one to display in the Current State column. " +
-                      "Only devices with more than one meaningful attribute are listed.</span></div>"
+                      "Devices with multiple meaningful attributes, and known single-attribute types (presence/Life360, locks, water, smoke, contact, motion) are always listed here — including newly paired devices where attributes may not yet be populated.</span></div>"
         }
         if (!stateDevList || stateDevList.size() == 0) {
             section("") {
-                paragraph "✅ No devices with multiple meaningful attributes found — no state overrides needed."
+                paragraph "✅ No devices with overrideable state attributes found."
             }
         } else {
-            section("<b>Devices with Multiple Attributes (${stateDevList.size()})</b>") {
+            section("<b>Devices with Overrideable State Attributes (${stateDevList.size()})</b>") {
                 stateDevList.each { device ->
                     def currentOverride      = settings["stateAttrOverride_${device.id}"] ?: "Auto-detect"
                     def autoResult           = getCurrentStateDisplay(device)
@@ -1975,7 +2029,6 @@ def scheduledSummary() {
 def infoPage(Map params = [:]) {
     dynamicPage(name: "infoPage", title: "App Guide & Reference", install: false) {
 
-        // ── Section 1: Health Ratings ───────────────────────
         section("<b>🔑 Health Ratings</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
                       "<div style='overflow-x:auto;'><table style='width:100%; border-collapse: collapse;'>" +
@@ -1991,7 +2044,6 @@ def infoPage(Map params = [:]) {
                       "</table></div></div>"
         }
 
-        // ── Section 2: How Baselines Are Learned ───────────
         section("<b>⏳ How Baselines Are Learned</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
                       "The app learns each device's normal check-in pattern automatically — no configuration needed.<br><br>" +
@@ -2006,7 +2058,6 @@ def infoPage(Map params = [:]) {
                       "<b>Sample window:</b> Up to 20 samples are kept per device. Older samples are discarded as new ones arrive, keeping the baseline current.</div>"
         }
 
-        // ── Section 3: Protocol Detection & Overrides ──────
         section("<b>📡 Protocol Detection &amp; Overrides</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
                       "The app detects each device's protocol automatically using Hubitat's internal controller type, data values, and driver name.<br><br>" +
@@ -2021,7 +2072,6 @@ def infoPage(Map params = [:]) {
                       "An <b>(override)</b> label appears next to the protocol in the Activity Summary so you can see at a glance which devices have been manually set.</div>"
         }
 
-        // ── Section 4: State Attribute Overrides ───────────
         section("<b>📌 State Attribute Overrides</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
                       "The <b>Current State</b> column in the Activity Summary shows each device's most meaningful state — ON/OFF, Open/Closed, Active/Inactive, Locked/Unlocked, and so on.<br><br>" +
@@ -2030,11 +2080,11 @@ def infoPage(Map params = [:]) {
                       "For devices without a recognized primary state, LAN-type attributes like status, connectionStatus, and operatingState are tried as a fallback.<br><br>" +
                       "<b>When auto-detection picks the wrong attribute:</b> Some devices report multiple meaningful attributes — for example a multi-sensor with both motion and contact. " +
                       "If the wrong one is showing, use <b>State Attribute Overrides</b> under <b>🔧 Protocol &amp; State Overrides</b> to pin the correct attribute. " +
-                      "Only devices with more than one meaningful attribute are listed there.<br><br>" +
+                      "Devices with multiple meaningful attributes, and known single-attribute types (presence/Life360, locks, water, smoke, contact, motion) are always listed here — " +
+                      "including newly paired devices where attributes may not yet be populated.<br><br>" +
                       "<b>Resetting:</b> Set back to <b>Auto-detect</b> at any time to let the app choose again automatically.</div>"
         }
 
-        // ── Section 5: Verification (Ping / Refresh) ───────
         section("<b>🔄 Verification (Ping / Refresh)</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
                       "When a device's health drops to Poor or Offline, the app attempts to verify whether it is truly unreachable before leaving it flagged.<br><br>" +
@@ -2052,7 +2102,6 @@ def infoPage(Map params = [:]) {
                       "This is normal for many Zigbee and Z-Wave sensors — it does not indicate a problem with the device or the app.</div>"
         }
 
-        // ── Section 6: Hub Mesh Source Hub Detection ───────
         section("<b>🔗 Hub Mesh Source Hub Detection</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
                       "The Hub Mesh Overview page attempts to group devices by their source hub. Detection tries three methods in order:<br><br>" +
@@ -2064,7 +2113,6 @@ def infoPage(Map params = [:]) {
                       "Hub grouping will improve automatically if Hubitat exposes hub name data in a future firmware release.</div>"
         }
 
-        // ── Section 7: Tips for Best Results ───────────────
         section("<b>💡 Tips for Best Results</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
                       "• The Activity Summary reflects the state at the last scan — device states do not update live in the browser. Use <b>Force Scan</b> to refresh immediately.<br>" +
