@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.23" BETA,
+    version: "2.4.23",
     doNotFocus: true
 )
 
@@ -1161,8 +1161,9 @@ def deviceManagePage(Map params = [:]) {
 
         section("<b>Select Device</b>") {
             href(name: "backToSummary", page: "summaryPage", title: "← Back to Battery Summary")
+            href(name: "backToMain", page: "mainPage", title: "← Back to Main Page")
             paragraph "Select a device to manage its battery type, log a replacement, reset drain history, or view replacement history."
-            paragraph "<span style='color:#94a3b8; font-size:12px;'>ℹ️ Tap <b>Done</b> (top right) to save battery type changes before leaving this page.</span>"
+            paragraph "<span style='color:#94a3b8; font-size:12px;'>ℹ️ Tap <b>Done</b> to save battery type changes. Done returns to this page — use the links above to navigate away.</span>"
             input "dmDeviceId", "enum",
                   title: "Device:",
                   options: devList.collectEntries { [(it.id): it.displayName] },
@@ -1308,6 +1309,7 @@ def deviceManagePage(Map params = [:]) {
 
         section("") {
             href(name: "backToSummaryBottom", page: "summaryPage", title: "← Back to Battery Summary")
+            href(name: "backToMainBottom", page: "mainPage", title: "← Back to Main Page")
         }
     }
 }
