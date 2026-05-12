@@ -1160,26 +1160,44 @@ def summaryPage() {
 // ===================== DEVICE MANAGE PAGE ==================
 // ============================================================
 def deviceManagePage(Map params = [:]) {
-    // When device selection changes, clear action confirmations so stale
-    // confirms from a previous device don't fire on the newly selected one.
     def selectedId = settings?.dmDeviceId
-    if (selectedId != settings?.dmLastDeviceId) {
+
+    // Clear confirms when device changes mid-session so stale confirms
+    // from a previous device don't fire on the newly selected one.
+    // We do NOT clear dmDeviceId here — clearing it on every re-render
+    // (triggered by submitOnChange) caused the device to deselect before
+    // action results could display. The device selector starts empty on
+    // first entry because dmDeviceId is cleared in the result sections
+    // after a successful action, and on Done the Hubitat framework resets
+    // page-local state naturally when navigating back in.
+    if (selectedId && selectedId != settings?.dmLastDeviceId) {
         app.updateSetting("dmReplaceConfirm", [value: false, type: "bool"])
         app.updateSetting("dmResetConfirm",   [value: false, type: "bool"])
         app.updateSetting("dmLastDeviceId",   [value: selectedId, type: "string"])
     }
 
-    def device = selectedId ? autoDevices?.find { it.id == selectedId } : null
+    def device  = selectedId ? autoDevices?.find { it.id == selectedId } : null
+    def devList = (autoDevices ?: []).sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
+
+    def typeOptions = ["": "— Not Set —"]
+    typeOptions["_sep1"] = "──────── Standard ────────"
+    ["AA", "AAA", "CR2", "CR1632", "CR2016", "CR2032", "CR2430", "CR2450", "CR2477", "CR123A", "9V", "ER14250", "LS14250"].each {
+        typeOptions[it] = it
+    }
+    typeOptions["_sep2"] = "──────── Rechargeable ────────"
+    ["Rechargeable AA", "Rechargeable AAA", "LIR2016", "LIR2032", "LIR2430", "LIR2450", "18650"].each {
+        typeOptions[it] = it
+    }
+    typeOptions["_sep3"] = "──────── Other ────────"
+    typeOptions["Other"] = "Other"
 
     dynamicPage(name: "deviceManagePage", title: "🔋 Device Battery Management", install: false) {
 
-        def devList = (autoDevices ?: []).sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
-
-        section("<b>Select Device</b>") {
-            paragraph "Select a device to manage its battery type, log a replacement, reset drain history, or view replacement history."
-            paragraph "<span style='color:#94a3b8; font-size:12px;'>ℹ️ Tap <b>Done</b> to save battery type changes.</span>"
+        // ── Section 1: Device Actions — replacement, reset, history ──
+        section("<b>⚙️ Device Actions</b>") {
+            paragraph "Select a device to log a replacement, reset drain history, or view replacement history."
             input "dmDeviceId", "enum",
-                  title: "Device:",
+                  title: "Select Device:",
                   options: devList.collectEntries { [(it.id): it.displayName] },
                   required: false,
                   submitOnChange: true
@@ -1187,15 +1205,15 @@ def deviceManagePage(Map params = [:]) {
 
         if (!device) { return }
 
+        // ── Device header ────────────────────────────────────
         def level = null
         try { level = device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : "?" } catch (e) { level = "?" }
-        def h          = health(device)
-        def drain      = displayDrain(device)
-        def est        = estDays(device)
+        def h           = health(device)
+        def drain       = displayDrain(device)
+        def est         = estDays(device)
         def catalogInfo = getCatalogBatteryInfo(device) ?: "Not set"
         def dead        = isBatteryDead(device)
 
-        // ── Header stats ─────────────────────────────────────
         section("") {
             def estStr    = (est != null) ? "${est}d" : "—"
             def drainStr  = (h == "Pending" || dead) ? "—" : "${drain}%/day"
@@ -1209,44 +1227,9 @@ def deviceManagePage(Map params = [:]) {
                       "Type: <b>${catalogInfo}</b></span></div>"
         }
 
-        // ── Battery Type ──────────────────────────────────────
-        def typeOptions = ["": "— Not Set —"]
-        typeOptions["_sep1"] = "──────── Standard ────────"
-        ["AA", "AAA", "CR2", "CR1632", "CR2016", "CR2032", "CR2430", "CR2450", "CR2477", "CR123A", "9V", "ER14250", "LS14250"].each {
-            typeOptions[it] = it
-        }
-        typeOptions["_sep2"] = "──────── Rechargeable ────────"
-        ["Rechargeable AA", "Rechargeable AAA", "LIR2016", "LIR2032", "LIR2430", "LIR2450", "18650"].each {
-            typeOptions[it] = it
-        }
-        typeOptions["_sep3"] = "──────── Other ────────"
-        typeOptions["Other"] = "Other"
-
-        section("<b>🔋 Battery Type</b>") {
-            paragraph "Select the battery type and quantity for this device. Changes save when you tap Done."
-            input "battType_${device.id}", "enum",
-                  title: "Battery Type:",
-                  options: typeOptions,
-                  required: false,
-                  defaultValue: settings["battType_${device.id}"] ?: "",
-                  submitOnChange: true
-            if (settings["battType_${device.id}"] == "Other") {
-                input "battCustomType_${device.id}", "text",
-                      title: "Custom Battery Type:",
-                      description: "e.g. CR17450, 4SR44, 28A",
-                      required: false,
-                      defaultValue: settings["battCustomType_${device.id}"] ?: ""
-            }
-            input "battCount_${device.id}", "number",
-                  title: "Battery Count:",
-                  defaultValue: settings["battCount_${device.id}"] ?: 1,
-                  required: false,
-                  range: "1..99"
-        }
-
         // ── Manual Replacement ───────────────────────────────
         section("<b>✅ Log Manual Replacement</b>") {
-            paragraph "Use this when you replace the battery. Logs a replacement entry, resets drain history, and restarts the learning period."
+            paragraph "Logs a replacement entry, resets drain history, and restarts the learning period."
             input "dmReplaceConfirm", "bool",
                   title: "Confirm — log battery replacement now",
                   defaultValue: false,
@@ -1257,6 +1240,8 @@ def deviceManagePage(Map params = [:]) {
                 def currentLevel = device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : 100
                 logReplacement(device, currentLevel, true)
                 app.updateSetting("dmReplaceConfirm", [value: false, type: "bool"])
+                app.removeSetting("dmDeviceId")
+                app.removeSetting("dmLastDeviceId")
                 paragraph "✅ Battery replacement logged for <b>${device.displayName}</b> at ${currentLevel}%. Drain history reset — health will show ⏳ Pending while fresh data is collected."
             }
         }
@@ -1287,6 +1272,8 @@ def deviceManagePage(Map params = [:]) {
                 state.trend[device.id]   = "Stable"
                 state.history = state.history
                 app.updateSetting("dmResetConfirm", [value: false, type: "bool"])
+                app.removeSetting("dmDeviceId")
+                app.removeSetting("dmLastDeviceId")
                 paragraph "✅ Drain history reset for <b>${device.displayName}</b>. Health will show ⏳ Pending while fresh samples are collected."
             }
         }
@@ -1307,7 +1294,7 @@ def deviceManagePage(Map params = [:]) {
                 table += "<td style='padding:4px; border:1px solid #ccc;'>Type</td>"
                 table += "</tr>"
                 deviceHistory.eachWithIndex { r, idx ->
-                    def rowBg  = (idx % 2 == 0) ? "#ffffff" : "#ebebeb"
+                    def rowBg   = (idx % 2 == 0) ? "#ffffff" : "#ebebeb"
                     def typeTag = r.type == "manual" ? "<span style='color:blue;'>Manual</span>" :
                                   r.type == "auto"   ? "<span style='color:green;'>Auto</span>" : "?"
                     table += "<tr style='background-color:${rowBg};'>"
@@ -1321,7 +1308,45 @@ def deviceManagePage(Map params = [:]) {
             }
         }
 
-
+        // ── Battery Types — always visible, collapsible ──────
+        section("<b>🔋 Battery Types</b>", hideable: true, hidden: true) {
+            paragraph "Assign a battery type and quantity to each device so Battery Monitor can include battery type in notifications and replacement history. " +
+                      "This helps you know exactly what to buy when a replacement is needed.<br><br>" +
+                      "Set the type and count for as many devices as you like, then tap <b>Done</b> once to save everything."
+            devList.each { dev ->
+                def currentType  = settings["battType_${dev.id}"] ?: ""
+                def currentCount = settings["battCount_${dev.id}"] ?: 1
+                def currentInfo  = getCatalogBatteryInfo(dev)
+                def levelStr     = ""
+                try {
+                    def lvl = dev.currentValue("battery")
+                    levelStr = (lvl != null) ? " ${lvl}%" : " —"
+                } catch (e) { levelStr = " —" }
+                def infoStr     = currentInfo ?: "Not set"
+                def deviceTitle = "<b>${dev.displayName}</b> <span style='color:#1a73e8; font-size:12px;'>${levelStr} · ${infoStr}</span>"
+                input "battType_${dev.id}", "enum",
+                      title: deviceTitle,
+                      options: typeOptions,
+                      required: false,
+                      defaultValue: currentType,
+                      submitOnChange: true,
+                      width: 8
+                if (settings["battType_${dev.id}"] == "Other") {
+                    input "battCustomType_${dev.id}", "text",
+                          title: "Custom type:",
+                          description: "e.g. CR17450, 4SR44",
+                          required: false,
+                          defaultValue: settings["battCustomType_${dev.id}"] ?: "",
+                          width: 8
+                }
+                input "battCount_${dev.id}", "number",
+                      title: "Qty:",
+                      defaultValue: currentCount,
+                      required: false,
+                      range: "1..99",
+                      width: 4
+            }
+        }
     }
 }
 
