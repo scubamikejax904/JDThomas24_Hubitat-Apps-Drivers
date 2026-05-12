@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.23 BETA 2",
+    version: "2.4.23 BETA 3",
     doNotFocus: true
 )
 
@@ -1219,7 +1219,51 @@ def deviceManagePage(Map params = [:]) {
             }
         }
 
-        if (!device) { return }
+        if (!device) {
+
+        // ── Battery Types — always visible, collapsible ──────
+        section("") {
+            paragraph "<b>🔋 Battery Types</b> — assign a battery type to each device so it appears in notifications and replacement history. Tap to expand and set all devices at once."
+        }
+        section("<b>🔋 Battery Types</b>", hideable: true, hidden: true) {
+            paragraph "Assign a battery type and quantity to each device so Battery Monitor can include battery type in notifications and replacement history. " +
+                      "This helps you know exactly what to buy when a replacement is needed.<br><br>" +
+                      "Set the type and count for as many devices as you like, then tap <b>Done</b> once to save everything."
+            devList.each { dev ->
+                def currentType  = settings["battType_${dev.id}"] ?: ""
+                def currentCount = settings["battCount_${dev.id}"] ?: 1
+                def currentInfo  = getCatalogBatteryInfo(dev)
+                def levelStr     = ""
+                try {
+                    def lvl = dev.currentValue("battery")
+                    levelStr = (lvl != null) ? " ${lvl}%" : " —"
+                } catch (e) { levelStr = " —" }
+                def infoStr     = currentInfo ?: "Not set"
+                def deviceTitle = "<b>${dev.displayName}</b> <span style='color:#1a73e8; font-size:12px;'>${levelStr} · ${infoStr}</span>"
+                input "battType_${dev.id}", "enum",
+                      title: deviceTitle,
+                      options: typeOptions,
+                      required: false,
+                      defaultValue: currentType,
+                      width: 8
+                if (settings["battType_${dev.id}"] == "Other") {
+                    input "battCustomType_${dev.id}", "text",
+                          title: "Custom type:",
+                          description: "e.g. CR17450, 4SR44",
+                          required: false,
+                          defaultValue: settings["battCustomType_${dev.id}"] ?: "",
+                          width: 8
+                }
+                input "battCount_${dev.id}", "number",
+                      title: "Qty:",
+                      defaultValue: currentCount,
+                      required: false,
+                      range: "1..99",
+                      width: 4
+            }
+        }
+            return
+        }
 
         // ── Device header ────────────────────────────────────
         def level = null
@@ -1324,47 +1368,6 @@ def deviceManagePage(Map params = [:]) {
             }
         }
 
-        // ── Battery Types — always visible, collapsible ──────
-        section("") {
-            paragraph "<b>🔋 Battery Types</b> — assign a battery type to each device so it appears in notifications and replacement history. Tap to expand and set all devices at once."
-        }
-        section("<b>🔋 Battery Types</b>", hideable: true, hidden: true) {
-            paragraph "Assign a battery type and quantity to each device so Battery Monitor can include battery type in notifications and replacement history. " +
-                      "This helps you know exactly what to buy when a replacement is needed.<br><br>" +
-                      "Set the type and count for as many devices as you like, then tap <b>Done</b> once to save everything."
-            devList.each { dev ->
-                def currentType  = settings["battType_${dev.id}"] ?: ""
-                def currentCount = settings["battCount_${dev.id}"] ?: 1
-                def currentInfo  = getCatalogBatteryInfo(dev)
-                def levelStr     = ""
-                try {
-                    def lvl = dev.currentValue("battery")
-                    levelStr = (lvl != null) ? " ${lvl}%" : " —"
-                } catch (e) { levelStr = " —" }
-                def infoStr     = currentInfo ?: "Not set"
-                def deviceTitle = "<b>${dev.displayName}</b> <span style='color:#1a73e8; font-size:12px;'>${levelStr} · ${infoStr}</span>"
-                input "battType_${dev.id}", "enum",
-                      title: deviceTitle,
-                      options: typeOptions,
-                      required: false,
-                      defaultValue: currentType,
-                      width: 8
-                if (settings["battType_${dev.id}"] == "Other") {
-                    input "battCustomType_${dev.id}", "text",
-                          title: "Custom type:",
-                          description: "e.g. CR17450, 4SR44",
-                          required: false,
-                          defaultValue: settings["battCustomType_${dev.id}"] ?: "",
-                          width: 8
-                }
-                input "battCount_${dev.id}", "number",
-                      title: "Qty:",
-                      defaultValue: currentCount,
-                      required: false,
-                      range: "1..99",
-                      width: 4
-            }
-        }
     }
 }
 
