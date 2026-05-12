@@ -1194,6 +1194,16 @@ def deviceManagePage(Map params = [:]) {
     dynamicPage(name: "deviceManagePage", title: "🔋 Device Battery Management", install: false) {
 
         // ── Section 1: Device Actions — replacement, reset, history ──
+        // Clear toggle wipes device selection — the only reliable way to reset
+        // in Hubitat since settings persist across submitOnChange re-renders.
+        if (settings?.dmClearDevice == true) {
+            app.removeSetting("dmDeviceId")
+            app.removeSetting("dmLastDeviceId")
+            app.updateSetting("dmClearDevice",    [value: false, type: "bool"])
+            app.updateSetting("dmReplaceConfirm", [value: false, type: "bool"])
+            app.updateSetting("dmResetConfirm",   [value: false, type: "bool"])
+        }
+
         section("<b>⚙️ Device Actions</b>") {
             paragraph "Select a device to log a replacement, reset drain history, or view replacement history."
             input "dmDeviceId", "enum",
@@ -1201,6 +1211,12 @@ def deviceManagePage(Map params = [:]) {
                   options: devList.collectEntries { [(it.id): it.displayName] },
                   required: false,
                   submitOnChange: true
+            if (settings?.dmDeviceId) {
+                input "dmClearDevice", "bool",
+                      title: "✖ Clear device selection",
+                      defaultValue: false,
+                      submitOnChange: true
+            }
         }
 
         if (!device) { return }
@@ -1309,6 +1325,9 @@ def deviceManagePage(Map params = [:]) {
         }
 
         // ── Battery Types — always visible, collapsible ──────
+        section("") {
+            paragraph "<b>🔋 Battery Types</b> — assign a battery type to each device so it appears in notifications and replacement history. Tap to expand and set all devices at once."
+        }
         section("<b>🔋 Battery Types</b>", hideable: true, hidden: true) {
             paragraph "Assign a battery type and quantity to each device so Battery Monitor can include battery type in notifications and replacement history. " +
                       "This helps you know exactly what to buy when a replacement is needed.<br><br>" +
@@ -1843,3 +1862,4 @@ def infoPage(Map params = [:]) {
         }
     }
 }
+
