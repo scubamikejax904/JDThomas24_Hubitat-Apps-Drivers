@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.23 BETA 4",
+    version: "2.4.23 BETA 5",
     doNotFocus: true
 )
 
@@ -806,18 +806,8 @@ def getHealthDisplay(device) {
             daysSinceReplaced = ((now() - (hist.lastDate as Long)) / (1000 * 60 * 60 * 24)).toInteger()
         }
 
-        def minDays   = 5
-        def samplePct = Math.min(100, (samples / minSamples * 100).toInteger())
-        def daysPct   = Math.min(100, (daysSinceReplaced / minDays * 100).toInteger())
-
-        def bar = { int pct ->
-            "<div style='background:#e2e8f0; border-radius:3px; width:80px; display:inline-block; height:8px; vertical-align:middle;'>" +
-            "<div style='background:#1a73e8; width:${pct}%; height:8px; border-radius:3px;'></div></div>"
-        }
-
-        return "<span style='color:#94a3b8; font-size:11px;'>⏳ Pending<br>" +
-               "Samples: ${bar(samplePct)} ${samples}/${minSamples}<br>" +
-               "Days:&nbsp;&nbsp;&nbsp;&nbsp;${bar(daysPct)} ${daysSinceReplaced}/${minDays}d</span>"
+        def minDays = 5
+        return "<span style='color:#94a3b8; font-size:11px;'>⏳ ${samples}/${minSamples} samples &nbsp;·&nbsp; ${daysSinceReplaced}/${minDays} days</span>"
     }
 
     def colorMap = ["Excellent": "#22c55e", "Good": "#22c55e", "Fair": "#f97316", "Poor": "#ef4444"]
@@ -1760,8 +1750,7 @@ def infoPage(Map params = [:]) {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>The app withholds a health verdict and shows <b>⏳ Pending</b> until enough data is collected. " +
                       "This prevents false Poor ratings from sparse early readings. While Pending, Trend and Drain show 📈 — the app is actively learning.<br><br>" +
                       "The Battery Health column shows a progress bar for Pending devices so you can see exactly where each device stands:<br>" +
-                      "<code style='background:#f0f0f0; padding:2px 6px; border-radius:3px;'>Samples: ▓▓▓░░░░░░░ 3/5</code><br>" +
-                      "<code style='background:#f0f0f0; padding:2px 6px; border-radius:3px;'>Days:&nbsp;&nbsp;&nbsp;&nbsp;▓▓▓▓▓▓░░░░ 3/5d</code><br><br>" +
+                      "<code style='background:#f0f0f0; padding:2px 6px; border-radius:3px;'>⏳ 3/5 samples · 3/5 days</code><br><br>" +
                       "<b>Standard gate</b> — both must be met:<br>" +
                       "• At least <b>5 samples</b> collected (7 for locks, smoke, and CO detectors)<br>" +
                       "• At least <b>5 days</b> since the battery was replaced or first seen<br><br>" +
@@ -1882,4 +1871,3 @@ def infoPage(Map params = [:]) {
         }
     }
 }
-
