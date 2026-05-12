@@ -1348,7 +1348,6 @@ def deviceManagePage(Map params = [:]) {
                       options: typeOptions,
                       required: false,
                       defaultValue: currentType,
-                      submitOnChange: true,
                       width: 8
                 if (settings["battType_${dev.id}"] == "Other") {
                     input "battCustomType_${dev.id}", "text",
@@ -1862,4 +1861,3 @@ def infoPage(Map params = [:]) {
         }
     }
 }
-
