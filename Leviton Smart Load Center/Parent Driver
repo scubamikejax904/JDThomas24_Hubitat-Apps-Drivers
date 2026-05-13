@@ -31,7 +31,7 @@ import hubitat.helper.InterfaceUtils
 
 metadata {
     definition(
-        name: "Leviton LDATA Parent",
+        name: "Leviton Smart Load Center Parent",
         namespace: "jdthomas24",
         author: "Community Port from rwoldberg/ldata-ha",
         description: "Leviton Smart Panel (LDATA/LWHEM) integration with breaker monitoring and control"
@@ -618,7 +618,7 @@ private void ensureBreakerChild(Map bd) {
     def child = getChildDevice(dni)
     if (!child) {
         def label = "${device.displayName} - ${bd.name} (${bd.panel_id})"
-        child = addChildDevice("jdthomas24", "Leviton LDATA Child", dni,
+        child = addChildDevice("jdthomas24", "Leviton Smart Load Center Child", dni,
             [label: label, isComponent: false])
         log.info "[LDATA] Created breaker child: ${label}"
     }
@@ -630,7 +630,7 @@ private void ensureCtChild(Map ctd) {
     def child = getChildDevice(dni)
     if (!child) {
         def label = "${device.displayName} - CT ${ctd.name} (Ch${ctd.channel})"
-        child = addChildDevice("jdthomas24", "Leviton LDATA Child", dni,
+        child = addChildDevice("jdthomas24", "Leviton Smart Load Center Child", dni,
             [label: label, isComponent: false])
         log.info "[LDATA] Created CT child: ${label}"
     }
