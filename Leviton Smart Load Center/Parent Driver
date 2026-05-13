@@ -3,7 +3,7 @@
  *
  * Ported from: https://github.com/rwoldberg/ldata-ha
  * Original author: rwoldberg (Home Assistant integration)
- * Hubitat port: jdthomas24
+ * Hubitat port: jthomas24
  *
  * Supports:
  *   - Leviton LDATA (1st gen Smart Breaker Data Hub)
@@ -161,10 +161,13 @@ def initialize() {
 
     // Schedule REST polling fallback (for energy counters + keepalive)
     def interval = (settings.pollInterval ?: "60").toInteger()
-    schedule("0/${interval} * * * * ?", "restPoll")
+    if (interval <= 30)       runEvery30Seconds("restPoll")
+    else if (interval <= 60)  runEvery1Minute("restPoll")
+    else if (interval <= 120) runEvery2Minutes("restPoll")
+    else                      runEvery5Minutes("restPoll")
 
-    // Schedule bandwidth keepalive every 45 seconds
-    schedule("0/45 * * * * ?", "bandwidthKeepalive")
+    // Schedule bandwidth keepalive every minute
+    runEvery1Minute("bandwidthKeepalive")
 
     log.info "[LDATA] Initialisation complete"
 }
@@ -962,7 +965,6 @@ def connectWebSocket() {
             "Origin"              : MYAPP_ORIGIN,
             "Cache-Control"       : "no-cache",
             "Pragma"              : "no-cache",
-            "Sec-WebSocket-Extensions": "permessage-deflate",
             "Sec-Fetch-Dest"      : "empty",
             "Sec-Fetch-Mode"      : "websocket",
             "Sec-Fetch-Site"      : "cross-site",
