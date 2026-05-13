@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.23 BETA 5",
+    version: "2.4.23 BETA 6",
     doNotFocus: true
 )
 
@@ -45,17 +45,23 @@ def updated() {
         if (pruned > 0 && debugMode) log.debug "Purged ${pruned} orphaned replacement history entr${pruned == 1 ? 'y' : 'ies'}"
     }
 
+    // Rebuild history map outside the loop to ensure Hubitat persists the changes.
+    // Mutating state inside each{} is unreliable in Hubitat — rebuilding the full
+    // map and reassigning state.history guarantees the write sticks.
     def migrationDirty = false
+    def migratedHistory = [:]
     state.history?.each { id, data ->
         if (data && !data.firstSeenDate) {
             def newData = new HashMap(data)
             newData.firstSeenDate = newData.replacedTime ?: newData.lastDate ?: now()
-            state.history[id] = newData
+            migratedHistory[id] = newData
             migrationDirty = true
             if (debugMode) log.debug "Migrated firstSeenDate for device ${id}: ${new Date(newData.firstSeenDate as long)}"
+        } else {
+            migratedHistory[id] = data
         }
     }
-    if (migrationDirty) state.history = state.history
+    if (migrationDirty) state.history = migratedHistory
 
     def didMigrate = false
     state.replacements?.each { r ->
@@ -176,6 +182,8 @@ def mainPage() {
                 if (!state.history) state.history = [:]
                 if (!state.trend)   state.trend   = [:]
                 devList.each { device ->
+                    // Store device name in settings for troubleshooting
+                    app.updateSetting("deviceName_${device.id}", [value: device.displayName, type: "string"])
                     if (!state.history[device.id]) {
                         def currentLevel = device.currentValue("battery")
                         state.history[device.id] = [
@@ -334,6 +342,9 @@ def scanAllDevices() {
     if (debugMode) log.debug "Running scheduled battery scan for ${devList.size()} device(s)"
     devList.each { device ->
         try {
+            // Store device name in settings so it appears alongside the ID
+            // in the settings dump for easier troubleshooting
+            app.updateSetting("deviceName_${device.id}", [value: device.displayName, type: "string"])
             def level = device.currentValue("battery")?.toInteger()
             if (level != null) {
                 updateBattery(device, level)
