@@ -6,7 +6,7 @@
   "description": "Advanced Hubitat battery monitoring with analytics, trends and replacement tracking. Recurring scan schedule, confidence-weighted health, EWMA smoothing.",
   "dateReleased": "4/8/26",
   "minimumHEVersion": "2.3.0",
-  "releaseNotes": "v2.4.22 - Fixed false automatic replacement detection triggered by app updates or hub reboots. Auto-detection now requires at least 2 prior drain samples before it can fire. Affects HomeKit/virtual devices that always report a fixed battery level (e.g. Ecobee via HomeKit Integration). Existing history and samples fully preserved.",
+  "releaseNotes": "v2.4.23 - New: OAuth web portal — live battery dashboard accessible from any browser via cloud or local URL. New: Device Battery Management page — assign battery types, log manual replacements, reset drain history, and view per-device replacement history all in one place. Consolidated Battery Catalog into Device Management. Legacy catalog entries auto-migrate on update. No data loss.",
   "apps": [
     {
       "name": "Battery Monitor 2.0",
