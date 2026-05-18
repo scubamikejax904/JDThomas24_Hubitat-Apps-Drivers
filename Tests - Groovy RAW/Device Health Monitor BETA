@@ -26,7 +26,7 @@ definition(
     name: "Device Health Monitor",
     namespace: "jdthomas24",
     author: "jdthomas24",
-    description: "Monitor device check-in health across Zigbee, Z-Wave, Matter, Hub Mesh, LAN, Virtual and Hub Variable — learns each device's normal pattern and alerts you when something goes quiet. Includes OAuth web portal, SPA dashboard, chunked scanning, sleepy device support, location grouping, and richer notifications.",
+    description: "Monitor device check-in health across Zigbee, Z-Wave, Matter, Hub Mesh, LAN, Virtual and Hub Variable — learns each device's normal pattern and alerts you when something goes quiet. Includes OAuth web portal, SPA dashboard, batch scanning, sleepy device support, location grouping, and richer notifications.",
     category: "Convenience",
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "",
@@ -883,7 +883,7 @@ def mainPage() {
         // ── Web Portal ───────────────────────────────────────
         def portalEnabled    = state.accessToken != null
         def portalStatus     = portalEnabled ? "<span style='color:blue; font-weight:bold;'>Enabled</span>" : "<span style='color:red; font-weight:bold;'>Not Enabled</span>"
-        def portalSectionTitle = "🌐 Device Health Portal — ${portalStatus}"
+        def portalSectionTitle = "<b>Device Health Portal</b> — ${portalStatus}"
 
         section(portalSectionTitle, hideable: true, hidden: portalEnabled) {
             if (portalEnabled) {
@@ -970,7 +970,7 @@ def mainPage() {
         def monitoringTitle = "<b>Monitoring Settings</b> — " +
             "Scan: <span style='color:blue;'>${currentScan}</span> | " +
             "Offline after: <span style='color:blue;'>${currentThreshold}h</span> | " +
-            "Chunk: <span style='color:blue;'>${currentChunk}</span> | " +
+            "Batch: <span style='color:blue;'>${currentChunk}</span> | " +
             "Snooze: ${snoozeLabel} | " +
             "Mode: <span style='color:${modeOn ? "blue" : "red"};'>${modeOn ? modeLabel : "off"}</span>${scanningLabel}"
 
@@ -981,10 +981,11 @@ def mainPage() {
                   options: ["0.5": "Every 30 Minutes", "1": "Hourly", "3": "Every 3 Hours", "6": "Every 6 Hours"],
                   defaultValue: "3", submitOnChange: true
 
-            paragraph "<b>Scan Chunk Size</b> — number of devices processed per batch. Smaller = gentler on the hub. 40 is recommended for most installs."
+            paragraph "<b>Scan Batch Size</b> — number of devices scanned per batch. Smaller batches are gentler on the hub. 40 is recommended for most installs."
             input "scanChunkSize", "number",
-                  title: "Devices per scan chunk:",
-                  defaultValue: 40, range: "5..100", required: true
+                  title: "Devices per batch:",
+                  defaultValue: 40, range: "5..100", required: true,
+                  description: "Larger = faster scan but heavier on hub. 40 recommended."
 
             paragraph "<b>Offline after inactivity (hours)</b> — devices with no activity beyond this threshold are marked Offline."
             input "offlineThresholdHours", "number", title: "Offline after inactivity (hours):",
@@ -1024,13 +1025,15 @@ def mainPage() {
                       "These cannot respond to pings and check in infrequently by design. " +
                       "They use the separate Sleepy Device Threshold instead of the standard Offline threshold."
             input "sleepyDevices", "capability.*",
-                  title: "Select sleepy devices (remotes, fobs, buttons):",
+                  title: "Select sleepy devices:",
+                  description: "Remotes, fobs, and button controllers that power their radios off between uses.",
                   multiple: true, required: false
 
             paragraph "<b>Mains-Powered Devices</b> — lights, switches, and plugs that should not flag Offline simply because they have not been used recently. " +
                       "When enabled, these devices are excluded from inactivity checks."
             input "mainsDevices", "capability.*",
-                  title: "Select mains-powered devices to exclude from inactivity checks:",
+                  title: "Select mains-powered devices:",
+                  description: "Lights, switches, and plugs that should not flag Offline when simply not in use.",
                   multiple: true, required: false
             input "mainsInactivityBypass", "bool",
                   title: "Enable inactivity bypass for mains-powered devices?",
@@ -1127,14 +1130,19 @@ def locationAssignPage() {
         .findAll { getProtocol(it) != "Unknown" }
         .sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
 
-    dynamicPage(name: "locationAssignPage", title: "📍 Location Assignment", install: false) {
+    dynamicPage(name: "locationAssignPage", title: "Location Assignment", install: false) {
 
         section("<b>Available Locations</b>") {
-            paragraph "Define your home locations here (comma separated). This list populates the dropdowns below and is used for room grouping in the portal."
+            paragraph "Enter your home locations separated by commas. These populate the location dropdowns below and power the <b>Group by Location</b> view on the web portal."
             input "roomList", "text",
-                  title: "Location list:",
+                  title: "Locations (comma separated):",
                   defaultValue: defaultRooms,
+                  required: false,
                   submitOnChange: true
+            if (roomOptions.size() > 0) {
+                def preview = roomOptions.collect { "• ${it}" }.join("<br>")
+                paragraph "<div style='background:#f4f4f4; border-left:3px solid #ccc; padding:8px 12px; font-size:12px; margin-top:4px;'><b>${roomOptions.size()} locations:</b><br>${preview}</div>"
+            }
         }
 
         if (!devList || devList.size() == 0) {
@@ -1142,16 +1150,23 @@ def locationAssignPage() {
             return
         }
 
-        section("<b>⚡ Bulk Apply Location</b>") {
-            paragraph "Select a location and multiple devices to apply the same location to all of them at once."
+        section("<b>Apply to Multiple Devices</b>") {
+            paragraph "Select a location and multiple devices to apply the same location to all of them at once. Tap <b>Done</b> to save after applying."
             def devOptions = devList.collectEntries { [(it.id): it.displayName] }.sort { a, b -> a.value <=> b.value }
             input "bulkLoc",  "enum", title: "1. Select Location:", options: roomOptions, required: false
-            input "bulkDevs", "enum", title: "2. Select Devices:",  options: devOptions, multiple: true, required: false, submitOnChange: true
-            if (settings?.bulkLoc && settings?.bulkDevs) {
-                def devIds = settings.bulkDevs instanceof List ? settings.bulkDevs : [settings.bulkDevs]
-                devIds.each { dId -> app.updateSetting("loc_${dId}", [type: "string", value: settings.bulkLoc]) }
-                app.removeSetting("bulkDevs")
-                paragraph "✅ Applied <b>${settings.bulkLoc}</b> to ${devIds.size()} device(s)."
+            input "bulkDevs", "enum", title: "2. Select Devices:",  options: devOptions, multiple: true, required: false
+            input "bulkApplyConfirm", "bool", title: "3. Confirm — apply location to selected devices", defaultValue: false, submitOnChange: true
+            if (settings?.bulkApplyConfirm == true) {
+                if (settings?.bulkLoc && settings?.bulkDevs) {
+                    def devIds = settings.bulkDevs instanceof List ? settings.bulkDevs : [settings.bulkDevs]
+                    devIds.each { dId -> app.updateSetting("loc_${dId}", [type: "string", value: settings.bulkLoc]) }
+                    app.removeSetting("bulkDevs")
+                    app.updateSetting("bulkApplyConfirm", [value: false, type: "bool"])
+                    paragraph "✅ Applied <b>${settings.bulkLoc}</b> to ${devIds.size()} device(s). Tap Done to save."
+                } else {
+                    app.updateSetting("bulkApplyConfirm", [value: false, type: "bool"])
+                    paragraph "⚠️ Please select a location and at least one device before confirming."
+                }
             }
         }
 
@@ -2465,7 +2480,7 @@ def forceScanPage() {
             def intervalMinutes = (intervalStr.toFloat() * 60).toInteger()
             def minGate         = Math.min(intervalMinutes * 0.5, 30.0).toInteger()
             paragraph "✅ Chunked scan started — ${devList.size()} device(s) across ${chunks} chunk(s) of ${chunkSize}. " +
-                      "Health scores and device states update as each chunk completes.<br><br>" +
+                      "Health scores and device states update as each batch completes.<br><br>" +
                       "<b>Note:</b> A new check-in sample is only recorded if at least <b>${minGate} minutes</b> have passed since the last recorded activity."
         }
     }
@@ -2656,13 +2671,13 @@ def infoPage(Map params = [:]) {
                       "Summary cards at the top show Offline, Poor, Fair, Healthy, and Total counts.<br><br>" +
                       "<b>Group by:</b> Toggle between By Protocol, By Health, and By Location using the dropdown on the portal.<br><br>" +
                       "<b>Edit from portal:</b> Tap any device card to open an edit modal — update location and description without opening the Hubitat app.<br><br>" +
-                      "<b>Force Scan:</b> The Force Scan button triggers an immediate chunked scan from the browser.<br><br>" +
+                      "<b>Force Scan:</b> The Force Scan button triggers an immediate batch scan from the browser.<br><br>" +
                       "<b>Auto-refresh:</b> The portal silently refreshes every 60 seconds. Zero hub load between refreshes.<br><br>" +
                       "<b>Dashboard tile:</b> Add a Link tile to your Hubitat dashboard, paste in the portal URL, and label it 📡 Device Health. " +
                       "Tapping opens the portal — use the back button to return to your dashboard.</div>"
         }
 
-        section("<b>⚙️ Chunked Scanning</b>") {
+        section("<b>Batch Scanning</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
                       "Starting in v1.5.0 the app scans devices in configurable batches rather than all at once. " +
                       "This prevents a large device query from blocking the hub's event queue on installs with 100+ devices.<br><br>" +
