@@ -1116,8 +1116,6 @@ def wsPing() {
             return
         }
     }
-    def lastSeen = state.wsLastSeen ?: 0
-    def age = (now() - lastSeen) / 1000
     if (age > 90) {
         log.warn "[LDATA] WS watchdog: no server message in ${age.toInteger()}s — reconnecting"
         state.wsConnected = false
@@ -1215,6 +1213,7 @@ def parse(String message) {
 
     // 🔥 IMPORTANT: prevent stale watchdog state
     state.wsLastSeen = now()
+    }
 }
 
 private Map buildWsAuthPayload() {
