@@ -1063,14 +1063,17 @@ def connectWebSocket() {
         // PATCH: use cooldown guard here too
         if (!state.wsReconnectPending) {
             state.wsReconnectPending = true
-            runIn(30, "wsReconnect")
+            runIn(390, "wsReconnect")
         }
     }
 }
 
 def closeWebSocket() {
     state.wsConnected = false
-    try { interfaces.webSocket.close() } catch (ignored) {}
+    try {
+        interfaces.webSocket.close()
+        pauseExecution(5000)
+    } catch (ignored) {}
     sendEvent(name: "wsStatus", value: "Disconnected")
     sendEvent(name: "presence", value: "not present")
 }
@@ -1127,7 +1130,7 @@ def webSocketStatus(String status) {
         // Send authentication
         def authPayload = buildWsAuthPayload()
         interfaces.webSocket.sendMessage(JsonOutput.toJson(authPayload))
-    } else if (status.startsWith("status: closing") || status.contains("failure")) {
+    } else if (status.contains("failure") || status.startsWith("status: closed")) {
         state.wsConnected = false
         sendEvent(name: "wsStatus",  value: "Disconnected")
         sendEvent(name: "presence",  value: "not present")
