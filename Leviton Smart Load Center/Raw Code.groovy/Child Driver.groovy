@@ -35,7 +35,7 @@ metadata {
         namespace  : "jdthomas24",
         author     : "Community Port from rwoldberg/ldata-ha",
         description: "Child device for Leviton Smart Panel breaker or CT sensor",
-        version    : "1.1.0"
+        version    : "1.1.1"
     ) {
         // Core capabilities
         capability "Switch"           // on/off = breaker reset/trip
