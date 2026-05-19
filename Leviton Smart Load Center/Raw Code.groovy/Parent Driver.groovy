@@ -23,6 +23,11 @@
  *   3. Create a new Virtual Device using "Leviton LDATA Parent" as the type
  *   4. Enter your My Leviton username and password in Preferences
  *   5. Save Preferences — the driver will authenticate and discover all panels/breakers
+ *
+ * Changelog:
+ *   - PATCH: Fixed Integer.round() error in recalcTotalPower and parsePanels
+ *             (Groovy Integer has no round() method; cast to Float explicitly)
+ *   - PATCH: Added WS reconnect cooldown guard to prevent reconnect loop flood
  */
 
 import groovy.json.JsonSlurper
@@ -34,7 +39,8 @@ metadata {
         name: "Leviton Smart Load Center Parent",
         namespace: "jdthomas24",
         author: "Community Port from rwoldberg/ldata-ha",
-        description: "Leviton Smart Panel (LDATA/LWHEM) integration with breaker monitoring and control"
+        description: "Leviton Smart Panel (LDATA/LWHEM) integration with breaker monitoring and control",
+        version: "1.1.0"
     ) {
         capability "Initialize"
         capability "Refresh"
@@ -123,6 +129,8 @@ def updated() {
     state.panels          = [:]
     state.breakers        = [:]
     state.cts             = [:]
+    // FIX: clear reconnect guard on full reinit
+    state.wsReconnectPending = false
     pauseExecution(1000)
     initialize()
 }
@@ -521,7 +529,8 @@ private void parsePanels(List panelsJson) {
 
         // ── Parse breakers ───────────────────────────────────────────────────
         def breakerList = panel.residentialBreakers ?: []
-        def totalPower  = 0.0
+        // PATCH: declare as Float to ensure .round() is always available
+        Float totalPower = 0.0
 
         breakerList.each { breaker ->
             def model = breaker.model
@@ -595,13 +604,14 @@ private void parsePanels(List panelsJson) {
             bd.importEnergy    = bd.importEnergy1 + bd.importEnergy2
 
             newBreakers[bId] = bd
-            totalPower += bd.power
+            totalPower += bd.power as Float
 
             // Create/update child device
             ensureBreakerChild(bd)
         }
 
         newPanels[panelId].totalPower = totalPower
+        // PATCH: totalPower is now Float, .round(1) is safe
         sendEvent(name: "totalPower", value: totalPower.round(1))
     }
 
@@ -944,10 +954,11 @@ private void applyCtUpdate(Map existing, Map raw) {
     }
 }
 
+// PATCH: recalcTotalPower — declare total as Float so .round(1) never fails
 private void recalcTotalPower(String panelId) {
-    def total = 0.0
+    Float total = 0.0
     state.breakers?.each { bId, bd ->
-        if (bd.panel_id == panelId) total += (bd.power ?: 0)
+        if (bd.panel_id == panelId) total += (bd.power as Float) ?: 0.0
     }
     if (state.panels[panelId]) state.panels[panelId].totalPower = total
     sendEvent(name: "totalPower", value: total.round(1))
@@ -974,7 +985,11 @@ def connectWebSocket() {
     } catch (Exception e) {
         log.error "[LDATA] WebSocket connect error: ${e.message}"
         sendEvent(name: "wsStatus", value: "Error")
-        runIn(30, "connectWebSocket")
+        // PATCH: use cooldown guard here too
+        if (!state.wsReconnectPending) {
+            state.wsReconnectPending = true
+            runIn(30, "wsReconnect")
+        }
     }
 }
 
@@ -986,8 +1001,16 @@ def closeWebSocket() {
 
 def reconnectWebSocket() {
     log.info "[LDATA] Manual WebSocket reconnect"
+    state.wsReconnectPending = false
     closeWebSocket()
     pauseExecution(2000)
+    connectWebSocket()
+}
+
+// PATCH: dedicated reconnect method so runIn has a named target and the
+//        pending flag is cleared atomically before connecting
+def wsReconnect() {
+    state.wsReconnectPending = false
     connectWebSocket()
 }
 
@@ -1003,8 +1026,11 @@ def webSocketStatus(String status) {
         sendEvent(name: "wsStatus",  value: "Disconnected")
         sendEvent(name: "presence",  value: "not present")
         log.warn "[LDATA] WebSocket disconnected: ${status}"
-        // Reconnect after delay
-        runIn(15, "connectWebSocket")
+        // PATCH: cooldown guard — only schedule one reconnect at a time
+        if (!state.wsReconnectPending) {
+            state.wsReconnectPending = true
+            runIn(30, "wsReconnect")
+        }
     }
 }
 
@@ -1019,6 +1045,8 @@ def parse(String message) {
             logDebug "[LDATA] WS authenticated — sending subscriptions"
             sendEvent(name: "wsStatus", value: "Connected")
             sendEvent(name: "presence", value: "present")
+            // PATCH: clear reconnect flag once successfully connected
+            state.wsReconnectPending = false
             sendWsSubscriptions()
             return
         }
