@@ -1031,10 +1031,13 @@ private void applyCtUpdate(Map existing, Map raw) {
 
 // PATCH: recalcTotalPower — declare total as Float so .round(1) never fails
 private void recalcTotalPower(String panelId) {
-    Float total = 0.0
-    state.breakers?.each { bId, bd ->
-        if (bd.panel_id == panelId) total += (bd.power as Float) ?: 0.0
+    float total = 0.0f
+
+state.breakers?.each { bId, bd ->
+    if (bd?.panel_id == panelId) {
+        total += floatOrDefault(bd?.power, 0.0f)
     }
+}
     if (state.panels[panelId]) state.panels[panelId].totalPower = total
     sendEvent(name: "totalPower", value: total.round(1))
 }
@@ -1100,9 +1103,18 @@ def wsReconnect() {
 // the server to immediately close the connection.
 // This method is kept as a watchdog: if state.wsLastSeen is too old, reconnect.
 def wsPing() {
+    def lastSeen = state.wsLastSeen ?: 0
+    def age = (now() - lastSeen) / 1000
+
     if (!state.wsConnected) {
-        logDebug "[LDATA] WS ping watchdog: not connected, skipping"
-        return
+        // 🔥 if we THINK disconnected but still receiving messages, recover
+        if (age < 20) {
+            logDebug "[LDATA] WS watchdog: false disconnected state — restoring"
+            state.wsConnected = true
+        } else {
+            logDebug "[LDATA] WS ping watchdog: not connected, skipping"
+            return
+        }
     }
     def lastSeen = state.wsLastSeen ?: 0
     def age = (now() - lastSeen) / 1000
@@ -1161,18 +1173,27 @@ def parse(String message) {
 
         // Server heartbeat: sends "not ready" then "ready" as its own keepalive cycle.
         // Receiving these resets wsLastSeen above — no response needed from us.
-        if (payload.type == "status" && payload.status == "not ready") {
+         if (payload.type == "status" && payload.status == "not ready") {
             logDebug "[LDATA] WS heartbeat: not ready (${payload.connectionId})"
+
+            // 🔥 IMPORTANT: update last seen so watchdog doesn't false-trigger
+            state.wsLastSeen = now()
+
             return
         }
 
         // Auth ready — server is ready to accept subscriptions
         if (payload.type == "status" && payload.status == "ready") {
-            logDebug "[LDATA] WS authenticated — sending subscriptions"
+            logDebug "[LDATA] WS ready received — connection confirmed"
+
             state.wsConnected = true
+            state.wsLastSeen = now()   // 🔥 ADD THIS LINE (critical fix)
+
             sendEvent(name: "wsStatus", value: "Connected")
             sendEvent(name: "presence", value: "present")
+
             state.wsReconnectPending = false
+
             sendWsSubscriptions()
             return
         }
@@ -1190,8 +1211,10 @@ def parse(String message) {
         }
 
     } catch (Exception e) {
-        log.warn "[LDATA] WS parse error: ${e.message} | raw: ${message?.take(120)}"
-    }
+    log.warn "[LDATA] WS parse error: ${e.message} | raw: ${message?.take(120)}"
+
+    // 🔥 IMPORTANT: prevent stale watchdog state
+    state.wsLastSeen = now()
 }
 
 private Map buildWsAuthPayload() {
