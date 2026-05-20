@@ -1468,7 +1468,10 @@ def runDeepVerificationScan() {
     // Schedule finalization after all batches complete + buffer
     def finalizeDelay = (totalGroups * 2) + 5
     processDeepScanGroup()
-    runIn(finalizeDelay, "finalizeDeepScan", [overwrite: false])
+    // Batch 1 runs immediately, each subsequent batch adds 2s
+    // Total = (totalGroups-1) * 2 seconds + 10s buffer for device responses
+    def actualDelay = ((totalGroups - 1) * 2) + 10
+    runIn(actualDelay, "finalizeDeepScan", [overwrite: false])
 }
 
 def processDeepScanGroup(data = null) {
@@ -1563,8 +1566,8 @@ def finalizeDeepScan() {
     log.info "Device Health Monitor: deep verification scan complete — ${verified} verified, ${unverifiable} unverifiable, ${declared} still declared"
 
     // Trigger a regular scan to pick up any device responses to the pings
-    runIn(5, "scanAllDevices", [overwrite: true])
-    log.info "Device Health Monitor: running scan to check for ping responses"
+    runIn(30, "scanAllDevices", [overwrite: true])
+    log.info "Device Health Monitor: running scan to check for ping responses — waiting 30s for device responses"
 }
 
 // ============================================================
@@ -3260,3 +3263,4 @@ def infoPage(Map params = [:]) {
         }
     }
 }
+
