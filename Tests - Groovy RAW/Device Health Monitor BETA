@@ -1440,29 +1440,40 @@ def runDeepVerificationScan() {
     def devList = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
     if (!devList) return
 
-    // Only target Declared devices — Verified and Unverifiable are already known
-    def targets = devList.findAll { getPingStatus(it.id) == "declared" }
+    // Target Declared and Unknown devices — skip Verified and Unverifiable (already known)
+    def targets = devList.findAll { getPingStatus(it.id) in ["declared", "unknown"] }
 
-    if (debugEnabled()) log.debug "Deep verification scan: ${targets.size()} declared device(s) to verify"
+    log.info "Device Health Monitor: deep verification scan starting — ${targets.size()} device(s) to verify"
+    if (targets.size() == 0) {
+        log.info "Device Health Monitor: deep verification scan — nothing to verify (all devices already Verified or Unverifiable)"
+        return
+    }
 
     def verified     = 0
     def unverifiable = 0
     def failed       = 0
 
-    // Process in groups of 5 with brief pauses — mesh friendly
-    def groups = targets.collate(5)
+    // Process in batches of 40 with 2 second gaps — same pattern as regular scan
+    def totalDevices = targets.size()
+    def batchSize    = totalDevices > 200 ? 25 : 40
+    def groups       = targets.collate(batchSize)
+    def totalGroups  = groups.size()
+    log.info "Device Health Monitor: deep scan — ${totalGroups} batch(es) of ${batchSize}"
     groups.eachWithIndex { group, idx ->
-        runIn((idx * 8), "processDeepScanGroup", [data: [deviceIds: group.collect { it.id }], overwrite: false])
+        runIn((idx * 2) + 1, "processDeepScanGroup", [data: [deviceIds: group.collect { it.id }, groupNum: idx + 1, totalGroups: totalGroups], overwrite: false])
     }
 
-    // Schedule finalization after all groups complete + buffer
-    def finalizDelay = (groups.size() * 8) + 10
-    runIn(finalizDelay, "finalizeDeepScan", [overwrite: false])
+    // Schedule finalization after all batches complete + buffer
+    def finalizeDelay = (groups.size() * 2) + 5
+    runIn(finalizeDelay, "finalizeDeepScan", [overwrite: false])
 }
 
 def processDeepScanGroup(data) {
-    def deviceIds = data?.deviceIds ?: []
-    def allDevs   = getAllMonitoredDevices()
+    def deviceIds   = data?.deviceIds ?: []
+    def groupNum    = data?.groupNum ?: 0
+    def totalGroups = data?.totalGroups ?: 0
+    def allDevs     = getAllMonitoredDevices()
+    log.info "Device Health Monitor: deep scan group ${groupNum}/${totalGroups} — pinging ${deviceIds.size()} device(s)"
 
     deviceIds.each { devId ->
         def device = allDevs.find { it.id == devId }
