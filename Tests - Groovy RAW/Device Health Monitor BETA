@@ -3,32 +3,6 @@
  * Version: 1.5.0
  *
  * Author: jdthomas24
- *
- * Changelog v1.5.1:
- *   - NEW: State-change verification — devices that cannot be pinged are now automatically
- *         verified as alive if a state change event occurred after their lastSeen timestamp
- *         and within 75% of the offline threshold window. Eliminates false Poor/Offline on
- *         scheduled devices (pool lights, irrigation) and event-only sensors (motion, contact)
- *         that don't support refresh or ping.
- *   - NEW: Gap sample discounting — when a device self-verifies via state change, the gap
- *         sample that caused the Poor rating is removed from the baseline so it doesn't
- *         permanently skew the learned check-in interval.
- *   - NEW: "✅ State verified" label in Health column and portal — replaces "⚠ Cannot verify"
- *         when a device proves itself alive through an event rather than a ping.
- *
- * Changelog v1.5.0:
- *   - NEW: OAuth Web Portal — browser-accessible device health dashboard (cloud + local URLs)
- *   - NEW: SPA architecture — portal shell loads instantly, data fetched async via /data JSON endpoint
- *         Eliminates 504 cloud timeouts on large device lists
- *   - NEW: Batch scanning — devices processed in auto-sized batches to protect hub performance
- *   - NEW: Low activity cap — devices with sparse check-in history that cannot be verified
- *         are capped at Poor instead of Offline — avoids false alarms on infrequently used devices
- *   - NEW: Location assignment per device — assign rooms/locations, bulk apply, used in portal
- *   - NEW: Group by Type / Group by Location toggle on portal dashboard
- *   - NEW: Per-device edit modal on portal — update location, description, and notes without
- *         opening the Hubitat app. Changes persist via /updateDevice endpoint
- *   - Portal status shown inline on main page — Enabled (blue) / Not Enabled (red)
- *   - Step-by-step OAuth setup with direct Apps Code link when not yet enabled
  */
 
 definition(
@@ -40,7 +14,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "",
     iconX2Url: "",
-    version: "1.5.1",
+    version: "1.5.0",
     doNotFocus: true,
     oauth: true
 )
@@ -1258,7 +1232,7 @@ def mainPage() {
             input "debugMode", "bool",
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.5.1</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.5.0</span>"
         }
     }
 }
