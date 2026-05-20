@@ -4,12 +4,23 @@
  *
  * Author: jdthomas24
  *
+ * Changelog v1.5.1:
+ *   - NEW: State-change verification — devices that cannot be pinged are now automatically
+ *         verified as alive if a state change event occurred after their lastSeen timestamp
+ *         and within 75% of the offline threshold window. Eliminates false Poor/Offline on
+ *         scheduled devices (pool lights, irrigation) and event-only sensors (motion, contact)
+ *         that don't support refresh or ping.
+ *   - NEW: Gap sample discounting — when a device self-verifies via state change, the gap
+ *         sample that caused the Poor rating is removed from the baseline so it doesn't
+ *         permanently skew the learned check-in interval.
+ *   - NEW: "✅ State verified" label in Health column and portal — replaces "⚠ Cannot verify"
+ *         when a device proves itself alive through an event rather than a ping.
+ *
  * Changelog v1.5.0:
  *   - NEW: OAuth Web Portal — browser-accessible device health dashboard (cloud + local URLs)
  *   - NEW: SPA architecture — portal shell loads instantly, data fetched async via /data JSON endpoint
  *         Eliminates 504 cloud timeouts on large device lists
  *   - NEW: Batch scanning — devices processed in auto-sized batches to protect hub performance
-nk)
  *   - NEW: Low activity cap — devices with sparse check-in history that cannot be verified
  *         are capped at Poor instead of Offline — avoids false alarms on infrequently used devices
  *   - NEW: Location assignment per device — assign rooms/locations, bulk apply, used in portal
@@ -29,7 +40,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "",
     iconX2Url: "",
-    version: "1.5.0",
+    version: "1.5.1",
     doNotFocus: true,
     oauth: true
 )
@@ -90,7 +101,6 @@ def appButtonHandler(btn) {
     if (btn == "btnRunDeepScan") {
         runDeepVerificationScan()
     }
-    // btnSaveLocations: re-render collapses the locations section showing the count
 }
 
 def initialize() {
@@ -105,10 +115,8 @@ def initialize() {
     if (state.isScanning         == null) state.isScanning         = false
     if (state.deviceCapabilities  == null) state.deviceCapabilities  = [:]
     if (state.deepScanResult      == null) state.deepScanResult      = [:]
+    if (state.dropHistory         == null) state.dropHistory         = [:]
 
-    // One-time migration: wipe any corrupt deviceCapabilities data written before
-    // the atomic write fix (v1.5.0 early builds used direct bracket assignment
-    // which corrupted state on Hubitat, setting false pingWorks on all devices)
     if (!state.capabilitiesResetDone) {
         state.deviceCapabilities  = [:]
         state.capabilitiesResetDone = true
@@ -116,7 +124,6 @@ def initialize() {
     }
     if (state.deviceLocations == null) state.deviceLocations = [:]
 
-    // Migrate any existing loc_ settings into state.deviceLocations
     getAllMonitoredDevices()?.each { device ->
         def existing = settings["loc_${device.id}"]
         if (existing && !state.deviceLocations?.containsKey(device.id as String)) {
@@ -126,7 +133,6 @@ def initialize() {
     }
     state.deviceLocations = state.deviceLocations
 
-    // OAuth token creation
     if (!state.accessToken) {
         try {
             createAccessToken()
@@ -315,15 +321,12 @@ def findHueBridge() {
     }
 }
 
-// Konnected child devices are identified by their DNI pattern: "parentId-key"
-// The parent Konnected Alarm Panel has capability Refresh and must be refreshed instead
 def findKonnectedPanel(device) {
     def monitoredPanels = getAllMonitoredDevices().findAll { d ->
         (d.typeName ?: "").toLowerCase().contains("konnected alarm panel")
     }
     if (!monitoredPanels) return null
 
-    // Method 1: parentDeviceId (most reliable when available)
     try {
         def parentId = device.parentDeviceId
         if (parentId) {
@@ -332,13 +335,10 @@ def findKonnectedPanel(device) {
         }
     } catch (e) {}
 
-    // Method 2: DNI prefix match — Konnected child DNIs are "parentDeviceId-key"
-    // where key is a long integer (ESPHome entity key)
     def dni = (device.deviceNetworkId ?: "")
     if (dni.contains("-")) {
         def parts    = dni.split("-")
         def parentId = parts[0]
-        // Verify the suffix looks like an ESPHome key (large integer)
         def suffix   = parts.size() > 1 ? parts[1] : ""
         if (suffix.isNumber() && suffix.toLong() > 1000) {
             def panel = monitoredPanels.find { d -> d.id == parentId }
@@ -362,7 +362,6 @@ def isModeOK() {
 // ============================================================
 // ===================== DEVICE CATEGORY HELPERS =============
 // ============================================================
-// Set device location in state (immediate) + settings (persistent)
 def setDeviceLocation(String deviceId, String loc) {
     if (!state.deviceLocations) state.deviceLocations = [:]
     if (loc == null || loc == "") {
@@ -375,7 +374,6 @@ def setDeviceLocation(String deviceId, String loc) {
     state.deviceLocations = state.deviceLocations
 }
 
-// Get device location — state first (immediate), fall back to settings
 def getDeviceLocation(deviceId) {
     return state.deviceLocations?.get(deviceId as String) ?: settings["loc_${deviceId}"] ?: ""
 }
@@ -386,17 +384,14 @@ def getDeviceDescription(device) {
 
 // ============================================================
 // ===================== PING STATUS HELPER ==================
-// Mark all monitored devices whose parent matches parentId as pingAttempted
-// Used when a bridge/panel refresh is sent — all children should get credit
+// ============================================================
 def markChildrenPingAttempted(String parentId) {
     def allDevs = getAllMonitoredDevices()
     def capMap  = state.deviceCapabilities ?: [:]
     allDevs.each { device ->
         def dni = (device.deviceNetworkId ?: "")
         def isChild = false
-        // Hue child: DNI starts with parentId
         try { if (device.parentDeviceId == parentId) isChild = true } catch (e) {}
-        // DNI prefix match
         if (!isChild && dni.contains("-")) {
             def prefix = dni.split("-")[0]
             if (prefix == parentId) isChild = true
@@ -415,9 +410,6 @@ def markChildrenPingAttempted(String parentId) {
     if (debugEnabled()) log.debug "DHM: marked children of ${parentId} as pingAttempted"
 }
 
-// ============================================================
-// ===================== PING STATUS HELPER ==================
-// ============================================================
 def getPingStatus(deviceId) {
     def capMap = state.deviceCapabilities ?: [:]
     def cap    = capMap[deviceId as String]
@@ -438,6 +430,41 @@ def getPingStatusDisplay(deviceId) {
 }
 
 // ============================================================
+// ===================== REPEAT DROPS / EXTENDED STATE =======
+// ============================================================
+def isRepeatDrops(deviceId) {
+    def drops = state.dropHistory?.get(deviceId as String) ?: []
+    drops = drops.findAll { now() - it < 86400000 }
+    return drops.size() >= 3
+}
+
+def getExtendedStateTag(device) {
+    if (device.hasAttribute("motion") && device.currentValue("motion") == "active") {
+        try {
+            def stateDate = device.currentState("motion")?.date
+            if (stateDate) {
+                def hoursActive = (now() - stateDate.time) / 3600000
+                if (hoursActive >= 2) {
+                    return " <span style='color:#f97316;font-size:10px;'>⏰ Active ${hoursActive.toInteger()}h</span>"
+                }
+            }
+        } catch (e) {}
+    }
+    if (device.hasAttribute("contact") && device.currentValue("contact") == "open") {
+        try {
+            def stateDate = device.currentState("contact")?.date
+            if (stateDate) {
+                def hoursOpen = (now() - stateDate.time) / 3600000
+                if (hoursOpen >= 24) {
+                    return " <span style='color:#f97316;font-size:10px;'>⏰ Open ${hoursOpen.toInteger()}h</span>"
+                }
+            }
+        } catch (e) {}
+    }
+    return ""
+}
+
+// ============================================================
 // ===================== LOW ACTIVITY ========================
 // ============================================================
 def isLowActivity(deviceId) {
@@ -448,6 +475,29 @@ def isLowActivity(deviceId) {
     def ageMs    = now() - lastSeen
     def ageDays  = ageMs / (1000.0 * 60 * 60 * 24)
     return (ageDays >= 7 && samples < 3)
+}
+
+// ============================================================
+// ===================== STATE-CHANGE VERIFICATION ===========
+// ============================================================
+// Returns true if a state change event occurred AFTER lastSeen and within
+// 75% of the offline threshold — proving the device is alive without a ping.
+def getStateVerified(deviceId) {
+    try {
+        def tracked = state.stateHistory?.get(deviceId as String)
+        if (!tracked?.lastChanged) return false
+        def data = state.history?.get(deviceId as String)
+        if (!data?.lastSeen) return false
+        // State change must have happened after the device's recorded lastSeen
+        def stateChangedAfterLastSeen = (tracked.lastChanged as Long) > (data.lastSeen as Long)
+        // State change must be recent enough to be meaningful (within 75% of offline threshold)
+        def thresholdMs = ((settings?.offlineThresholdHours ?: 72) * 60 * 60 * 1000 * 0.75).toLong()
+        def stateChangeIsRecent = (now() - (tracked.lastChanged as Long)) < thresholdMs
+        return stateChangedAfterLastSeen && stateChangeIsRecent
+    } catch (e) {
+        if (debugEnabled()) log.debug "getStateVerified error for device ${deviceId}: ${e.message}"
+        return false
+    }
 }
 
 // ============================================================
@@ -998,14 +1048,12 @@ def mainPage() {
     applyCustomLabel()
     dynamicPage(name: "mainPage", title: "", install: true, uninstall: true) {
 
-        // ── App Display Name ─────────────────────────────────
         def currentLabel = app.label ?: "Device Health Monitor"
         section("<b>App Display Name</b> — <span style='color:blue;'>${currentLabel}</span>", hideable: true, hidden: true) {
             paragraph "Enter a name to rename this app in your Hubitat app list."
             input "customAppName", "text", title: "Custom App Name", required: false
         }
 
-        // ── Web Portal ───────────────────────────────────────
         def portalEnabled    = state.accessToken != null
         def portalStatus     = portalEnabled ? "<span style='color:blue; font-weight:bold;'>Enabled</span>" : "<span style='color:red; font-weight:bold;'>Not Enabled</span>"
         def portalSectionTitle = "<b>Device Health Portal</b> — ${portalStatus}"
@@ -1033,7 +1081,6 @@ def mainPage() {
             }
         }
 
-        // ── Device Selection ─────────────────────────────────
         def devicesSelected = (monitoredDevices?.size() ?: 0) > 0
         def devSectionTitle = devicesSelected
             ? "<b>Monitored Devices</b> — <span style='color:blue;'>${monitoredDevices.size()} selected</span>"
@@ -1078,7 +1125,6 @@ def mainPage() {
             }
         }
 
-        // ── Monitoring Settings ──────────────────────────────
         def scanIntervalLabel  = ["0.5": "Every 30 min", "1": "Hourly", "3": "Every 3 h", "6": "Every 6 h"]
         def currentScan        = scanIntervalLabel[settings?.scanInterval ?: "3"] ?: "Every 3 h"
         def currentThreshold   = settings?.offlineThresholdHours ?: 72
@@ -1108,8 +1154,6 @@ def mainPage() {
             input "offlineThresholdHours", "number", title: "Offline after inactivity (hours):",
                   defaultValue: 72, required: true, submitOnChange: true
 
-
-
             paragraph "<b>Snooze</b> — enable or disable snooze globally."
             input "enableSnooze", "bool", title: "Enable snooze", defaultValue: false, submitOnChange: true
             if (snoozeEnabled()) {
@@ -1117,7 +1161,6 @@ def mainPage() {
                       defaultValue: 24, required: true, submitOnChange: true
             }
 
-            // ── Deep Verification Scan ──────────────────────────────
             def deepResult    = state.deepScanResult
             def deepResultStr = deepResult ? new Date(deepResult.ranAt).format("MM/dd/yy h:mm a", location.timeZone) +
                 " — ${deepResult.verified} verified, ${deepResult.unverifiable} unverifiable, ${deepResult.declared} still declared" : "Never run"
@@ -1144,8 +1187,6 @@ def mainPage() {
             }
         }
 
-        // ── Device Categories ────────────────────────────────
-        // ── Notifications ────────────────────────────────────
         def notifOn           = settings?.enablePush != false
         def notifSectionTitle = "<b>Notifications</b> — <span style='color:${notifOn ? "blue" : "red"};'>${notifOn ? "ON" : "OFF"}</span>"
         section(notifSectionTitle, hideable: true, hidden: true) {
@@ -1177,7 +1218,6 @@ def mainPage() {
             href(name: "toSendNotification", page: "sendNotificationPage", title: "📤 Send Notification Now")
         }
 
-        // ── Reports ──────────────────────────────────────────
         section("<b>Reports:</b>") {
             href(name: "toActivitySummary", page: "activitySummaryPage",
                  title: "<b>Device Activity Summary</b>",
@@ -1204,7 +1244,6 @@ def mainPage() {
                  description: "Fix misdetected protocols or pin a specific state attribute per device")
         }
 
-        // ── Help & Support ───────────────────────────────────
         section("<b>Help & Support</b>") {
             href(name: "toInfoPage", page: "infoPage",
                  title: "📖 App Guide & Reference",
@@ -1219,7 +1258,7 @@ def mainPage() {
             input "debugMode", "bool",
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.5.0</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.5.1</span>"
         }
     }
 }
@@ -1227,7 +1266,6 @@ def mainPage() {
 // ============================================================
 // ===================== LOCATION ASSIGNMENT PAGE ============
 // ============================================================
-// Helper — collects loc1..loc20 inputs, filters blanks, sorts alphabetically
 def getRoomOptions() {
     def locs = []
     (1..30).each { i ->
@@ -1290,7 +1328,6 @@ def locationAssignPage() {
                 paragraph "<i>Select a room — devices already assigned to it will be pre-checked. Check or uncheck devices, then confirm to save.</i>"
                 def devOptions = devList.collectEntries { [(it.id): it.displayName] }.sort { a, b -> a.value <=> b.value }
 
-                // Step 1 — pick a room. submitOnChange pre-populates the device list.
                 input "bulkLoc", "enum",
                       title: "Room:",
                       options: roomOptions,
@@ -1298,14 +1335,11 @@ def locationAssignPage() {
                       submitOnChange: true
 
                 if (settings?.bulkLoc) {
-                    // Pre-populate bulkDevs with devices currently in this room
-                    // Only do this when bulkLoc just changed — detected by comparing to state
                     def selectedRoom = settings.bulkLoc
                     def currentlyInRoom = devList
                         .findAll { getDeviceLocation(it.id) == selectedRoom }
                         .collect { it.id as String }
 
-                    // If bulkLoc changed since last render, reset bulkDevs to room's current devices
                     if (state.lastBulkLoc != selectedRoom) {
                         state.lastBulkLoc = selectedRoom
                         if (currentlyInRoom) {
@@ -1335,7 +1369,6 @@ def locationAssignPage() {
                         def addedCount   = 0
                         def removedCount = 0
 
-                        // Add newly checked devices to this room
                         newDevIds.each { dId ->
                             if (getDeviceLocation(dId) != selectedRoom) {
                                 setDeviceLocation(dId, selectedRoom)
@@ -1343,7 +1376,6 @@ def locationAssignPage() {
                             }
                         }
 
-                        // Remove unchecked devices that were previously in this room
                         currentlyInRoom.each { dId ->
                             if (!newDevIds.contains(dId)) {
                                 setDeviceLocation(dId, "")
@@ -1463,7 +1495,6 @@ def shouldRunWeekly() {
     return false
 }
 
-
 // ============================================================
 // ===================== DEEP VERIFICATION SCAN ==============
 // ============================================================
@@ -1471,7 +1502,6 @@ def runDeepVerificationScan() {
     def devList = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
     if (!devList) return
 
-    // Target Declared and Unknown devices — skip Verified and Unverifiable (already known)
     def targets = devList.findAll { getPingStatus(it.id) in ["declared", "unknown"] }
 
     log.info "Device Health Monitor: deep verification scan starting — ${targets.size()} device(s) to verify"
@@ -1480,27 +1510,17 @@ def runDeepVerificationScan() {
         return
     }
 
-    def verified     = 0
-    def unverifiable = 0
-    def failed       = 0
-
-    // Process in batches of 40 with 2 second gaps — same pattern as regular scan
     def totalDevices = targets.size()
     def batchSize    = totalDevices > 200 ? 25 : 40
     def groups       = targets.collate(batchSize)
     def totalGroups  = groups.size()
     log.info "Device Health Monitor: deep scan — ${totalGroups} batch(es) of ${batchSize}"
 
-    // Store batches in state — runIn data passing is unreliable for large maps
     state.deepScanQueue   = groups.collect { group -> group.collect { it.id } }
     state.deepScanTotal   = totalGroups
     state.deepScanCurrent = 0
 
-    // Schedule finalization after all batches complete + buffer
-    def finalizeDelay = (totalGroups * 2) + 5
     processDeepScanGroup()
-    // Batch 1 runs immediately, each subsequent batch adds 2s
-    // Total = (totalGroups-1) * 2 seconds + 10s buffer for device responses
     def actualDelay = ((totalGroups - 1) * 2) + 10
     runIn(actualDelay, "finalizeDeepScan", [overwrite: false])
 }
@@ -1517,7 +1537,6 @@ def processDeepScanGroup(data = null) {
     def allDevs     = getAllMonitoredDevices()
     log.info "Device Health Monitor: deep scan batch ${groupNum}/${totalGroups} — pinging ${deviceIds.size()} device(s)"
 
-    // Schedule next batch if more remain
     if (!queue.isEmpty()) {
         runIn(2, "processDeepScanGroup", [overwrite: false])
     }
@@ -1576,13 +1595,10 @@ def processDeepScanGroup(data = null) {
 def finalizeDeepScan() {
     def devList = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
 
-    // Count outcomes — devices that responded after ping attempt are now Verified
-    // (pingAttempted + lastSeen updated = pingWorks set to true in processScanChunk)
     def verified     = devList.count { getPingStatus(it.id) == "verified"     }
     def unverifiable = devList.count { getPingStatus(it.id) == "unverifiable" }
     def declared     = devList.count { getPingStatus(it.id) == "declared"     }
 
-    // Store result
     state.deepScanResult = [
         ranAt:       now(),
         verified:    verified,
@@ -1590,13 +1606,11 @@ def finalizeDeepScan() {
         declared:    declared
     ]
 
-    // Auto-disable — one-shot behavior
     app.updateSetting("enableDeepScan", [value: false, type: "bool"])
     unschedule("runDeepVerificationScan")
 
     log.info "Device Health Monitor: deep verification scan complete — ${verified} verified, ${unverifiable} unverifiable, ${declared} still declared"
 
-    // Trigger a regular scan to pick up any device responses to the pings
     runIn(30, "scanAllDevices", [overwrite: true])
     log.info "Device Health Monitor: running scan to check for ping responses — waiting 30s for device responses"
 }
@@ -1608,7 +1622,6 @@ def scanAllDevices() {
     def devList = getAllMonitoredDevices().findAll { getProtocol(it) != "Unknown" }
     if (!devList) return
 
-    // Guard against stuck scan
     def nowMs = new Date().time
     if (state.isScanning && state.scanStartTime && (nowMs - state.scanStartTime > 120000)) {
         log.warn "Device Health Monitor: previous scan appears stuck — resetting."
@@ -1666,7 +1679,6 @@ def processScanChunk() {
         return
     }
 
-    // Auto-scale batch size — smaller batches for larger installs
     def totalDevices = getAllMonitoredDevices().size()
     def chunkSize    = totalDevices > 200 ? 25 : 40
     def chunk        = queue.take(chunkSize)
@@ -1692,28 +1704,22 @@ def processScanChunk() {
             def filtered = usesFilteredSampling(protocol)
 
             def lastActivity = device.getLastActivity()
-            def lastSeen     = lastActivity ? safeTime(lastActivity) : now()
+            def lastSeen     = (lastActivity ? safeTime(lastActivity) : null) ?: now()
 
-            // Declared capability detection — cheap property reads, no hub load
-            // Hue and Konnected devices are verified via parent device — mark as declared
             def capMap  = state.deviceCapabilities ?: [:]
             def capKey  = id as String
             def capData = capMap[capKey] ?: [:]
 
             if (isHueDevice(device)) {
-                // Hue devices verified via Hue Bridge
                 if (debugEnabled()) log.debug "DHM capability scan: ${device.displayName} detected as Hue — marking declared"
                 capData.declared        = true
                 capData.declaredRefresh = true
-                // Clear any incorrectly set unverifiable status — these use parent verification
-                if (capData.pingWorks == false && (capData.pingFailed ?: 0) == 0) capData.pingWorks = null
+                if (capData.pingWorks == false) { capData.pingWorks = null; capData.pingFailed = 0 }
             } else if (isKonnectedDevice(device)) {
-                // Konnected child devices verified via parent panel
                 if (debugEnabled()) log.debug "DHM capability scan: ${device.displayName} detected as Konnected child (DNI: ${device.deviceNetworkId}) — marking declared"
                 capData.declared        = true
                 capData.declaredRefresh = true
-                // Clear any incorrectly set unverifiable status — these use parent verification
-                if (capData.pingWorks == false && (capData.pingFailed ?: 0) == 0) capData.pingWorks = null
+                if (capData.pingWorks == false) { capData.pingWorks = null; capData.pingFailed = 0 }
             } else {
                 def declaredRefresh  = false
                 def declaredPing     = false
@@ -1727,7 +1733,6 @@ def processScanChunk() {
                 capData.declaredPing     = declaredPing
                 capData.declared         = declaredRefresh || declaredPing || hasCustomRefresh
                 capData.customRefreshCmd = hasCustomRefresh && !declaredRefresh ? "forceRefresh" : null
-                // If scan ran successfully but no capability/command found → unverifiable
                 if (capCheckOk && !capData.declared && capData.pingWorks == null) {
                     capData.pingWorks  = false
                     capData.pingFailed = 0
@@ -1749,7 +1754,6 @@ def processScanChunk() {
             } else {
                 def prevLastSeen = data.lastSeen ?: lastSeen
                 if (lastSeen > prevLastSeen) {
-                    // If device recovered after a ping attempt → ping works!
                     def capMapRec  = state.deviceCapabilities ?: [:]
                     def capKeyRec  = id as String
                     def capDataRec = capMapRec[capKeyRec] ?: [:]
@@ -1837,15 +1841,47 @@ def updateHealth(device) {
     }
 
     def currentHealth = state.health[id]
+
+    def prevHealth = state.prevHealth?.get(id as String)
+    if (currentHealth in ["Poor", "Offline"] && !(prevHealth in ["Poor", "Offline"])) {
+        def dropMap  = state.dropHistory ?: [:]
+        def drops    = dropMap[id as String] ?: []
+        drops << now()
+        drops = drops.findAll { now() - it < 86400000 }
+        dropMap[id as String] = drops
+        state.dropHistory = dropMap
+    }
+    if (!state.prevHealth) state.prevHealth = [:]
+    def prevMap = state.prevHealth
+    prevMap[id as String] = currentHealth
+    state.prevHealth = prevMap
+
     if (!(currentHealth in ["Poor", "Offline"])) {
         state.verifying?.remove(id)
         return
     }
 
-    // Attempt verification — ping or refresh
     if (state.verifying == null) state.verifying = [:]
     if (state.verifying[id]) {
         state.verifying.remove(id)
+        return
+    }
+
+    // ── State-change verification ─────────────────────────────
+    // If the device fired a state change event after its lastSeen timestamp
+    // and within the staleness window, it proved itself alive without a ping.
+    // Discount the gap sample that caused the drop and skip the ping entirely.
+    if (getStateVerified(id as String)) {
+        state.verifying[id] = "state_verified"
+        log.info "Device Health Monitor: ${currentHealth} — ${device.displayName} self-verified via state change event (no ping needed)"
+        // Remove the most recent gap sample that caused the health drop
+        if (data?.samples?.size() > 0) {
+            data.samples.remove(data.samples.size() - 1)
+            if (data.samples.size() >= 3) {
+                data.avgInterval = data.samples.sum() / data.samples.size()
+            }
+            state.history[id] = data
+        }
         return
     }
 
@@ -1863,7 +1899,6 @@ def updateHealth(device) {
             try {
                 bridge.refresh()
                 verifyMethod = "hue_bridge"
-                // Mark all Hue children as pingAttempted so they get credited when lastSeen updates
                 markChildrenPingAttempted(bridge.id as String)
             }
             catch (e) { verifyMethod = "hue_bridge_failed" }
@@ -1876,7 +1911,6 @@ def updateHealth(device) {
             try {
                 panel.refresh()
                 verifyMethod = "konnected_panel"
-                // Mark all Konnected children as pingAttempted so they get credited when lastSeen updates
                 markChildrenPingAttempted(panel.id as String)
             }
             catch (e) { verifyMethod = "konnected_panel_failed" }
@@ -1910,7 +1944,6 @@ def updateHealth(device) {
         if (debugEnabled()) log.debug "Device Health Monitor: ${currentHealth} — cannot verify ${device.displayName} (${verifyMethod})"
     }
 
-    // Record declared capability outcome into deviceCapabilities
     def capMapH  = state.deviceCapabilities ?: [:]
     def capKeyH  = id as String
     def capDataH = capMapH[capKeyH] ?: [:]
@@ -1924,9 +1957,6 @@ def updateHealth(device) {
     capMapH[capKeyH]         = capDataH
     state.deviceCapabilities = capMapH
 
-    // Low activity + cannot verify = cap at Poor, not Offline
-    // A device with sparse check-in history that can't be pinged should not be
-    // declared Offline — we genuinely don't know its state.
     if (currentHealth == "Offline" &&
         isLowActivity(id as String) &&
         verifyMethod in ["none", "virtual", "hue_no_bridge", "hue_bridge_failed", "failed"]) {
@@ -1955,34 +1985,39 @@ def getHealthDisplay(device) {
             ? "🔴 Poor"
             : "💀 <span style='color:#991b1b;font-weight:bold;'>Offline</span>"
 
-        def lowActivity = isLowActivity(device.id as String)
-        def tagSuffix   = ""
-        if (lowActivity) tagSuffix = " <span style='color:#94a3b8;font-size:10px;'>ℹ️ Low Activity Device</span>"
+        def lowActivity  = isLowActivity(device.id as String)
+        def repeatDrops  = isRepeatDrops(device.id as String)
+        def tagSuffix    = ""
+        if (repeatDrops)  tagSuffix = " <span style='color:#f97316;font-size:10px;'>🔄 Repeat Drops</span>"
+        else if (lowActivity) tagSuffix = " <span style='color:#94a3b8;font-size:10px;'>ℹ️ Low Activity Device</span>"
 
         def verifyMethod = state.verifying?.get(device.id)
         if (verifyMethod == null) return "${baseDisplay}${tagSuffix}"
         switch (verifyMethod) {
-            case "refresh":           return "${baseDisplay}${tagSuffix} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (refresh sent)</span>"
-            case "ping":              return "${baseDisplay}${tagSuffix} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (ping sent)</span>"
+            case "state_verified":        return "${baseDisplay}${tagSuffix} <span style='color:#22c55e;font-size:11px;'>✅ State verified — device active via event</span>"
+            case "refresh":               return "${baseDisplay}${tagSuffix} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (refresh sent)</span>"
+            case "ping":                  return "${baseDisplay}${tagSuffix} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (ping sent)</span>"
             case "hue_bridge":            return "${baseDisplay}${tagSuffix} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (Hue Bridge refresh sent)</span>"
             case "hue_no_bridge":         return "${baseDisplay}${tagSuffix} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — add Hue Bridge to monitored devices</span>"
             case "hue_bridge_failed":     return "${baseDisplay}${tagSuffix} <span style='color:#94a3b8;font-size:11px;'>⚠ Hue Bridge refresh failed</span>"
             case "konnected_panel":       return "${baseDisplay}${tagSuffix} <span style='color:#1a73e8;font-size:11px;'>🔄 Verifying... (Konnected Panel refresh sent)</span>"
             case "konnected_no_panel":    return "${baseDisplay}${tagSuffix} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — add Konnected Alarm Panel to monitored devices</span>"
             case "konnected_panel_failed":return "${baseDisplay}${tagSuffix} <span style='color:#94a3b8;font-size:11px;'>⚠ Konnected Panel refresh failed</span>"
-            case "virtual":           return "${baseDisplay}${tagSuffix} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — virtual device</span>"
-            case "none":              return "${baseDisplay}${tagSuffix} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — device does not support ping or refresh</span>"
-            case "failed":            return "${baseDisplay}${tagSuffix} <span style='color:#94a3b8;font-size:11px;'>⚠ Verification attempted but command failed</span>"
-            default:                  return "${baseDisplay}${tagSuffix}"
+            case "virtual":               return "${baseDisplay}${tagSuffix} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — virtual device</span>"
+            case "none":                  return "${baseDisplay}${tagSuffix} <span style='color:#94a3b8;font-size:11px;'>⚠ Cannot verify — device does not support ping or refresh</span>"
+            case "failed":                return "${baseDisplay}${tagSuffix} <span style='color:#94a3b8;font-size:11px;'>⚠ Verification attempted but command failed</span>"
+            default:                      return "${baseDisplay}${tagSuffix}"
         }
     }
     switch (h) {
-        case "Excellent": return "🟢 Excellent"
-        case "Good":      return "🟢 Good"
+        case "Excellent":
+        case "Good":
         case "Fair":
-            def lowActivity = isLowActivity(device.id as String)
-            def lowSuffix   = lowActivity ? " <span style='color:#94a3b8;font-size:10px;'>ℹ️ Low Activity Device</span>" : ""
-            return "🟠 Fair${lowSuffix}"
+            def lowActivity    = isLowActivity(device.id as String)
+            def extStateTag    = getExtendedStateTag(device)
+            def lowSuffix      = (lowActivity && !extStateTag) ? " <span style='color:#94a3b8;font-size:10px;'>ℹ️ Low Activity Device</span>" : ""
+            def healthEmoji    = h == "Fair" ? "🟠" : "🟢"
+            return "${healthEmoji} ${h}${extStateTag}${lowSuffix}"
         default: return "${h}"
     }
 }
@@ -2181,12 +2216,13 @@ def serveDataEndpoint() {
                 location:     loc,
                 description:  desc,
                 pingStatus:   getPingStatus(device.id),
+                repeatDrops:  isRepeatDrops(device.id as String),
+                extStateTag:  getExtendedStateTag(device),
                 verifyMethod: verifyMethod ?: "",
                 lowActivity:  isLowActivity(device.id as String)
             ]
         }
 
-        // Sort: Offline → Poor → Fair → Good → Excellent → Pending, then alpha
         def healthOrder = ["Offline": 1, "Poor": 2, "Fair": 3, "Good": 4, "Excellent": 5, "Pending": 6]
         estate = estate.sort { a, b ->
             def pA = healthOrder[a.health] ?: 6
@@ -2301,12 +2337,14 @@ function healthLabel(dev) {
     if (h === 'Pending') return "⏳ Pending";
 
     let suffix = '';
+    if (dev.repeatDrops) suffix = ' <span style="color:#f97316;font-size:10px;">🔄 Repeat Drops</span>';
     else if (dev.lowActivity && (h === 'Fair' || h === 'Poor' || h === 'Offline')) suffix = ' <span style="color:#94a3b8;font-size:10px;">ℹ️ Low Activity</span>';
 
     if (h === 'Poor' || h === 'Offline') {
         let vm = dev.verifyMethod;
         let vSuffix = '';
-        if (vm === 'refresh' || vm === 'ping') vSuffix = ' <span style="color:#1a73e8;font-size:10px;">🔄 Verifying...</span>';
+        if (vm === 'state_verified')               vSuffix = ' <span style="color:#22c55e;font-size:10px;">✅ State verified</span>';
+        else if (vm === 'refresh' || vm === 'ping') vSuffix = ' <span style="color:#1a73e8;font-size:10px;">🔄 Verifying...</span>';
         else if (vm === 'none' || vm === 'virtual') vSuffix = ' <span style="color:#94a3b8;font-size:10px;">⚠ Cannot verify</span>';
         else if (vm === 'hue_bridge')              vSuffix = ' <span style="color:#1a73e8;font-size:10px;">🔄 Hue Bridge refresh sent</span>';
         else if (vm === 'hue_no_bridge')           vSuffix = ' <span style="color:#94a3b8;font-size:10px;">⚠ Add Hue Bridge</span>';
@@ -2391,7 +2429,6 @@ function render() {
     html += "</select>";
     html += "</div>";
 
-    // Active issues
     let issues = estate.filter(d => ['Offline','Poor','Fair'].includes(d.health) && !d.snoozed);
     if (issues.length) {
         html += "<details open><summary style='border-left-color:#ef4444;'>⚠️ Active Issues <span class='cat-count'>" + issues.length + " devices</span></summary><div style='padding-top:10px;'>";
@@ -2399,7 +2436,6 @@ function render() {
         html += "</div></details>";
     }
 
-    // Snoozed
     let snoozed = estate.filter(d => d.snoozed);
     if (snoozed.length) {
         html += "<details><summary style='border-left-color:#8b5cf6;'>😴 Snoozed <span class='cat-count'>" + snoozed.length + "</span></summary><div style='padding-top:10px;'>";
@@ -2407,7 +2443,6 @@ function render() {
         html += "</div></details>";
     }
 
-    // Healthy devices grouped
     let healthy_devs = estate.filter(d => !['Offline','Poor','Fair'].includes(d.health) && !d.snoozed);
     let groups = {};
     healthy_devs.forEach(d => {
@@ -2435,13 +2470,11 @@ function openEdit(card) {
     document.getElementById('editDeviceId').value = card.getAttribute('data-id');
     document.getElementById('editDeviceName').innerText = card.getAttribute('data-name');
 
-    // Device info
     document.getElementById('modalHealth').innerText    = card.getAttribute('data-health') || '—';
     document.getElementById('modalProtocol').innerText  = card.getAttribute('data-protocol') || '—';
     document.getElementById('modalLastSeen').innerText  = card.getAttribute('data-lastseen') || '—';
     document.getElementById('modalAvgInt').innerText    = card.getAttribute('data-avginterval') || '—';
 
-    // Location dropdown
     let locSel = document.getElementById('editLoc');
     locSel.innerHTML = '<option value="">— Unassigned —</option>';
     (db.locations || []).forEach(l => {
@@ -2459,8 +2492,6 @@ function openEdit(card) {
     document.getElementById('editDesc').value = card.getAttribute('data-desc') || '';
     document.getElementById('editModal').style.display = 'flex';
 }
-
-
 
 function saveEdit() {
     let btn = document.querySelector('.modal-save');
@@ -2513,7 +2544,6 @@ setInterval(silentRefresh, 60000);
         return render(contentType: "text/html", data: "<h3 style='color:white;font-family:sans-serif;'>Portal Error</h3><p style='color:#ccc;'>${e}</p>", status: 500)
     }
 }
-
 
 // ============================================================
 // ===================== ACTIVITY SUMMARY PAGE ===============
@@ -2743,7 +2773,6 @@ def problemDevicesPage() {
         def unverCount   = unverifiable.size()
         def unknownCount = allDevs.findAll { getPingStatus(it.id) == "unknown"   }.size()
 
-        // ── Summary bar ─────────────────────────────────────────
         section("") {
             def offCount  = problems.count { state.health?.get(it.id) == "Offline" }
             def poorCount = problems.count { state.health?.get(it.id) == "Poor"    }
@@ -2759,7 +2788,6 @@ def problemDevicesPage() {
                 "<b><span style='color:#94a3b8;'>⚠ ${unverCount} Unverifiable</span></b>"
         }
 
-        // ── Active Problems ──────────────────────────────────────
         section("<b>Active Issues</b>") {
             if (!problems) {
                 paragraph "✅ No problem devices — all monitored devices are healthy."
@@ -2800,7 +2828,6 @@ def problemDevicesPage() {
             }
         }
 
-        // ── Unverifiable Devices ─────────────────────────────────
         section("<b>Unverifiable Devices</b> — <span style='color:${unverCount > 0 ? "#94a3b8" : "#22c55e"};'>${unverCount} device(s)</span>", hideable: true, hidden: unverCount == 0) {
             if (unverCount == 0) {
                 paragraph "✅ All devices support ping or refresh verification."
@@ -2842,7 +2869,6 @@ def problemDevicesPage() {
             }
         }
 
-        // ── Verification Summary ─────────────────────────────────
         section("<b>Verification Summary</b>", hideable: true, hidden: true) {
             paragraph "<div style='background-color:#f8f8f8; border:1px solid #ddd; border-radius:6px; padding:10px;'>" +
                       "<b>✅ Verified (${verified})</b> — confirmed responds to ping or refresh after going Poor/Offline<br>" +
@@ -2867,7 +2893,6 @@ def problemDevicesPage() {
         }
     }
 }
-
 
 // ============================================================
 // ===================== PROTOCOL OVERRIDE PAGE ==============
@@ -3181,8 +3206,7 @@ def scheduledSummary() {
                 def stateStr  = stateInfo ? " [${stateInfo.label}]" : ""
                 def lastStr   = state.history?.get(device.id)?.lastSeen
                     ? ", last seen ${formatTimeAgo(state.history[device.id].lastSeen)}" : ""
-                def tagStr    = ""
-                sections[h].list << "${device.displayName.trim()}${tagStr}${stateStr}${lastStr}"
+                sections[h].list << "${device.displayName.trim()}${stateStr}${lastStr}"
             }
         }
     }
@@ -3245,7 +3269,6 @@ def infoPage(Map params = [:]) {
                       "so a single bad scan can't block future scans indefinitely.</div>"
         }
 
-
         section("<b>🏷️ Location Assignment</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
                       "Assign rooms or locations to devices from the <b>🏷️ Location Assignment</b> page in the Reports menu. " +
@@ -3280,22 +3303,24 @@ def infoPage(Map params = [:]) {
                       "<b>Sample window:</b> Up to 20 samples are kept per device. Older samples are discarded as new ones arrive.</div>"
         }
 
-        section("<b>🔄 Verification (Ping / Refresh)</b>") {
+        section("<b>🔄 Verification (Ping / Refresh / State)</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "When a device first enters Poor or Offline the app attempts to verify by sending refresh() or ping(). " +
-                      "If the device responds its health recovers on the next scan. The verification status is shown inline in the Health column.<br><br>" +
-                      "<b>Low activity devices</b> that cannot be verified (no Refresh or Ping capability) are capped at Poor instead of Offline — the app cannot confirm they are truly unreachable.<br><br>" +
-                      "<b>Hue devices:</b> Add your Hue Bridge (or CoCoHue Bridge) to the monitored devices list. " +
-                      "The app refreshes the Bridge when any Hue device goes Poor or Offline — one refresh covers all connected Hue devices simultaneously.<br><br>" +
-                      "<b>Konnected devices:</b> Add your <b>Konnected Alarm Panel</b> to monitored devices. " +
-                      "Child sensors (door, motion, water) are verified by refreshing the panel — one refresh covers all connected sensors simultaneously.</div>"
+                      "When a device first enters Poor or Offline the app attempts to verify it is still reachable. Verification happens in priority order:<br><br>" +
+                      "<b>1. State-change verification (v1.5.1+):</b> If the device fired a state change event after its last recorded check-in and within 75% of the offline threshold, " +
+                      "it is considered <b>✅ State verified</b> — alive without needing a ping. The gap sample that caused the drop is also discounted so it does not permanently skew the baseline. " +
+                      "This eliminates false alarms for scheduled devices (pool lights, irrigation) and event-only sensors (motion, contact) that do not support refresh or ping.<br><br>" +
+                      "<b>2. Refresh / Ping:</b> If state-change verification is not available, the app sends refresh() or ping() to the device. " +
+                      "If the device responds its health recovers on the next scan.<br><br>" +
+                      "<b>Low activity devices</b> that cannot be verified by any method are capped at Poor instead of Offline — the app cannot confirm they are truly unreachable.<br><br>" +
+                      "<b>Hue devices:</b> Add your Hue Bridge (or CoCoHue Bridge) to monitored devices. The app refreshes the Bridge when any Hue device goes Poor or Offline.<br><br>" +
+                      "<b>Konnected devices:</b> Add your <b>Konnected Alarm Panel</b> to monitored devices. Child sensors are verified by refreshing the panel.</div>"
         }
 
         section("<b>💡 Tips for Best Results</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
                       "• Enable OAuth in App Code to unlock the Web Portal<br>" +
+                      "• Scheduled devices (lights, irrigation) self-verify via state changes — no configuration needed<br>" +
                       "• Low activity devices that cannot be verified will show Poor instead of Offline — this is intentional<br>" +
-                      
                       "• Assign locations in the 🏷️ Location Assignment page — enables room grouping in the portal<br>" +
                       "• Hub Mesh Overview is most useful when you have 10+ Hub Mesh devices<br>" +
                       "• If a device is stuck at Pending after several days, check that it is actively reporting to the hub<br>" +
