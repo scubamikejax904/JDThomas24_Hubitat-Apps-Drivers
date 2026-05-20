@@ -1095,10 +1095,8 @@ def mainPage() {
 
             paragraph "<hr style='background-color:#eee; height:1px; border:0; margin:8px 0;'/>"
             paragraph deepTitle
-            paragraph "<i>Sends ping or refresh commands to all unconfirmed devices to test whether they actually respond. Runs once then auto-disables. Best run overnight when the home is quiet.</i>"
-            paragraph "<span style='color:#94a3b8;font-size:11px;'>⚠ May cause brief radio activity. Some devices wake up or flash lights when pinged. Battery devices drain slightly faster.</span>"
             paragraph "<b>Last run:</b> ${deepResultStr}"
-            input "enableDeepScan", "bool", title: "Enable deep verification scan (runs once then auto-disables):", defaultValue: false, submitOnChange: true
+            input "enableDeepScan", "bool", title: "Schedule — runs once then auto-disables:", defaultValue: false, submitOnChange: true
             if (deepEnabled) {
                 input "deepScanTime", "time", title: "Run at:", required: true
             }
