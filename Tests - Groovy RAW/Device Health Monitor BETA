@@ -1459,21 +1459,34 @@ def runDeepVerificationScan() {
     def groups       = targets.collate(batchSize)
     def totalGroups  = groups.size()
     log.info "Device Health Monitor: deep scan — ${totalGroups} batch(es) of ${batchSize}"
-    groups.eachWithIndex { group, idx ->
-        runIn((idx * 2) + 1, "processDeepScanGroup", [data: [deviceIds: group.collect { it.id }, groupNum: idx + 1, totalGroups: totalGroups], overwrite: false])
-    }
+
+    // Store batches in state — runIn data passing is unreliable for large maps
+    state.deepScanQueue   = groups.collect { group -> group.collect { it.id } }
+    state.deepScanTotal   = totalGroups
+    state.deepScanCurrent = 0
 
     // Schedule finalization after all batches complete + buffer
-    def finalizeDelay = (groups.size() * 2) + 5
+    def finalizeDelay = (totalGroups * 2) + 5
+    runIn(1, "processDeepScanGroup", [overwrite: false])
     runIn(finalizeDelay, "finalizeDeepScan", [overwrite: false])
 }
 
-def processDeepScanGroup(data) {
-    def deviceIds   = data?.deviceIds ?: []
-    def groupNum    = data?.groupNum ?: 0
-    def totalGroups = data?.totalGroups ?: 0
+def processDeepScanGroup(data = null) {
+    def queue   = state.deepScanQueue ?: []
+    if (queue.isEmpty()) return
+
+    def deviceIds   = queue.remove(0)
+    state.deepScanQueue   = queue
+    state.deepScanCurrent = (state.deepScanCurrent ?: 0) + 1
+    def groupNum    = state.deepScanCurrent
+    def totalGroups = state.deepScanTotal ?: 0
     def allDevs     = getAllMonitoredDevices()
-    log.info "Device Health Monitor: deep scan group ${groupNum}/${totalGroups} — pinging ${deviceIds.size()} device(s)"
+    log.info "Device Health Monitor: deep scan batch ${groupNum}/${totalGroups} — pinging ${deviceIds.size()} device(s)"
+
+    // Schedule next batch if more remain
+    if (!queue.isEmpty()) {
+        runIn(2, "processDeepScanGroup", [overwrite: false])
+    }
 
     deviceIds.each { devId ->
         def device = allDevs.find { it.id == devId }
