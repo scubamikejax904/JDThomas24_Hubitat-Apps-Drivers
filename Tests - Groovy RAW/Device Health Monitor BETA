@@ -386,6 +386,37 @@ def getDeviceDescription(device) {
 
 // ============================================================
 // ===================== PING STATUS HELPER ==================
+// Mark all monitored devices whose parent matches parentId as pingAttempted
+// Used when a bridge/panel refresh is sent — all children should get credit
+def markChildrenPingAttempted(String parentId) {
+    def allDevs = getAllMonitoredDevices()
+    def capMap  = state.deviceCapabilities ?: [:]
+    allDevs.each { device ->
+        def dni = (device.deviceNetworkId ?: "")
+        def isChild = false
+        // Hue child: DNI starts with parentId
+        try { if (device.parentDeviceId == parentId) isChild = true } catch (e) {}
+        // DNI prefix match
+        if (!isChild && dni.contains("-")) {
+            def prefix = dni.split("-")[0]
+            if (prefix == parentId) isChild = true
+        }
+        if (isChild) {
+            def capKey  = device.id as String
+            def capData = capMap[capKey] ?: [:]
+            if (capData.pingWorks != true) {
+                capData.pingAttempted    = true
+                capData.lastPingAttempt  = now()
+                capMap[capKey]           = capData
+            }
+        }
+    }
+    state.deviceCapabilities = capMap
+    if (debugEnabled()) log.debug "DHM: marked children of ${parentId} as pingAttempted"
+}
+
+// ============================================================
+// ===================== PING STATUS HELPER ==================
 // ============================================================
 def getPingStatus(deviceId) {
     def capMap = state.deviceCapabilities ?: [:]
@@ -399,9 +430,9 @@ def getPingStatus(deviceId) {
 
 def getPingStatusDisplay(deviceId) {
     switch (getPingStatus(deviceId)) {
-        case "verified":     return "<span style='color:#22c55e;font-size:10px;font-weight:bold;'>✅ Ping verified</span>"
+        case "verified":     return "<span style='color:#22c55e;font-size:10px;font-weight:bold;'>✅ Verified</span>"
         case "unverifiable": return "<span style='color:#94a3b8;font-size:10px;'>⚠ Cannot verify</span>"
-        case "declared":     return "<span style='color:#f97316;font-size:10px;'>🔄 Ping declared</span>"
+        case "declared":     return "<span style='color:#f97316;font-size:10px;'>🔄 Verifiable</span>"
         default:             return ""
     }
 }
@@ -1829,7 +1860,12 @@ def updateHealth(device) {
     } else if (isHueDevice(device)) {
         def bridge = findHueBridge()
         if (bridge) {
-            try { bridge.refresh(); verifyMethod = "hue_bridge" }
+            try {
+                bridge.refresh()
+                verifyMethod = "hue_bridge"
+                // Mark all Hue children as pingAttempted so they get credited when lastSeen updates
+                markChildrenPingAttempted(bridge.id as String)
+            }
             catch (e) { verifyMethod = "hue_bridge_failed" }
         } else {
             verifyMethod = "hue_no_bridge"
@@ -1837,7 +1873,12 @@ def updateHealth(device) {
     } else if (isKonnectedDevice(device)) {
         def panel = findKonnectedPanel(device)
         if (panel) {
-            try { panel.refresh(); verifyMethod = "konnected_panel" }
+            try {
+                panel.refresh()
+                verifyMethod = "konnected_panel"
+                // Mark all Konnected children as pingAttempted so they get credited when lastSeen updates
+                markChildrenPingAttempted(panel.id as String)
+            }
             catch (e) { verifyMethod = "konnected_panel_failed" }
         } else {
             verifyMethod = "konnected_no_panel"
@@ -2295,9 +2336,9 @@ function protoTag(dev) {
 function card(dev) {
     let locDesc = [];
     if (dev.location) locDesc.push('🏷️ ' + dev.location);
-    let pingTag = dev.pingStatus === 'verified' ? "<span style='color:#22c55e;font-size:10px;'>✅ Ping verified</span>" :
+    let pingTag = dev.pingStatus === 'verified' ? "<span style='color:#22c55e;font-size:10px;'>✅ Verified</span>" :
                   dev.pingStatus === 'unverifiable' ? "<span style='color:#94a3b8;font-size:10px;'>⚠ Cannot verify</span>" :
-                  dev.pingStatus === 'declared' ? "<span style='color:#f97316;font-size:10px;'>🔄 Ping declared</span>" : '';
+                  dev.pingStatus === 'declared' ? "<span style='color:#f97316;font-size:10px;'>🔄 Verifiable</span>" : '';
     if (dev.description) locDesc.push('📝 ' + dev.description);
     let locHtml = locDesc.length ? "<div style='font-size:11px;color:#888;margin-top:2px;'>" + locDesc.join(' &nbsp;|&nbsp; ') + "</div>" : '';
 
@@ -3263,4 +3304,3 @@ def infoPage(Map params = [:]) {
         }
     }
 }
-
