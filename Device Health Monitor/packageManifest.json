@@ -1,12 +1,12 @@
 {
   "packageName": "Device Health Monitor",
   "author": "Jdthomas24",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "category": "Monitoring",
   "description": "Monitor device check-in health across Zigbee, Z-Wave, Matter, Hub Mesh, LAN, Virtual and Hub Variable — learns each device's normal pattern and alerts you when something goes quiet.",
   "dateReleased": "4/28/26",
   "minimumHEVersion": "2.3.0",
-  "releaseNotes": "v1.5.0: Added OAuth web portal with SPA dashboard. Batch scanning for large installs. State-change self-verification eliminates false alarms on event-only devices. Offline threshold default increased to 7 days. Location assignment, Konnected support, Deep Verification Scan, Repeat Drops detection, and expanded Problem Devices page.",
+  "releaseNotes": "v1.5.1: Added OAuth web portal with SPA dashboard. Batch scanning for large installs. State-change self-verification eliminates false alarms on event-only devices. Offline threshold default increased to 7 days. Location assignment, Konnected support, Deep Verification Scan, Repeat Drops detection, and expanded Problem Devices page.",
   "apps": [
     {
       "id": "a045ac2b-5fe0-4159-830b-8550899d9553",
