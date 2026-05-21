@@ -1,7 +1,7 @@
 /*
 SmartThings Motion Sensor Enhanced
 
-Version: 1.7.7
+Version: 1.7.8
 Author: jdthomas24
 Namespace: jdthomas24
 
@@ -20,6 +20,15 @@ Enhancements:
 - Health Check ping() implementation
 - Debug logging auto-disables after 30 minutes
 - Temperature logging suppressed when enableTemp is off
+
+Changes in 1.7.8:
+- Updated battery voltage curve for CR2 lithium chemistry
+  Previous curve was tuned for CR2450/CR2477 coin cells — incorrect for these devices
+  New curve reflects CR2 discharge profile: 3.0V fresh, ~2.8V plateau, 2.0V cutoff
+  Steeper end-of-life drop below 2.5V matches CR2 real-world behavior
+- Default battery reporting interval changed from 60 to 240 minutes
+  Reduces overly frequent reporting that caused Battery Monitor drain outlier rejection
+  Existing installs are unaffected — only applies on fresh install
 
 Changes in 1.7.7:
 - configure() now only fires when enableTemp or batteryReportMinutes change —
@@ -47,7 +56,7 @@ Changes in 1.7.6:
 import hubitat.zigbee.clusters.iaszone.ZoneStatus
 import hubitat.zigbee.zcl.DataType
 
-def driverVersion() { return "1.7.7" }
+def driverVersion() { return "1.7.8" }
 
 metadata {
     definition(
@@ -83,7 +92,7 @@ metadata {
               title: "Battery Reporting Interval (minutes)",
               description: "How often the device reports battery. Converted to seconds for Zigbee reporting.",
               options: ["30","60","120","240","360"],
-              defaultValue: "60"
+              defaultValue: "240"
         input name: "infoLogging",  type: "bool", title: "Enable Info Logging",                              defaultValue: true
         input name: "debugLogging", type: "bool", title: "Enable Debug Logging (auto-disables after 30 min)", defaultValue: false
     }
@@ -160,7 +169,7 @@ def updated() {
 }
 
 def configure() {
-    def battInterval = (batteryReportMinutes ?: "60").toInteger() * 60
+    def battInterval = (batteryReportMinutes ?: "240").toInteger() * 60
 
     def cmds = []
     cmds += zigbee.batteryConfig()
@@ -299,32 +308,33 @@ def updateRouteHealth(Integer lqi) {
 // ============================================================
 
 /**
- * Voltage-to-percentage curve for CR2450/CR2477 coin cells.
- * 5% increments for cleaner reporting.
- * These batteries hold voltage well between 3.0-2.8V then drop steeply below 2.7V.
+ * Voltage-to-percentage curve for CR2 lithium batteries.
+ * Based on ~750-800mAh capacity, 3.0V fresh, ~2.8V nominal plateau, 2.0V cutoff.
+ * Low-drain Zigbee sensor load profile.
+ * CR2 holds voltage well through the plateau then drops steeply below 2.5V.
+ * 5% increments with tighter steps at end-of-life cliff.
  */
 def calculateBattery(Double voltage) {
-    if (voltage >= 3.05) return 100
-    if (voltage >= 3.00) return 95
-    if (voltage >= 2.95) return 90
-    if (voltage >= 2.90) return 85
-    if (voltage >= 2.85) return 80
-    if (voltage >= 2.80) return 75
-    if (voltage >= 2.75) return 70
+    if (voltage >= 3.00) return 100
+    if (voltage >= 2.95) return 99  // brief initial drop from fresh cell
+    if (voltage >= 2.90) return 95
+    if (voltage >= 2.85) return 90
+    if (voltage >= 2.80) return 85  // enters flat plateau ~2.8V
+    if (voltage >= 2.75) return 75
     if (voltage >= 2.70) return 65
-    if (voltage >= 2.65) return 60
-    if (voltage >= 2.60) return 55
-    if (voltage >= 2.55) return 50
-    if (voltage >= 2.50) return 45
-    if (voltage >= 2.45) return 40
-    if (voltage >= 2.40) return 35
-    if (voltage >= 2.35) return 30
-    if (voltage >= 2.30) return 25
-    if (voltage >= 2.25) return 20
-    if (voltage >= 2.20) return 15
-    if (voltage >= 2.15) return 10
-    if (voltage >= 2.10) return 5
-    return 1
+    if (voltage >= 2.65) return 55
+    if (voltage >= 2.60) return 45
+    if (voltage >= 2.55) return 35
+    if (voltage >= 2.50) return 28
+    if (voltage >= 2.45) return 22
+    if (voltage >= 2.40) return 17
+    if (voltage >= 2.35) return 13
+    if (voltage >= 2.30) return 9
+    if (voltage >= 2.25) return 6
+    if (voltage >= 2.20) return 4
+    if (voltage >= 2.10) return 2
+    if (voltage >= 2.00) return 1
+    return 0
 }
 
 def smoothBattery(Double voltage) {
