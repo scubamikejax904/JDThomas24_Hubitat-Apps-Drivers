@@ -2225,7 +2225,8 @@ def infoPage(Map params = [:]) {
                       "<b>Bulk Actions:</b> Log replacements or reset drain history across multiple devices at once — " +
                       "useful when swapping batteries in several devices at the same time. Includes a 60-second cooldown to prevent accidental back-to-back runs.<br><br>" +
                       "<b>Ignored Devices:</b> Add devices to the ignore list to exclude them completely from all reports, notifications, stale checks, health scoring, and the web portal. " +
-                      "Devices remain in your monitored list and any Hubitat rules. When a device is removed from the ignore list, its history resets and a <b>Restored (R)</b> entry is logged in Battery Replacement History.</div>"
+                      "Devices remain in your monitored list and any Hubitat rules. When a device is removed from the ignore list, its history resets and a <b>Restored (R)</b> entry is logged in Battery Replacement History. " +
+                      "The device will also show <b>Recently Replaced</b> in the Battery Summary for up to 24 hours — this is expected and clears automatically.</div>"
         }
 
         section("<b>🔄 Force Scan & 🔁 Replacement Detection</b>") {
