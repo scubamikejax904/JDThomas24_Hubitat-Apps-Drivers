@@ -7,10 +7,22 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.4.23 BETA 6",
-    doNotFocus: true
+    version: "2.5.26",
+    doNotFocus: true,
+    oauth: true
 )
 
+// ============================================================
+// ===================== OAUTH MAPPINGS ======================
+// ============================================================
+mappings {
+    path("/dashboard") { action: [GET: "serveDashboardPage"]  }
+    path("/refresh")   { action: [GET: "forceRefreshEndpoint"] }
+}
+
+// ============================================================
+// ===================== LIFECYCLE ===========================
+// ============================================================
 def installed() {
     if (debugMode) log.debug "Installed - initializing app"
     applyCustomLabel()
@@ -22,13 +34,52 @@ def updated() {
     applyCustomLabel()
     unschedule()
     unsubscribe()
+
+    // Detect devices removed from ignore list and restore them
+    def previouslyIgnored = state.ignoredDeviceIds ?: []
+    def currentIgnored    = (settings?.ignoredDevices?.collect { it as String }) ?: []
+    def restored          = previouslyIgnored.findAll { !currentIgnored.contains(it) }
+    if (restored) {
+        restored.each { deviceId ->
+            def device = autoDevices?.find { it.id == deviceId }
+            if (device) {
+                def level = device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : 100
+                state.history[device.id] = [
+                    lastLevel:     level,
+                    lastDate:      now(),
+                    lastScanDate:  now(),
+                    firstSeenDate: now(),
+                    replacedTime:  now(),
+                    justReplaced:  true,
+                    drain:         0.3,
+                    samples:       [],
+                    zeroCount:     0
+                ]
+                state.trend[device.id] = "Stable"
+                state.history = state.history
+                state.replacements = state.replacements ?: []
+                state.replacements = state.replacements.findAll { it.device != device.displayName }
+                state.replacements << [
+                    deviceId: device.id,
+                    device:   device.displayName,
+                    level:    level,
+                    date:     new Date().format("yyyy-MM-dd HH:mm", location.timeZone),
+                    type:     "restored"
+                ]
+                state.replacements = state.replacements.sort { a, b -> b.date <=> a.date }
+                if (debugMode) log.debug "Device restored from ignored list: ${device.displayName}"
+            }
+        }
+    }
+    state.ignoredDeviceIds = currentIgnored
+
     initialize()
 
     if (debugMode) {
         runIn(1800, disableDebugLogging)
     }
 
-    def devList = autoDevices ?: []
+    def devList    = autoDevices ?: []
     def currentIds = devList.collect { it.id as String }
     state.history?.keySet()?.findAll { !currentIds.contains(it) }?.each { removedId ->
         state.history.remove(removedId)
@@ -45,17 +96,14 @@ def updated() {
         if (pruned > 0 && debugMode) log.debug "Purged ${pruned} orphaned replacement history entr${pruned == 1 ? 'y' : 'ies'}"
     }
 
-    // Rebuild history map outside the loop to ensure Hubitat persists the changes.
-    // Mutating state inside each{} is unreliable in Hubitat — rebuilding the full
-    // map and reassigning state.history guarantees the write sticks.
-    def migrationDirty = false
+    def migrationDirty  = false
     def migratedHistory = [:]
     state.history?.each { id, data ->
         if (data && !data.firstSeenDate) {
             def newData = new HashMap(data)
             newData.firstSeenDate = newData.replacedTime ?: newData.lastDate ?: now()
-            migratedHistory[id] = newData
-            migrationDirty = true
+            migratedHistory[id]   = newData
+            migrationDirty        = true
             if (debugMode) log.debug "Migrated firstSeenDate for device ${id}: ${new Date(newData.firstSeenDate as long)}"
         } else {
             migratedHistory[id] = data
@@ -76,9 +124,6 @@ def updated() {
     }
     if (didMigrate) state.replacements = state.replacements
 
-    // v2.4.24: migrate legacy battInfo_ catalog entries to battType_/battCount_
-    // Previously this ran only when opening Battery Catalog. Now runs on every
-    // update so existing users don't lose catalog data after Catalog was removed.
     def devList2 = autoDevices ?: []
     devList2.each { device ->
         def legacyInfo = settings["battInfo_${device.id}"]
@@ -110,8 +155,19 @@ def initialize() {
     if (state.history           == null) state.history           = [:]
     if (state.trend             == null) state.trend             = [:]
     if (state.notifSnoozedUntil == null) state.notifSnoozedUntil = 0
+    if (state.ignoredDeviceIds  == null) state.ignoredDeviceIds  = []
+
+    if (!state.accessToken) {
+        try {
+            createAccessToken()
+        } catch (e) {
+            log.error "Battery Monitor: OAuth is not enabled. Please enable OAuth in the App Code screen."
+        }
+    }
+
     scheduleReportFrequency()
     scheduleScanInterval()
+
     def devList = autoDevices ?: []
     if (devList) {
         subscribe(devList, "battery", batteryHandler)
@@ -127,6 +183,18 @@ def applyCustomLabel() {
     }
 }
 
+// ============================================================
+// ===================== IGNORED DEVICE HELPER ===============
+// ============================================================
+def isIgnored(device) {
+    if (!device) return false
+    def ignoredIds = (settings?.ignoredDevices?.collect { it as String }) ?: []
+    return ignoredIds.contains(device.id as String)
+}
+
+// ============================================================
+// ===================== PREFERENCES =========================
+// ============================================================
 preferences {
     page(name: "mainPage")
     page(name: "summaryPage")
@@ -139,6 +207,9 @@ preferences {
     page(name: "sendNotificationPage")
     page(name: "deviceManagePage")
     page(name: "deviceActionsPage")
+    page(name: "bulkActionsPage")
+    page(name: "bulkActionsResultPage")
+    page(name: "ignoredDevicesPage")
 }
 
 // ============================================================
@@ -149,14 +220,41 @@ def mainPage() {
 
     dynamicPage(name: "mainPage", title: "", install: true, uninstall: true) {
 
-        def currentLabel  = app.label ?: "Battery Monitor 2.0"
-        def appNameTitle  = "<b>App Display Name</b> — <span style='color:blue;'>${currentLabel}</span>"
+        def currentLabel = app.label ?: "Battery Monitor 2.0"
+        def appNameTitle = "<b>App Display Name</b> — <span style='color:blue;'>${currentLabel}</span>"
         section(appNameTitle, hideable: true, hidden: true) {
             paragraph "Enter a name to rename this app in your Hubitat app list."
             input "customAppName", "text",
                   title: "Custom App Name",
                   description: "Rename how this app appears in your Hubitat app list",
                   required: false
+        }
+
+        def portalEnabled    = state.accessToken != null
+        def portalStatus     = portalEnabled ? "<span style='color:blue; font-weight:bold;'>Enabled</span>" : "<span style='color:red; font-weight:bold;'>Not Enabled</span>"
+        def portalSectionTitle = "🌐 Battery Web Portal — ${portalStatus}"
+
+        section(portalSectionTitle, hideable: true, hidden: portalEnabled) {
+            if (portalEnabled) {
+                def cloudUrl = getFullApiServerUrl()
+                def localUrl = getFullLocalApiServerUrl()
+                paragraph "<div style='padding:10px; background-color:#d1ecf1; border:1px solid #bee5eb; color:#0c5460; border-radius:4px;'>" +
+                          "<b>Cloud URL (use anywhere):</b><br>" +
+                          "<a href='${cloudUrl}/dashboard?access_token=${state.accessToken}' target='_blank' style='color:#0c5460; word-wrap:break-word;'>${cloudUrl}/dashboard?access_token=${state.accessToken}</a><br><br>" +
+                          "<b>Local URL (use at home):</b><br>" +
+                          "<a href='${localUrl}/dashboard?access_token=${state.accessToken}' target='_blank' style='color:#0c5460; word-wrap:break-word;'>${localUrl}/dashboard?access_token=${state.accessToken}</a><br><br>" +
+                          "</div>"
+            } else {
+                def hubIp = location?.hub?.localIP ?: ""
+                paragraph "<div style='padding:10px; background-color:#f8d7da; border:1px solid #f5c6cb; color:#721c24; border-radius:4px;'>" +
+                          "<b>OAuth is not yet enabled.</b> To activate the web portal:<br><br>" +
+                          "1. Go to <b>Apps Code</b> in the Hubitat menu" + (hubIp ? " — <a href='http://${hubIp}/app/list' target='_blank' style='color:#721c24;'>tap here to open Apps Code</a>" : "") + "<br>" +
+                          "2. Find <b>Battery Monitor 2.0</b> in the list and open it<br>" +
+                          "3. Click <b>OAuth</b> in the top-right of the code editor<br>" +
+                          "4. Click <b>Enable OAuth in App</b> → <b>Update</b><br>" +
+                          "5. Return here and tap <b>Done</b> to save — the portal URLs will appear above." +
+                          "</div>"
+            }
         }
 
         def devicesSelected = (autoDevices?.size() ?: 0) > 0
@@ -169,7 +267,6 @@ def mainPage() {
                       "Select the devices you want to monitor from the list below. Only selected devices will be tracked for trends, battery health, and notifications.</b>"
             paragraph "<span style='color:red; font-weight:bold;'>Note for mobile users:</span> If your device names are long, they may extend past the screen in the selection list. This is a UI limitation on smaller screens. You can still select devices as usual."
             paragraph "<span style='color:red; font-weight:bold;'>IMPORTANT: After selecting devices, you MUST click 'Done' to exit the app BEFORE viewing the battery report. Skipping this step may cause an error.</span>"
-
             input "autoDevices", "capability.battery",
                   title: "Select battery devices to monitor",
                   multiple: true,
@@ -182,7 +279,6 @@ def mainPage() {
                 if (!state.history) state.history = [:]
                 if (!state.trend)   state.trend   = [:]
                 devList.each { device ->
-                    // Store device name in settings for troubleshooting
                     app.updateSetting("deviceName_${device.id}", [value: device.displayName, type: "string"])
                     if (!state.history[device.id]) {
                         def currentLevel = device.currentValue("battery")
@@ -210,7 +306,7 @@ def mainPage() {
                   submitOnChange: true
         }
 
-        def snoozed = state.notifSnoozedUntil && state.notifSnoozedUntil >= now()
+        def snoozed         = state.notifSnoozedUntil && state.notifSnoozedUntil >= now()
         def snoozeHoursLeft = snoozed ? Math.ceil((state.notifSnoozedUntil - now()) / 3600000).toInteger() : 0
         def snoozeSectionTitle = snoozed
             ? "<b>Notification Snooze</b> — <span style='color:orange;'>😴 ${snoozeHoursLeft}h remaining</span>"
@@ -246,9 +342,9 @@ def mainPage() {
             }
         }
 
-        def notifOn = settings?.enablePush != false
+        def notifOn              = settings?.enablePush != false
         def notificationSettings = (notificationSettings != false)
-        def notifSectionTitle = "<b>Notifications</b> — <span style='color:${notifOn ? "blue" : "red"};'>${notifOn ? "ON" : "OFF"}</span>"
+        def notifSectionTitle    = "<b>Notifications</b> — <span style='color:${notifOn ? "blue" : "red"};'>${notifOn ? "On" : "Off"}</span>"
         section(notifSectionTitle, hideable: true, hidden: notificationSettings) {
             paragraph "ℹ️ Enable the toggle below to reveal notification settings including frequency, timing, device targets, and which battery groups to include in reports."
             input "enablePush", "bool", title: "Enable notifications", defaultValue: true, submitOnChange: true
@@ -278,17 +374,17 @@ def mainPage() {
                 input "staleThresholdHours", "number",
                       title: "<b>Mark device as stale if no activity for X hours</b>",
                       defaultValue: 24
-                input "suppressEmptyReport",   "bool", title: "🔕 Don't send notification if nothing to report <b>(Skips Notification entirely when all enabled toggles are Empty)</b>", defaultValue: false
-                input "notifyIncludeAppLink",  "bool", title: "🔗 Include link to Battery Monitor app <b>(Local Only)</b>", defaultValue: false
+                input "suppressEmptyReport",  "bool", title: "🔕 Don't send notification if nothing to report <b>(Skips Notification entirely when all enabled toggles are Empty)</b>", defaultValue: false
+                input "notifyIncludeAppLink", "bool", title: "🔗 Include link to Battery Monitor app <b>(Local Only)</b>", defaultValue: false
                 paragraph "<b>Send notification now:</b>"
                 href(name: "toSendNotification", page: "sendNotificationPage", title: "📤 Send Notification Now")
             }
         }
 
         section("<b>Reports:</b>") {
-            href(name: "toSummary",   page: "summaryPage",      title: "<b>Battery Summary</b>",             description: "Battery levels and health ratings")
-            href(name: "toTrends",    page: "trendsPage",       title: "<b>Battery Trends</b>",              description: "Drain rates and trend history")
-            href(name: "toHistory",   page: "historyPage",      title: "<b>Battery Replacement History</b>", description: "Auto and manual replacement log")
+            href(name: "toSummary",   page: "summaryPage",      title: "<b>Battery Summary</b>",              description: "Battery levels and health ratings")
+            href(name: "toTrends",    page: "trendsPage",       title: "<b>Battery Trends</b>",               description: "Drain rates and trend history")
+            href(name: "toHistory",   page: "historyPage",      title: "<b>Battery Replacement History</b>",  description: "Auto and manual replacement log")
             href(name: "toDevManage", page: "deviceManagePage", title: "<b>🔋 Device Battery Management</b>", description: "Assign battery types, log replacements, reset drain history, view history")
         }
 
@@ -308,7 +404,7 @@ def mainPage() {
 
         section("<b>Diagnostics</b>") {
             input "debugMode", "bool", title: "Debug Logging (auto-disables after 30 min)", defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Battery Monitor v2.4.24</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Battery Monitor v2.5.26</span>"
         }
     }
 }
@@ -337,23 +433,32 @@ def scheduleScanInterval() {
 }
 
 def scanAllDevices() {
-    def devList = autoDevices ?: []
+    def devList = (autoDevices ?: []).findAll { !isIgnored(it) }
     if (!devList) return
     if (debugMode) log.debug "Running scheduled battery scan for ${devList.size()} device(s)"
+
+    def poor  = []
+    def stale = []
+
     devList.each { device ->
         try {
-            // Store device name in settings so it appears alongside the ID
-            // in the settings dump for easier troubleshooting
             app.updateSetting("deviceName_${device.id}", [value: device.displayName, type: "string"])
             def level = device.currentValue("battery")?.toInteger()
             if (level != null) {
                 updateBattery(device, level)
                 if (debugMode) log.debug "Scanned ${device.displayName}: ${level}%"
+                if (level <= 25 && !isBatteryDead(device)) poor  << "${device.displayName} (${level}%)"
+                if (isStale(device))                        stale << device.displayName
             }
         } catch (e) {
             log.warn "Scan failed for ${device.displayName}: ${e.message}"
         }
     }
+
+    def ts = new Date().format("MM/dd h:mm a", location.timeZone)
+    def msg = "SCAN: ${devList.size()} device(s) scanned at ${ts}."
+    if (poor.size()  > 0) msg += " Low battery: ${poor.join(', ')}."
+    if (stale.size() > 0) msg += " Stale: ${stale.join(', ')}."
 }
 
 def reportScheduler() {
@@ -391,7 +496,7 @@ def scheduledSummary() {
         return
     }
 
-    def devList = (autoDevices ?: []).findAll { it?.currentValue("battery") != null }
+    def devList = (autoDevices ?: []).findAll { it?.currentValue("battery") != null && !isIgnored(it) }
     if (!devList) return
 
     def categories = [
@@ -432,7 +537,7 @@ def scheduledSummary() {
     def postfix = ""
 
     if (usePushover) {
-        def tags = settings.pushoverPrefix.trim()
+        def tags          = settings.pushoverPrefix.trim()
         def priorityMatch = tags =~ /^(\[[EHLNS]\])(.*)/
         if (priorityMatch) {
             prefix  = priorityMatch[0][1]
@@ -443,7 +548,7 @@ def scheduledSummary() {
     }
 
     def timestamp = new Date().format("MM/dd HH:mm", location.timeZone)
-    def body = "${prefix}🔋 Battery Summary — ${timestamp}\n"
+    def body      = "${prefix}🔋 Battery Summary — ${timestamp}\n"
 
     def staleDevices = devList.findAll { isStale(it) }.collect {
         def last        = getLastActivityTime(it)
@@ -473,9 +578,7 @@ def scheduledSummary() {
     if (notifyHighDrain != null ? notifyHighDrain : true) {
         if (highDrainList) {
             body += "\n⚠️ High Drain (Fair/Poor):\n"
-            highDrainList.each { dev ->
-                body += "• ${dev.health} (${dev.drain}%) ${dev.name} (${dev.level}%)\n"
-            }
+            highDrainList.each { dev -> body += "• ${dev.health} (${dev.drain}%) ${dev.name} (${dev.level}%)\n" }
         } else {
             body += "\n⚠️ High Drain (Fair/Poor): None\n"
         }
@@ -530,6 +633,10 @@ def scheduledSummary() {
     if (settings?.enablePush)      sendPush(pushoverBody)
     if (settings?.pushoverDevices) settings.pushoverDevices.each { it.deviceNotification(pushoverBody) }
     if (settings?.notifyDevices)   notifyDevices.each { it.deviceNotification(plainBody) }
+
+    def poorCount  = categories["🔴 Poor"]?.list?.size() ?: 0
+    def staleCount = staleDevices?.size() ?: 0
+    def deadCount  = deadBatteryList?.size() ?: 0
 }
 
 // ============================================================
@@ -537,6 +644,7 @@ def scheduledSummary() {
 // ============================================================
 def batteryHandler(evt) {
     def device = evt.device
+    if (isIgnored(device)) return
     def level  = null
     try {
         level = evt.value ? (int) Double.parseDouble(evt.value) : null
@@ -583,10 +691,10 @@ def updateBattery(device, level) {
     }
 
     if (level <= 1 && (data.zeroCount ?: 0) < 3) {
-        data.justReplaced = false
-        data.replacedTime = null
-        data.drain        = 1.0
-        data.samples      = []
+        data.justReplaced      = false
+        data.replacedTime      = null
+        data.drain             = 1.0
+        data.samples           = []
         state.trend[device.id] = "Heavy Drain"
     }
 
@@ -628,7 +736,7 @@ def updateBattery(device, level) {
             }
 
             if (data.samples && data.samples.size() > 0) {
-                def avg = data.samples.sum() / data.samples.size()
+                def avg  = data.samples.sum() / data.samples.size()
                 data.drain = Math.min(avg, 3.0)
                 updateTrend(device, data.drain)
             }
@@ -646,7 +754,7 @@ def updateBattery(device, level) {
 // ===================== DEAD BATTERY DETECTION ==============
 // ============================================================
 def isBatteryDead(device) {
-    def data = state.history?.get(device.id)
+    def data      = state.history?.get(device.id)
     if (!data) return false
     def level     = device.currentValue("battery")
     def zeroCount = data.zeroCount ?: 0
@@ -700,7 +808,7 @@ def updateTrend(device, drain) {
     def devType      = (device?.name ?: device?.typeName ?: "").toLowerCase()
     def isLock       = devType.contains("lock")
     def isSensor     = devType.contains("contact") || devType.contains("motion")
-    def isSlowSensor = devType.contains("smoke")   || devType.contains("carbonmonoxide")
+    def isSlowSensor = devType.contains("smoke") || devType.contains("carbonmonoxide")
 
     def adjustedDrain = isLock       ? drain * 0.4 :
                         isSensor     ? drain * 0.5 :
@@ -714,8 +822,8 @@ def updateTrend(device, drain) {
         if (avg > 3) adjustedDrain = Math.min(adjustedDrain, 1.0)
     }
 
-    def stableThreshold   = isLock                       ? 0.9 : (isSensor || isSlowSensor) ? 0.6 : 0.3
-    def moderateThreshold = isLock                       ? 2.0 : (isSensor || isSlowSensor) ? 1.5 : 0.8
+    def stableThreshold   = isLock ? 0.9 : (isSensor || isSlowSensor) ? 0.6 : 0.3
+    def moderateThreshold = isLock ? 2.0 : (isSensor || isSlowSensor) ? 1.5 : 0.8
 
     if (adjustedDrain <= stableThreshold)       state.trend[device.id] = "Stable"
     else if (adjustedDrain < moderateThreshold) state.trend[device.id] = "Moderate"
@@ -765,9 +873,8 @@ def health(device) {
     def devType      = (device?.name ?: device?.typeName ?: "").toLowerCase()
     def isLock       = devType.contains("lock")
     def isSensor     = devType.contains("contact") || devType.contains("motion")
-    def isSlowSensor = devType.contains("smoke")   || devType.contains("carbonmonoxide")
-
-    def minSamples = (isLock || isSlowSensor) ? 7 : 5
+    def isSlowSensor = devType.contains("smoke") || devType.contains("carbonmonoxide")
+    def minSamples   = (isLock || isSlowSensor) ? 7 : 5
 
     def daysSinceReplaced = 999
     if (hist?.replacedTime) {
@@ -782,9 +889,7 @@ def health(device) {
     if (!slowReporter && (samples < minSamples || daysSinceReplaced < 5)) return "Pending"
 
     def rawDrain      = getDrain(device)
-    def adjustedDrain = isLock       ? rawDrain * 0.4 :
-                        isSensor     ? rawDrain * 0.5 :
-                        isSlowSensor ? rawDrain * 0.5 : rawDrain
+    def adjustedDrain = isLock ? rawDrain * 0.4 : isSensor ? rawDrain * 0.5 : isSlowSensor ? rawDrain * 0.5 : rawDrain
 
     def conf     = getConfidence(device)
     def effDrain = 0.3 + conf * (adjustedDrain - 0.3)
@@ -802,10 +907,8 @@ def getHealthDisplay(device) {
 
     def devType      = (device?.name ?: device?.typeName ?: "").toLowerCase()
     def isLock       = devType.contains("lock")
-    def isSensor     = devType.contains("contact") || devType.contains("motion")
-    def isSlowSensor = devType.contains("smoke")   || devType.contains("carbonmonoxide")
-
-    def minSamples = (isLock || isSlowSensor) ? 7 : 5
+    def isSlowSensor = devType.contains("smoke") || devType.contains("carbonmonoxide")
+    def minSamples   = (isLock || isSlowSensor) ? 7 : 5
 
     if (h == "Pending") {
         def daysSinceReplaced = 0
@@ -816,13 +919,12 @@ def getHealthDisplay(device) {
         } else if (hist?.lastDate) {
             daysSinceReplaced = ((now() - (hist.lastDate as Long)) / (1000 * 60 * 60 * 24)).toInteger()
         }
-
         def minDays = 5
         return "<span style='color:#94a3b8; font-size:11px;'>⏳ ${samples}/${minSamples} samples &nbsp;·&nbsp; ${daysSinceReplaced}/${minDays} days</span>"
     }
 
     def colorMap = ["Excellent": "#22c55e", "Good": "#22c55e", "Fair": "#f97316", "Poor": "#ef4444"]
-    def color = colorMap[h] ?: "#94a3b8"
+    def color    = colorMap[h] ?: "#94a3b8"
     return "<span style='color:${color};font-weight:bold;'>${h}</span>"
 }
 
@@ -859,10 +961,8 @@ def getCatalogBatteryInfo(device) {
     def battType  = settings["battType_${device.id}"]
     def battCount = settings["battCount_${device.id}"]
     if (battType && battType != "" && !battType.startsWith("_sep")) {
-        def count = (battCount != null && battCount.toString().trim() != "") ? battCount.toString().trim() : "1"
-        def resolvedType = (battType == "Other")
-            ? (settings["battCustomType_${device.id}"]?.trim() ?: "Other")
-            : battType
+        def count        = (battCount != null && battCount.toString().trim() != "") ? battCount.toString().trim() : "1"
+        def resolvedType = (battType == "Other") ? (settings["battCustomType_${device.id}"]?.trim() ?: "Other") : battType
         return "${resolvedType} x${count}"
     }
     def info = settings["battInfo_${device.id}"]
@@ -914,32 +1014,18 @@ def formatInactive(ts) {
 // ===================== BATTERY DISPLAY =====================
 // ============================================================
 def getBatteryLevelDisplay(level, device = null) {
-    if (device && isBatteryDead(device)) {
-        return "<span style='color:#ef4444;'>🪫 Dead</span>"
-    }
-
+    if (device && isBatteryDead(device)) return "<span style='color:#ef4444;'>🪫 Dead</span>"
     level = (level instanceof Number ? level : null) != null ? level : 100
-
-    def cat = level >= 100 ? "🟢 Excellent" :
-              level > 70   ? "🟢 Good" :
-              level > 25   ? "🟠 Fair" :
-                             "🔴 Poor"
-
+    def cat = level >= 100 ? "🟢 Excellent" : level > 70 ? "🟢 Good" : level > 25 ? "🟠 Fair" : "🔴 Poor"
     def label = "${cat} (${level}%)"
-
     def data         = (device && state.history?.containsKey(device.id)) ? safeHistory(device) : null
     def showTag      = data?.justReplaced == true
     def replacedTime = data?.replacedTime
-
     if (showTag) {
         replacedTime = safeTime(replacedTime)
         def hoursSinceReplacement = (now() - replacedTime) / (1000 * 60 * 60)
-        if (hoursSinceReplacement >= 24) {
-            if (data) data.justReplaced = false
-            showTag = false
-        }
+        if (hoursSinceReplacement >= 24) { if (data) data.justReplaced = false; showTag = false }
     }
-
     if (device && showTag) label += " (Recently Replaced)"
     return label
 }
@@ -965,16 +1051,16 @@ def logReplacement(device, newLevel, manual = false) {
         state.trend[device.id] = "Stable"
     }
 
-    data.drain             = 0.3
-    data.samples           = []
-    data.lastLevel         = newLevel
-    data.lastDate          = now()
-    data.lastScanDate      = now()
-    data.firstSeenDate     = now()
-    data.justReplaced      = true
-    data.replacedTime      = now()
-    data.zeroCount         = 0
-    state.trend[device.id] = "Stable"
+    data.drain                 = 0.3
+    data.samples               = []
+    data.lastLevel             = newLevel
+    data.lastDate              = now()
+    data.lastScanDate          = now()
+    data.firstSeenDate         = now()
+    data.justReplaced          = true
+    data.replacedTime          = now()
+    data.zeroCount             = 0
+    state.trend[device.id]     = "Stable"
     data.lastReplacementLogged = now()
 
     state.replacements = state.replacements?.findAll { it.device != device.displayName } ?: []
@@ -989,6 +1075,146 @@ def logReplacement(device, newLevel, manual = false) {
 
     state.history[device.id] = data
     state.history = state.history
+
+    def typeStr = manual ? "Manual" : "Auto-detected"
+}
+
+// ============================================================
+// ===================== OAUTH PORTAL HELPERS ================
+// ============================================================
+def getPortalRedirectHtml(delayMs, msgText) {
+    return "<!DOCTYPE html><html><head><meta charset='UTF-8'>" +
+           "<script>setTimeout(function(){window.location.href='dashboard?access_token=${state.accessToken}';},${delayMs});</script>" +
+           "</head><body style='background:#0d0d0d;color:#fff;text-align:center;padding-top:100px;font-family:sans-serif;'>" +
+           "<h3>🔄 Refreshing...</h3><p style='color:#666;'>${msgText}</p></body></html>"
+}
+
+// ============================================================
+// ===================== PORTAL ENDPOINT: REFRESH ============
+// ============================================================
+def forceRefreshEndpoint() {
+    try {
+        runIn(1, "scanAllDevices", [overwrite: true])
+        return render(contentType: "text/html", data: getPortalRedirectHtml(2500, "Running battery scan..."), status: 200)
+    } catch (e) {
+        log.error "Battery Monitor portal refresh error: ${e}"
+        return render(contentType: "text/html", data: "Error: ${e.message}", status: 500)
+    }
+}
+
+// ============================================================
+// ===================== PORTAL ENDPOINT: DASHBOARD ==========
+// ============================================================
+def serveDashboardPage() {
+    try {
+        def devList = (autoDevices ?: []).findAll { it?.currentValue("battery") != null && !isIgnored(it) }
+
+        devList = devList.sort { a, b ->
+            def levelA = a.currentValue("battery") != null ? a.currentValue("battery").toInteger() : 100
+            def levelB = b.currentValue("battery") != null ? b.currentValue("battery").toInteger() : 100
+            levelA != levelB ? levelA <=> levelB : a.displayName.trim() <=> b.displayName.trim()
+        }
+
+        def totalCount     = devList.size()
+        def poorCount      = devList.count { it.currentValue("battery") != null && it.currentValue("battery").toInteger() <= 25 && !isBatteryDead(it) }
+        def deadCount      = devList.count { isBatteryDead(it) }
+        def staleCount     = devList.count { isStale(it) }
+        def highDrainCount = devList.count { device ->
+            def h = health(device)
+            (h == "Poor" || h == "Fair") && getDrain(device) > 1.5
+        }
+
+        def css = """
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;padding:20px;background:#0d0d0d;color:#e0e0e0;margin:0}
+.container{max-width:820px;margin:0 auto;background:#151515;padding:25px;border-radius:12px;box-sizing:border-box}
+h2{text-align:center;color:#fff;margin:0 0 4px 0}
+.subtitle{text-align:center;font-size:12px;color:#666;margin-bottom:20px}
+.summary-box{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px}
+.summary-card{flex:1;min-width:90px;box-sizing:border-box;background:#1e1e1e;padding:12px;border-radius:8px;text-align:center;border-bottom:3px solid #333}
+.summary-card b{display:block;font-size:22px;color:#fff;margin-bottom:4px}
+.summary-card span{font-size:11px;color:#aaa;text-transform:uppercase}
+.btn{display:block;background:#1f618d;color:#fff;padding:13px 20px;border-radius:8px;text-align:center;text-decoration:none;font-weight:600;margin-bottom:10px}
+.btn:hover{background:#1a5276}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:15px}
+th{background:#1e1e1e;color:#aaa;padding:8px 6px;text-align:left;border-bottom:2px solid #333;font-size:11px;text-transform:uppercase}
+td{padding:8px 6px;border-bottom:1px solid #222;vertical-align:middle}
+tr:hover td{background:#1a1a1a}
+.badge{display:inline-block;padding:3px 8px;border-radius:10px;font-size:11px;font-weight:bold}
+.badge-poor{background:#3b1212;color:#ef4444}
+.badge-fair{background:#3b2a12;color:#f97316}
+.badge-good{background:#12301a;color:#22c55e}
+.badge-excellent{background:#12301a;color:#22c55e}
+.badge-dead{background:#3b1212;color:#ef4444}
+.badge-pending{background:#1e1e1e;color:#94a3b8}
+.batt-bg{width:80px;background:#333;height:5px;border-radius:3px;overflow:hidden;display:inline-block;vertical-align:middle;margin-left:6px}
+.batt-fg{height:100%}
+.stale-tag{font-size:10px;color:#f97316;margin-left:4px}
+.section-title{color:#fff;font-size:15px;font-weight:bold;margin:20px 0 8px 0;border-bottom:1px solid #333;padding-bottom:6px}
+"""
+
+        StringBuilder html = new StringBuilder()
+        html.append("<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>")
+        html.append("<title>Battery Monitor Portal</title><style>${css}</style>")
+        html.append("<script>setTimeout(function(){location.reload();},120000);</script>")
+        html.append("</head><body><div class='container'>")
+
+        html.append("<h2>🔋 Battery Monitor</h2>")
+        html.append("<p class='subtitle'>Live Dashboard &nbsp;·&nbsp; Auto-refreshes every 2 min</p>")
+
+        html.append("<div class='summary-box'>")
+        html.append("<div class='summary-card' style='border-bottom-color:#ef4444;'><b>${poorCount}</b><span>Low Battery</span></div>")
+        html.append("<div class='summary-card' style='border-bottom-color:#f97316;'><b>${staleCount}</b><span>Stale</span></div>")
+        html.append("<div class='summary-card' style='border-bottom-color:#f97316;'><b>${highDrainCount}</b><span>High Drain</span></div>")
+        html.append("<div class='summary-card' style='border-bottom-color:#ef4444;'><b>${deadCount}</b><span>Dead</span></div>")
+        html.append("<div class='summary-card' style='border-bottom-color:#1a73e8;'><b>${totalCount}</b><span>Total</span></div>")
+        html.append("</div>")
+
+        html.append("<a href='refresh?access_token=${state.accessToken}' class='btn'>🔄 Force Scan Now</a>")
+
+        html.append("<div class='section-title'>All Devices</div>")
+        html.append("<table><thead><tr>")
+        html.append("<th>Device</th><th>Battery</th><th>Health</th><th>Drain</th><th>Est Days</th><th>Last Activity</th><th>Type</th>")
+        html.append("</tr></thead><tbody>")
+
+        devList.each { device ->
+            def dead      = isBatteryDead(device)
+            def level     = device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : 0
+            def h         = health(device)
+            def drain     = getDrain(device)
+            def est       = estDays(device)
+            def stale     = isStale(device)
+            def catalog   = getCatalogBatteryInfo(device) ?: "—"
+            def lastActMs = getLastActivityTime(device)
+            def lastAct   = lastActMs ? formatTimeAgo(lastActMs) : "N/A"
+
+            def badgeCls  = dead ? "badge-dead" : h == "Poor" ? "badge-poor" : h == "Fair" ? "badge-fair" : h == "Good" ? "badge-good" : h == "Excellent" ? "badge-excellent" : "badge-pending"
+            def badgeLbl  = dead ? "🪫 Dead" : h
+            def barColor  = level > 50 ? "#22c55e" : level > 25 ? "#f97316" : "#ef4444"
+            def drainStr  = (dead || h == "Pending") ? "—" : "${String.format('%.2f', drain)}%"
+            def estStr    = (dead || h == "Pending" || est == null) ? "—" : "${est}d"
+            def staleHtml = stale ? "<span class='stale-tag'>⚠ Stale</span>" : ""
+
+            html.append("<tr>")
+            html.append("<td><b>${device.displayName}</b>${staleHtml}</td>")
+            html.append("<td>${level}% <div class='batt-bg'><div class='batt-fg' style='width:${level}%;background:${barColor};'></div></div></td>")
+            html.append("<td><span class='badge ${badgeCls}'>${badgeLbl}</span></td>")
+            html.append("<td>${drainStr}</td>")
+            html.append("<td>${estStr}</td>")
+            html.append("<td>${lastAct}</td>")
+            html.append("<td>${catalog}</td>")
+            html.append("</tr>")
+        }
+
+        html.append("</tbody></table>")
+        html.append("<p style='text-align:center;font-size:10px;color:#444;margin-top:20px;'>Battery Monitor v2.5.26 &nbsp;·&nbsp; jdthomas24</p>")
+        html.append("</div></body></html>")
+
+        return render(contentType: "text/html", data: html.toString(), status: 200)
+
+    } catch (Exception e) {
+        log.error "Battery Monitor portal error: ${e}"
+        return render(contentType: "text/html", data: "<h3 style='color:white;font-family:sans-serif;'>Portal Error</h3><p style='color:#ccc;'>${e}</p>", status: 500)
+    }
 }
 
 // ============================================================
@@ -1015,13 +1241,12 @@ def summaryPage() {
 """
             paragraph "<span style='color:red; font-weight:bold;'>⚠ Device links below are accessible only on your local network (LAN). They will not work remotely.</span>"
             paragraph "<span style='color:red; font-weight:bold;'>¹ Last Battery</span> shows when this app last received a battery reading — from a scheduled scan or device event. It is independent of Last Activity. A device can be active recently but still show an old Last Battery timestamp if its battery level has not changed or reported."
-            paragraph "<b>🔋 Manage</b> — tap the battery icon next to any device name to assign battery type, log a manual replacement, reset drain history, and view that device's replacement history."
             href(name: "toForceScanFromSummary", page: "forceScanPage",
                  title: "🔄 Force Scan Now",
                  description: "Tap to immediately read battery levels from all monitored devices")
 
             def devList = (autoDevices ?: []).findAll {
-                try { it?.currentValue("battery") != null } catch (e) {
+                try { it?.currentValue("battery") != null && !isIgnored(it) } catch (e) {
                     log.warn "Error checking battery capability for ${it?.displayName}: ${e.message}"
                     return false
                 }
@@ -1089,8 +1314,7 @@ def summaryPage() {
                 def color = ""
                 try { color = getBatteryLevelDisplay(level, device) } catch (e) { color = "${level}%" }
 
-                def staleTag = (stale && lastActivity) ? " ⚠️ Stale" : ""
-
+                def staleTag      = (stale && lastActivity) ? " ⚠️ Stale" : ""
                 def healthDisplay = ""
                 try { healthDisplay = getHealthDisplay(device) } catch (e) { healthDisplay = "Unknown" }
 
@@ -1099,7 +1323,7 @@ def summaryPage() {
                 summaryRowNum++
                 table += "<tr style='background-color:${summaryRowBg};'>"
 
-                def sortName   = name.toLowerCase()
+                def sortName = name.toLowerCase()
                 if (hubIp) {
                     table += "<td style='padding:4px; border:1px solid #ccc;' data-order='${sortName}'><a href='http://${hubIp}/device/edit/${device.id}' target='_blank'>${name}</a></td>"
                 } else {
@@ -1160,6 +1384,7 @@ def summaryPage() {
 // ============================================================
 def deviceManagePage(Map params = [:]) {
     def devList = (autoDevices ?: []).sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
+    def ignoredCount = (settings?.ignoredDevices?.size() ?: 0)
 
     def typeOptions = ["": "— Not Set —"]
     typeOptions["_sep1"] = "──────── Standard ────────"
@@ -1172,12 +1397,28 @@ def deviceManagePage(Map params = [:]) {
     dynamicPage(name: "deviceManagePage", title: "🔋 Device Battery Management", install: false) {
 
         section("<b>⚙️ Device Actions</b>") {
-            paragraph "Log a battery replacement, reset drain history, view replacement history, or change battery type for a specific device.<br>" +
-                      "<span style='color:#94a3b8; font-size:12px;'>ℹ️ Note: the last selected device is remembered — change the dropdown to switch devices.</span>"
             href(name: "toDeviceActions", page: "deviceActionsPage",
                  title: "Open Device Actions",
-                 description: "Select a device to manage")
+                 description: "Log a replacement, reset drain history, change battery type, or view history for a single device. Last selected device is remembered.")
         }
+
+        section("<b>📦 Bulk Actions</b>") {
+            href(name: "toBulkActions", page: "bulkActionsPage",
+                 title: "Open Bulk Actions",
+                 description: "Log replacements or reset drain history across multiple devices at once. Useful when swapping batteries in several devices at the same time.")
+        }
+
+        def ignoredSectionTitle = ignoredCount > 0
+            ? "<b>🚫 Ignored Devices</b> — <span style='color:blue;'>${ignoredCount} ignored</span>"
+            : "<b>🚫 Ignored Devices</b>"
+        section(ignoredSectionTitle) {
+            href(name: "toIgnoredDevices", page: "ignoredDevicesPage",
+                 title: "Manage Ignored Devices",
+                 description: ignoredCount > 0
+                     ? "${ignoredCount} device(s) ignored — excluded from all reports, notifications, and the web portal. Removing a device resets its history and logs a Restored entry."
+                     : "No devices ignored — add devices to exclude them from all reports, notifications, stale checks, health scoring, and the web portal.")
+        }
+
         section("") {
             paragraph "Assign a battery type and quantity to each device so Battery Monitor can include battery type in notifications and replacement history. " +
                       "This helps you know exactly what to buy when a replacement is needed.<br><br>" +
@@ -1190,7 +1431,7 @@ def deviceManagePage(Map params = [:]) {
                 def currentInfo  = getCatalogBatteryInfo(dev)
                 def levelStr     = ""
                 try {
-                    def lvl = dev.currentValue("battery")
+                    def lvl  = dev.currentValue("battery")
                     levelStr = (lvl != null) ? " ${lvl}%" : " —"
                 } catch (e) { levelStr = " —" }
                 def infoStr     = currentInfo ?: "Not set"
@@ -1221,19 +1462,219 @@ def deviceManagePage(Map params = [:]) {
 }
 
 // ============================================================
+// ===================== IGNORED DEVICES PAGE ================
+// ============================================================
+def ignoredDevicesPage() {
+    def devList = (autoDevices ?: []).sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
+
+    dynamicPage(name: "ignoredDevicesPage", title: "🚫 Ignored Devices", install: false) {
+
+        section("") {
+            paragraph "Select devices to ignore completely. Ignored devices are excluded from all reports, " +
+                      "notifications, stale checks, health scoring, and the web portal. They remain in your " +
+                      "monitored devices list and in any Hubitat rules.<br><br>" +
+                      "<span style='color:#94a3b8; font-size:12px;'>ℹ️ When a device is removed from this list, its drain history resets and a <b>Restored</b> entry is logged " +
+                      "in Battery Replacement History. The device starts fresh as if newly added.</span>"
+        }
+
+        section("<b>Select Devices to Ignore</b>") {
+            input "ignoredDevices", "enum",
+                  title: "Ignored devices:",
+                  options: devList.collectEntries { dev ->
+                      def lvl = ""
+                      try { lvl = dev.currentValue("battery") != null ? " (${dev.currentValue("battery").toInteger()}%)" : "" } catch (e) { }
+                      [(dev.id): "${dev.displayName}${lvl}"]
+                  },
+                  multiple: true,
+                  required: false,
+                  submitOnChange: false
+        }
+
+        section("") {
+            paragraph "<span style='color:#94a3b8; font-size:12px;'>Changes take effect when you tap Done.</span>"
+        }
+    }
+}
+
+// ============================================================
+// ===================== BULK ACTIONS PAGE ===================
+// ============================================================
+def bulkActionsPage() {
+    def devList = (autoDevices ?: []).sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
+
+    def cooldownMs  = 60000
+    def lastRun     = state.bulkActionLastRun ?: 0
+    def elapsed     = now() - lastRun
+    def onCooldown  = elapsed < cooldownMs
+    def secondsLeft = onCooldown ? Math.ceil((cooldownMs - elapsed) / 1000).toInteger() : 0
+
+    dynamicPage(name: "bulkActionsPage", title: "📦 Bulk Actions", install: false) {
+
+        section("") {
+            paragraph "Select multiple devices to log battery replacements or reset drain history in one shot. " +
+                      "Useful when swapping batteries across several devices at once.<br><br>" +
+                      "<span style='color:#94a3b8; font-size:12px;'>ℹ️ Each action has a 60-second cooldown after running to prevent accidental back-to-back runs.</span>"
+        }
+
+        section("<b>Select Devices</b>") {
+            if (!devList) {
+                paragraph "No monitored devices found."
+                return
+            }
+            input "bulkSelectedDevices", "enum",
+                  title: "Devices:",
+                  options: devList.collectEntries { dev ->
+                      def lvl = ""
+                      try { lvl = dev.currentValue("battery") != null ? " (${dev.currentValue("battery").toInteger()}%)" : "" } catch (e) { }
+                      [(dev.id): "${dev.displayName}${lvl}"]
+                  },
+                  multiple: true,
+                  required: false,
+                  submitOnChange: false
+        }
+
+        if (onCooldown) {
+            section("<b>Actions</b>") {
+                paragraph "<div style='background-color:#fff3cd; border-left:3px solid #ffc107; border-radius:0 4px 4px 0; padding:10px 14px;'>" +
+                          "<span style='color:#856404;'>⏱ Bulk actions are on cooldown — available again in <b>${secondsLeft}s</b>. " +
+                          "This prevents accidental back-to-back runs.</span></div>"
+            }
+            return
+        }
+
+        section("<b>Actions</b>") {
+            paragraph "Both actions below operate on the selected devices above. " +
+                      "You may confirm one or both — each executes independently."
+            input "bulkReplaceConfirm", "bool",
+                  title: "✅ Confirm — log battery replacement for all selected devices",
+                  defaultValue: false,
+                  submitOnChange: true
+            input "bulkResetConfirm", "bool",
+                  title: "🔄 Confirm — reset drain history for all selected devices (no replacement logged)",
+                  defaultValue: false,
+                  submitOnChange: true
+        }
+
+        def anyConfirmed = (settings?.bulkReplaceConfirm == true || settings?.bulkResetConfirm == true)
+        def hasSelection = (settings?.bulkSelectedDevices?.size() ?: 0) > 0
+
+        if (anyConfirmed && !hasSelection) {
+            section("") {
+                paragraph "<div style='background-color:#f8d7da; border-left:3px solid #f5c6cb; border-radius:0 4px 4px 0; padding:10px 14px;'>" +
+                          "<span style='color:#721c24;'>⚠️ No devices selected — please select at least one device above.</span></div>"
+            }
+            return
+        }
+
+        if (anyConfirmed && hasSelection) {
+            section("") {
+                href(name: "toBulkActionsResult", page: "bulkActionsResultPage",
+                     title: "▶ Apply — tap to execute and see results",
+                     description: "")
+            }
+        }
+    }
+}
+
+// ============================================================
+// ===================== BULK ACTIONS RESULT PAGE ============
+// ============================================================
+def bulkActionsResultPage() {
+    def doReplace   = settings?.bulkReplaceConfirm == true
+    def doReset     = settings?.bulkResetConfirm   == true
+    def selectedIds = settings?.bulkSelectedDevices ?: []
+
+    def replacedNames = []
+    def resetNames    = []
+    def skippedNames  = []
+
+    if (selectedIds) {
+        def selectedDevices = autoDevices?.findAll { selectedIds.contains(it.id) } ?: []
+
+        selectedDevices.each { device ->
+            try {
+                def level = device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : 100
+
+                if (doReplace) {
+                    logReplacement(device, level, true)
+                    replacedNames << "${device.displayName} (${level}%)"
+                } else if (doReset) {
+                    def existing = state.history[device.id] ?: [:]
+                    state.history[device.id] = [
+                        lastLevel:     existing.lastLevel     ?: level,
+                        lastDate:      now(),
+                        lastScanDate:  now(),
+                        firstSeenDate: existing.firstSeenDate ?: existing.replacedTime ?: existing.lastDate ?: now(),
+                        replacedTime:  existing.replacedTime,
+                        justReplaced:  existing.justReplaced ?: false,
+                        drain:         0.3,
+                        samples:       [],
+                        zeroCount:     0
+                    ]
+                    state.trend[device.id] = "Stable"
+                    state.history = state.history
+                    resetNames << device.displayName
+                }
+            } catch (e) {
+                skippedNames << device.displayName
+                log.warn "Bulk action failed for ${device.displayName}: ${e.message}"
+            }
+        }
+    }
+
+    state.bulkActionLastRun = now()
+
+    app.updateSetting("bulkReplaceConfirm",  [value: false, type: "bool"])
+    app.updateSetting("bulkResetConfirm",    [value: false, type: "bool"])
+    app.updateSetting("bulkSelectedDevices", [value: [], type: "enum"])
+
+    dynamicPage(name: "bulkActionsResultPage", title: "📦 Bulk Actions — Result", install: false) {
+
+        if (!doReplace && !doReset) {
+            section("<b>Nothing to do</b>") {
+                paragraph "No actions were confirmed — nothing was changed. Tap back to return."
+            }
+            return
+        }
+
+        if (replacedNames) {
+            section("<b>✅ Battery Replacements Logged</b>") {
+                paragraph "<div style='background-color:#d4edda; border-left:3px solid #28a745; border-radius:0 4px 4px 0; padding:10px 14px;'>" +
+                          "<span style='color:#155724;'><b>${replacedNames.size()} device(s) updated</b> — replacement logged, drain history reset, health set to ⏳ Pending.</span><br><br>" +
+                          "<span style='color:#155724;'>" + replacedNames.collect { "• ${it}" }.join("<br>") + "</span></div>"
+            }
+        }
+
+        if (resetNames) {
+            section("<b>🔄 Drain History Reset</b>") {
+                paragraph "<div style='background-color:#d4edda; border-left:3px solid #28a745; border-radius:0 4px 4px 0; padding:10px 14px;'>" +
+                          "<span style='color:#155724;'><b>${resetNames.size()} device(s) reset</b> — drain history cleared, health set to ⏳ Pending. No replacement logged.</span><br><br>" +
+                          "<span style='color:#155724;'>" + resetNames.collect { "• ${it}" }.join("<br>") + "</span></div>"
+            }
+        }
+
+        if (skippedNames) {
+            section("<b>⚠️ Skipped</b>") {
+                paragraph "<div style='background-color:#fff3cd; border-left:3px solid #ffc107; border-radius:0 4px 4px 0; padding:10px 14px;'>" +
+                          "<span style='color:#856404;'>The following devices encountered an error and were skipped:<br><br>" +
+                          skippedNames.collect { "• ${it}" }.join("<br>") + "</span></div>"
+            }
+        }
+
+        section("") {
+            paragraph "<span style='color:#94a3b8; font-size:12px;'>⏱ Bulk actions are on a 60-second cooldown. Tap back to return to the management page.</span>"
+        }
+    }
+}
+
+// ============================================================
 // ===================== DEVICE ACTIONS PAGE =================
 // ============================================================
-// NOTE: Hubitat persists settings across page visits so the dropdown
-// will remember the last selected device. This is a known Hubitat
-// framework limitation — URL params passed via raw HTML links are
-// stripped, and there is no page-unload event to clear settings.
-// The dropdown approach is the only reliable option within the framework.
 def deviceActionsPage() {
     def devList    = (autoDevices ?: []).sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
     def selectedId = settings?.ddDeviceId
     def device     = selectedId ? autoDevices?.find { it.id == selectedId } : null
 
-    // Clear confirms when device changes mid-session
     if (selectedId && selectedId != settings?.ddLastDeviceId) {
         app.updateSetting("ddReplaceConfirm", [value: false, type: "bool"])
         app.updateSetting("ddResetConfirm",   [value: false, type: "bool"])
@@ -1262,8 +1703,7 @@ def deviceActionsPage() {
 
         if (!device) { return }
 
-        // ── Device header ────────────────────────────────────
-        def level = null
+        def level       = null
         try { level = device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : "?" } catch (e) { level = "?" }
         def h           = health(device)
         def drain       = displayDrain(device)
@@ -1284,7 +1724,6 @@ def deviceActionsPage() {
                       "Type: <b>${catalogInfo}</b></span></div>"
         }
 
-        // ── Battery Type ──────────────────────────────────────
         section("<b>🔋 Battery Type</b>") {
             paragraph "Changes save when you tap Done."
             input "battType_${device.id}", "enum",
@@ -1310,7 +1749,6 @@ def deviceActionsPage() {
                   width: 4
         }
 
-        // ── Manual Replacement ───────────────────────────────
         section("<b>✅ Log Manual Replacement</b>") {
             paragraph "Logs a replacement entry, resets drain history, and restarts the learning period."
             input "ddReplaceConfirm", "bool",
@@ -1327,7 +1765,6 @@ def deviceActionsPage() {
             }
         }
 
-        // ── Reset Drain History ──────────────────────────────
         section("<b>🔄 Reset Drain History</b>") {
             paragraph "Clears drain samples and resets health to ⏳ Pending without logging a replacement. Use when a device shows incorrect Heavy Drain."
             input "ddResetConfirm", "bool",
@@ -1356,7 +1793,6 @@ def deviceActionsPage() {
             }
         }
 
-        // ── Replacement History ───────────────────────────────
         section("<b>📋 Replacement History</b>") {
             def deviceHistory = state.replacements?.findAll { r ->
                 r.deviceId == device.id || r.device == device.displayName
@@ -1402,8 +1838,8 @@ def trendsPage() {
             href(name: "toForceScanFromTrends", page: "forceScanPage",
                  title: "🔄 Force Scan Now",
                  description: "Tap to immediately read battery levels from all monitored devices")
-            def devList = (autoDevices ?: []).findAll { it?.currentValue("battery") != null }
 
+            def devList = (autoDevices ?: []).findAll { it?.currentValue("battery") != null && !isIgnored(it) }
             if (!devList) { paragraph "No battery devices found for trends."; return }
 
             def trendPriority = ["Heavy Drain": 1, "Moderate": 2, "Stable": 3]
@@ -1441,20 +1877,18 @@ def trendsPage() {
             def trendsRowNum = 0
 
             devList.each { device ->
-                def dead    = isBatteryDead(device)
-                def hist    = safeHistory(device)
-                def level   = device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : 100
-                def drain   = getDrain(device)
-                def trend   = state.trend[device.id] ?: "Unknown"
-                def h       = health(device)
-
+                def dead          = isBatteryDead(device)
+                def hist          = safeHistory(device)
+                def level         = device.currentValue("battery") != null ? device.currentValue("battery").toInteger() : 100
+                def drain         = getDrain(device)
+                def trend         = state.trend[device.id] ?: "Unknown"
+                def h             = health(device)
                 def trendColor    = trend == "Heavy Drain" ? "🔴" : trend == "Moderate" ? "🟠" : "🟢"
                 def color         = getBatteryLevelDisplay(level, device)
                 def healthDisplay = dead ? "<span style='color:#94a3b8;'>—</span>" : getHealthDisplay(device)
-
-                def trendOrder  = dead ? 1 : (h == "Pending" ? 999 : ((trendPriority[trend] ?: 4) + 1))
-                def healthOrder = dead ? 999 : (h == "Poor" ? 4 : h == "Fair" ? 3 : h == "Good" ? 2 : h == "Excellent" ? 1 : 99)
-                def trendsRowBg = (trendsRowNum % 2 == 0) ? "#ffffff" : "#ebebeb"
+                def trendOrder    = dead ? 1 : (h == "Pending" ? 999 : ((trendPriority[trend] ?: 4) + 1))
+                def healthOrder   = dead ? 999 : (h == "Poor" ? 4 : h == "Fair" ? 3 : h == "Good" ? 2 : h == "Excellent" ? 1 : 99)
+                def trendsRowBg   = (trendsRowNum % 2 == 0) ? "#ffffff" : "#ebebeb"
                 trendsRowNum++
                 table += "<tr style='background-color:${trendsRowBg};'>"
 
@@ -1501,17 +1935,14 @@ ${hubIp ? "<span style='color:red; font-weight:bold;'>⚠ Device links below are
 </script>
 """
         }
-
     }
 }
 
-// ============================================================
 // ============================================================
 // ===================== HISTORY PAGE ========================
 // ============================================================
 def historyPage() {
     dynamicPage(name: "historyPage", title: "Battery Replacement History", install: false) {
-
         section("") {
             if (!state.replacements || state.replacements.size() == 0) {
                 paragraph "No battery replacements have been logged yet."
@@ -1529,13 +1960,12 @@ def historyPage() {
 
             state.replacements.sort { a, b -> b.date <=> a.date }.eachWithIndex { r, idx ->
                 def historyRowBg = (idx % 2 == 0) ? "#ffffff" : "#ebebeb"
-                def typeTag = r.type == "manual" ? "<span style='color:blue;'>M</span>" :
-                              r.type == "auto"   ? "<span style='color:green;'>A</span>" : "?"
-
-                def dev = r.deviceId
+                def typeTag      = r.type == "manual"   ? "<span style='color:blue;'>M</span>" :
+                                   r.type == "auto"     ? "<span style='color:green;'>A</span>" :
+                                   r.type == "restored" ? "<span style='color:#9333ea;'>R</span>" : "?"
+                def dev          = r.deviceId
                     ? autoDevices?.find { it.id == r.deviceId }
                     : autoDevices?.find { it.displayName == r.device }
-
                 def orphaned    = (dev == null)
                 def info        = dev ? getCatalogBatteryInfo(dev) : null
                 def infoStr     = info ? "${info}" : ""
@@ -1555,7 +1985,7 @@ def historyPage() {
 
             table += "</table>"
             paragraph "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'>${table}</div>"
-            paragraph "<b>Legend:</b> <span style='color:green;'>A</span> = Automatic, <span style='color:blue;'>M</span> = Manual"
+            paragraph "<b>Legend:</b> <span style='color:green;'>A</span> = Automatic, <span style='color:blue;'>M</span> = Manual, <span style='color:#9333ea;'>R</span> = Restored from ignored"
         }
 
         section("<b>Delete an Entry</b>") {
@@ -1703,7 +2133,7 @@ def forceScanPage() {
 
     dynamicPage(name: "forceScanPage", title: "Force Scan", install: false) {
         section("<b>Scan Complete</b>") {
-            def devList = autoDevices ?: []
+            def devList = (autoDevices ?: []).findAll { !isIgnored(it) }
             def count   = devList.size()
             paragraph "✅ Battery scan complete — ${count} device(s) read. " +
                       "Return to Battery Summary or Trends to see updated values.<br><br>" +
@@ -1719,6 +2149,18 @@ def forceScanPage() {
 // ============================================================
 def infoPage(Map params = [:]) {
     dynamicPage(name: "infoPage", title: "App Guide & Reference", install: false) {
+
+        section("<b>🌐 Web Portal</b>") {
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "The <b>Battery Web Portal</b> is a browser-accessible dashboard available from any device — phone, tablet, or desktop.<br><br>" +
+                      "<b>How to access:</b> The Cloud and Local URLs are displayed at the top of the main page once OAuth is enabled in the App Code screen. " +
+                      "The Cloud URL works anywhere. The Local URL works only on your home network but is faster.<br><br>" +
+                      "<b>What it shows:</b> All devices sorted by battery level, health rating, drain rate, estimated days remaining, last activity, and battery type. " +
+                      "Summary cards at the top show at-a-glance counts for low battery, stale, high drain, and dead devices.<br><br>" +
+                      "<b>Force Scan button:</b> Triggers an immediate battery scan from the portal — no need to open the Hubitat app.<br><br>" +
+                      "<b>Auto-refresh:</b> The portal refreshes automatically every 2 minutes. Zero hub load between refreshes.<br><br>" +
+                      "<b>Adding to a Hubitat Dashboard:</b> Add a Link tile to your dashboard, paste in your Cloud or Local URL from the main page, and set a label like 🔋 Battery Portal. Tapping the tile opens the portal — use the back button to return to your dashboard.</div>"
+        }
 
         section("<b>🔑 Battery Level Ranges</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Battery level colors reflect current charge percentage. " +
@@ -1746,136 +2188,64 @@ def infoPage(Map params = [:]) {
                       "<tr><td>🟠 Fair</td><td>🔴 Heavy Drain</td><td>0.8–1.5%</td><td>Above average — worth monitoring, no alert</td></tr>" +
                       "<tr><td>🔴 Poor</td><td>🔴 Heavy Drain</td><td>&gt; 1.5%</td><td>High drain — High Drain alert fires</td></tr>" +
                       "</table></div><br>" +
-                      "<b>Note:</b> Door locks use higher drain thresholds than other devices. Because locks drive a motor to operate, a higher baseline drain is normal and expected. Locks showing 🟠 Moderate trend are not necessarily a concern unless drain is consistently very high.<br><br>" +
-                      "<b>Status Icons:</b><br>" +
-                      "<div style='overflow-x:auto; -webkit-overflow-scrolling:touch;'><table style='width:100%; border-collapse: collapse;'>" +
-                      "<tr style='font-weight:bold;'><td>Icon</td><td>Meaning</td></tr>" +
-                      "<tr><td>⏳</td><td>Pending — not enough data yet to assign a health verdict</td></tr>" +
-                      "<tr><td>⚠️</td><td>Warning — high drain device or stale activity</td></tr>" +
-                      "<tr><td>⏱</td><td>Stale — device has not reported within the configured threshold</td></tr>" +
-                      "<tr><td>🪫</td><td>Dead — battery confirmed at 0% for 3 or more consecutive scans</td></tr>" +
-                      "</table></div></div>"
+                      "<b>Note:</b> Door locks use higher drain thresholds than other devices. Locks showing 🟠 Moderate trend are not necessarily a concern unless drain is consistently very high.</div>"
         }
 
         section("<b>⏳ Pending Health & Samples</b>") {
-            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>The app withholds a health verdict and shows <b>⏳ Pending</b> until enough data is collected. " +
-                      "This prevents false Poor ratings from sparse early readings. While Pending, Trend and Drain show 📈 — the app is actively learning.<br><br>" +
-                      "Pending devices show inline progress in the Battery Health column — for example: <b>⏳ 3/5 samples · 3/5 days</b><br><br>" +
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>The app withholds a health verdict and shows <b>⏳ Pending</b> until enough data is collected.<br><br>" +
+                      "Pending devices show inline progress — for example: <b>⏳ 3/5 samples · 3/5 days</b><br><br>" +
                       "<b>Standard gate</b> — both must be met:<br>" +
                       "• At least <b>5 samples</b> collected (7 for locks, smoke, and CO detectors)<br>" +
                       "• At least <b>5 days</b> since the battery was replaced or first seen<br><br>" +
-                      "<b>Slow reporter gate</b> — for devices like smoke detectors that rarely report:<br>" +
-                      "• After <b>14 days</b> with at least <b>2 samples</b>, Pending clears automatically<br><br>" +
-                      "<b>Note:</b> Updating or reinstalling the app resets the sample timing gates. All devices will return to Pending temporarily while fresh data is collected.<br><br>" +
-                      "<b>Confidence weighting:</b> Early readings carry less weight than established ones. " +
-                      "With 5 samples the blend is partial — by 10 samples the full measured drain is used.</div>"
+                      "<b>Slow reporter gate:</b> After <b>14 days</b> with at least <b>2 samples</b>, Pending clears automatically.<br><br>" +
+                      "<b>Confidence weighting:</b> Early readings carry less weight — by 10 samples the full measured drain is used.</div>"
         }
 
         section("<b>🔍 Drain, Estimated Days & Last Battery</b>") {
-            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Drain shows how fast a device uses battery (% per day). " +
-                      "Calculated using EWMA (exponential weighted moving average) across the last 10 readings.<br><br>" +
-                      "<b>While health is ⏳ Pending</b> — Drain shows 📈 and Estimated Days shows 📈 — the app is actively learning. " +
-                      "Both will populate automatically once the device clears the Pending gate.<br><br>" +
-                      "<b>Estimated days remaining</b> = current level ÷ average daily drain. " +
-                      "Capped at 365 days — estimates beyond a year are not considered meaningful.<br><br>" +
-                      "<b>Last Battery</b> shows when the app last received a battery reading — from a scheduled scan or device event. " +
-                      "It is independent of Last Activity.</div>"
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Drain shows how fast a device uses battery (% per day), " +
+                      "calculated using EWMA across the last 10 readings.<br><br>" +
+                      "<b>Estimated days remaining</b> = current level ÷ average daily drain. Capped at 365 days.<br><br>" +
+                      "<b>Last Battery</b> shows when the app last received a battery reading. Independent of Last Activity.</div>"
         }
 
         section("<b>😴 Notification Snooze</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "The <b>Notification Snooze</b> feature on the main page silences all Battery Monitor notifications for a configurable number of days.<br><br>" +
-                      "This is useful when you are traveling, on vacation, or otherwise unavailable to act on battery alerts. " +
-                      "Snoozing does not affect scanning — the app continues to collect battery data in the background.<br><br>" +
-                      "<b>While snoozed:</b><br>" +
-                      "• All scheduled notifications are suppressed<br>" +
-                      "• Battery data continues to be collected normally<br>" +
-                      "• The main page shows a banner with time remaining<br>" +
-                      "• Manual Send Notification Now bypasses the snooze and sends immediately<br><br>" +
-                      "Snooze expires automatically when the duration passes. You can also clear it early at any time from the main page.</div>"
-        }
-
-        section("") {
-            paragraph rawHtml: true, "<div style='background-color:#e8f0fe; padding:6px 10px; border-radius:4px; font-weight:bold;'>⚙️ Features & Actions</div>"
+                      "Silences all Battery Monitor notifications for a configurable number of days. " +
+                      "Scanning continues normally — only notifications are paused. " +
+                      "Manual Send Notification Now bypasses the snooze. Snooze expires automatically.</div>"
         }
 
         section("<b>🔋 Device Battery Management</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "Open 🔋 Device Battery Management from the main Reports menu.<br><br>" +
-                      "<b>Device Actions</b> — tap Open Device Actions and select a device from the dropdown to:<br>" +
+                      "Open from the main Reports menu. Select a device to:<br>" +
                       "• Assign or change battery type and count<br>" +
-                      "• Log a manual battery replacement (resets drain history and logs a replacement entry)<br>" +
+                      "• Log a manual battery replacement<br>" +
                       "• Reset drain history without logging a replacement<br>" +
                       "• View all replacement history entries for that device<br><br>" +
-                      "<b>Note:</b> Hubitat remembers the last selected device in the dropdown — change it to switch to a different device.<br><br>" +
-                      "<b>Battery Types</b> — tap to expand a full list of all devices. Set battery type and count for as many devices as you like, then tap Done once to save everything.<br><br>" +
-                      "Battery type changes take effect immediately in the summary table, notifications, and replacement history.</div>"
+                      "<b>Bulk Actions:</b> Log replacements or reset drain history across multiple devices at once — " +
+                      "useful when swapping batteries in several devices at the same time. Includes a 60-second cooldown to prevent accidental back-to-back runs.<br><br>" +
+                      "<b>Ignored Devices:</b> Add devices to the ignore list to exclude them completely from all reports, notifications, stale checks, health scoring, and the web portal. " +
+                      "Devices remain in your monitored list and any Hubitat rules. When a device is removed from the ignore list, its history resets and a <b>Restored (R)</b> entry is logged in Battery Replacement History.</div>"
         }
 
         section("<b>🔄 Force Scan & 🔁 Replacement Detection</b>") {
-            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'><b>Force Scan Now</b> on the Summary and Trends pages immediately reads battery levels from all devices " +
-                      "instead of waiting for the next scheduled scan.<br><br>" +
-                      "<b>Force Scan does NOT instantly generate drain samples.</b> A sample requires the battery level to have " +
-                      "changed since the last reading, or 24+ hours to have passed at the same level.<br><br>" +
-                      "<b>Replacement detection</b> fires automatically when a device jumps from ≤40% up to ≥90–95%. " +
-                      "Detection requires at least 2 prior drain samples — this prevents false positives on app updates or " +
-                      "virtual/HomeKit devices that always report a fixed level. " +
-                      "If replaced before dropping to 40%, log it manually to keep trends accurate.</div>"
-        }
-
-        section("") {
-            paragraph rawHtml: true, "<div style='background-color:#e8f0fe; padding:6px 10px; border-radius:4px; font-weight:bold;'>🔔 Alerts & Monitoring</div>"
-        }
-
-        section("<b>⚠️ High Drain Alerts & ⏱ Stale Devices</b>") {
-            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'><b>High Drain alert</b> fires when a device crosses into 🔴 Poor territory — drain exceeds 1.5%/day.<br>" +
-                      "🟠 Fair devices (0.8–1.5%/day) are worth monitoring but do not trigger an alert.<br><br>" +
-                      "<b>Stale</b> means a device has not reported any activity within the configured threshold (default 24h). " +
-                      "Stale is based on Last Activity — not Last Battery.</div>"
-        }
-
-        section("<b>🔔 Notification Schedule (2, 3, Weekly)</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "<b>2 / 3 (interval-based):</b> Notifications sent on a rolling interval as long as conditions persist.<br><br>" +
-                      "<b>Weekly:</b> Notifications anchored to Monday. First notification sent the day after detection, then weekly on Mondays.<br><br>" +
-                      "Notifications are not duplicated within the same interval window.</div>"
-        }
-
-        section("") {
-            paragraph rawHtml: true, "<div style='background-color:#e8f0fe; padding:6px 10px; border-radius:4px; font-weight:bold;'>🛠 Help & Troubleshooting</div>"
-        }
-
-        section("<b>⚙️ Device Adjustments & Troubleshooting</b>") {
-            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Some device types have adjusted drain calculations:<br><br>" +
-                      "• <b>Locks</b> — drain adjusted down by 60%, higher thresholds, requires 7 samples<br>" +
-                      "• <b>Contact &amp; motion sensors</b> — drain adjusted down by 50%, standard 5-sample gate<br>" +
-                      "• <b>Smoke &amp; CO detectors</b> — drain adjusted down by 50%, requires 7 samples, slow reporter gate<br>" +
-                      "• Other types use the standard calculation (5 samples)<br><br>" +
-                      "<b>Battery Type Assignment:</b><br>" +
-                      "Open 🔋 Device Battery Management from the main Reports menu, select the device, and assign its battery type. If your type is not listed, select <b>Other</b> — a free text field will appear for custom types (e.g. CR17450, 4SR44, 28A). " +
-                      "Custom types appear in notifications and replacement history just like standard types.<br><br>" +
-                      "<b>If a device shows High Drain or Poor health after Pending:</b><br>" +
-                      "• Check signal strength and mesh routing<br>" +
-                      "• Verify reporting frequency in the device driver<br>" +
-                      "• Confirm correct battery type in 🔋 Device Battery Management<br>" +
-                      "• Consider environmental factors (temperature, distance)</div>"
-        }
-
-        section("<b>🔄 Reset Drain History</b>") {
-            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'><b>Reset Drain History</b> is available on the 🔋 Device Battery Management page — select a device and use the Reset Drain History section.<br><br>" +
-                      "It clears accumulated drain samples and resets a device back to ⏳ Pending without logging a battery replacement.<br><br>" +
-                      "<b>What it resets:</b> drain samples, drain rate, trend, health.<br>" +
-                      "<b>What it does NOT change:</b> battery replacement history, last battery level, last seen date.</div>"
+                      "<b>Force Scan</b> reads all battery levels immediately. A new drain sample only records if the level has changed since the last reading.<br><br>" +
+                      "<b>Replacement detection</b> fires automatically when a device jumps from ≤40% up to ≥90–95%. Requires at least 2 prior drain samples.</div>"
         }
 
         section("<b>💡 Tips for Best Results</b>") {
-            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>• Let new batteries run for at least a week before trusting health ratings<br>" +
-                      "• Use the 🔋 icon in Battery Summary to assign battery types and log replacements directly from the summary<br>" +
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "• Let new batteries run for at least a week before trusting health ratings<br>" +
+                      "• Assign battery types in 🔋 Device Battery Management — used in the portal and notifications<br>" +
                       "• Set Scan Interval to Hourly to build health ratings faster<br>" +
-                      "• After replacing a battery open 🔋 Device Battery Management, select the device, and log the replacement<br>" +
+                      "• After replacing a battery, log it in 🔋 Device Battery Management<br>" +
+                      "• Use Bulk Actions when replacing batteries in multiple devices at once<br>" +
+                      "• Use Ignored Devices for spare or storage devices you don't want to monitor<br>" +
                       "• Use Reset Drain History on locks and sensors if they show Heavy Drain after first install<br>" +
-                      "• Use Notification Snooze when traveling so you are not notified about batteries you cannot replace<br>" +
-                      "• After updating the app, switch to Hourly scan temporarily to rebuild sample data faster</div>"
+                      "• Use Notification Snooze when traveling<br>" +
+                      "• After updating the app, switch to Hourly scan temporarily to rebuild sample data faster<br>" +
+                      "• Enable OAuth in App Code to unlock the Web Portal</div>"
         }
     }
 }
