@@ -1,12 +1,12 @@
 {
   "packageName": "Battery Monitor 2.0",
   "author": "Jdthomas24",
-  "version": "2.4.26",
+  "version": "2.4.27",
   "category": "Convenience",
   "description": "Advanced Hubitat battery monitoring with analytics, trends and replacement tracking. Recurring scan schedule, confidence-weighted health, EWMA smoothing.",
   "dateReleased": "4/8/26",
   "minimumHEVersion": "2.3.0",
-  "releaseNotes": "v2.5.26 - New: Ignored Devices — exclude spare or storage devices completely from all reports, notifications, stale checks, health scoring, and the web portal. Removing a device from the list resets its history and logs a Restored entry. App Guide trimmed and updated.",
+  "releaseNotes": "v2.5.27 - Scan start and completion now log at info level — visible in logs without debug mode enabled.",
   "apps": [
     {
       "name": "Battery Monitor 2.0",
