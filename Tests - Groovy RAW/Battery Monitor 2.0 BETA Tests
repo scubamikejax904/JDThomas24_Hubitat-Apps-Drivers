@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.5.26",
+    version: "2.5.28",
     doNotFocus: true,
     oauth: true
 )
@@ -37,9 +37,7 @@ def updated() {
 
     initialize()
 
-    if (debugMode) {
-        runIn(1800, disableDebugLogging)
-    }
+    runIn(1800, disableDebugLogging)
 
     def devList    = autoDevices ?: []
     def currentIds = devList.collect { it.id as String }
@@ -56,6 +54,16 @@ def updated() {
         }
         def pruned = before - state.replacements.size()
         if (pruned > 0 && debugMode) log.debug "Purged ${pruned} orphaned replacement history entr${pruned == 1 ? 'y' : 'ies'}"
+    }
+
+    // Prune pendingReplacement entries for devices no longer monitored
+    if (state.pendingReplacement) {
+        def pendingBefore = state.pendingReplacement.size()
+        state.pendingReplacement = state.pendingReplacement.findAll { id, _ ->
+            currentIds.contains(id)
+        }
+        def pendingPruned = pendingBefore - state.pendingReplacement.size()
+        if (pendingPruned > 0 && debugMode) log.debug "Pruned ${pendingPruned} orphaned pending-replacement entr${pendingPruned == 1 ? 'y' : 'ies'}"
     }
 
     def migrationDirty  = false
@@ -113,11 +121,12 @@ def disableDebugLogging() {
 
 def initialize() {
     if (debugMode) log.debug "Initialization complete"
-    if (state.replacements      == null) state.replacements      = []
-    if (state.history           == null) state.history           = [:]
-    if (state.trend             == null) state.trend             = [:]
-    if (state.notifSnoozedUntil == null) state.notifSnoozedUntil = 0
-    if (state.ignoredDeviceIds  == null) state.ignoredDeviceIds  = []
+    if (state.replacements         == null) state.replacements         = []
+    if (state.history              == null) state.history              = [:]
+    if (state.trend                == null) state.trend                = [:]
+    if (state.notifSnoozedUntil    == null) state.notifSnoozedUntil    = 0
+    if (state.ignoredDeviceIds     == null) state.ignoredDeviceIds     = []
+    if (state.pendingReplacement   == null) state.pendingReplacement   = [:]
 
     if (!state.accessToken) {
         try {
@@ -366,7 +375,7 @@ def mainPage() {
 
         section("<b>Diagnostics</b>") {
             input "debugMode", "bool", title: "Debug Logging (auto-disables after 30 min)", defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Battery Monitor v2.5.26</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Battery Monitor v2.5.27</span>"
         }
     }
 }
@@ -398,6 +407,9 @@ def scanAllDevices() {
     def devList = (autoDevices ?: []).findAll { !isIgnored(it) }
     if (!devList) return
     if (debugMode) log.debug "Running scheduled battery scan for ${devList.size()} device(s)"
+    log.info "Battery Monitor: scan started — ${devList.size()} device(s)"
+
+    confirmPendingReplacements()
 
     def poor  = []
     def stale = []
@@ -421,6 +433,7 @@ def scanAllDevices() {
     def msg = "SCAN: ${devList.size()} device(s) scanned at ${ts}."
     if (poor.size()  > 0) msg += " Low battery: ${poor.join(', ')}."
     if (stale.size() > 0) msg += " Stale: ${stale.join(', ')}."
+    log.info "Battery Monitor: scan complete — ${devList.size()} device(s) processed"
 }
 
 def reportScheduler() {
@@ -728,7 +741,9 @@ def isBatteryDead(device) {
 // ============================================================
 def detectReplacement(device, newLevel, oldLevel) {
     newLevel = newLevel != null ? newLevel : 100
-    oldLevel = oldLevel != null ? oldLevel : (state.history[device.id]?.lastLevel != null ? state.history[device.id].lastLevel : 0)
+    oldLevel = oldLevel != null ? oldLevel
+                                : (state.history[device.id]?.lastLevel != null
+                                   ? state.history[device.id].lastLevel : 0)
 
     if (!state.history[device.id]) {
         state.history[device.id] = [
@@ -743,21 +758,160 @@ def detectReplacement(device, newLevel, oldLevel) {
         state.trend[device.id] = "Stable"
     }
 
-    def data            = state.history[device.id]
-    def largeJump       = (newLevel - oldLevel)
-    def hadDrainHistory = data?.samples && data.samples.size() >= 2
-    def detected        = false
+    def data = state.history[device.id]
 
-    if (!hadDrainHistory) return
+    // ── Gate 1: require at least N prior drain samples ──────────────────────
+    //   Prevents triggering on a newly-added device that starts at 95%+.
+    def minSamples  = (settings?.detectionMinSamples ?: 3).toInteger()
+    def sampleCount = data?.samples?.size() ?: 0
+    if (sampleCount < minSamples) {
+        if (debugMode) log.debug "${device.displayName}: replacement gate — only ${sampleCount}/${minSamples} prior samples, skipping"
+        return
+    }
 
-    if (newLevel >= 95 && oldLevel <= 40)                                            detected = true
-    else if (newLevel >= 90 && oldLevel <= 40 && largeJump >= 25)                    detected = true
-    else if (newLevel >= 90 && hadDrainHistory && largeJump >= 15 && oldLevel <= 40) detected = true
-    else if (newLevel >= 95 && hadDrainHistory && oldLevel <= 40)                    detected = true
+    // ── Gate 2: device must not be newly added ───────────────────────────────
+    //   Skip detection if device has been known for fewer than N days.
+    def minAgeDays = (settings?.detectionMinAgeDays ?: 3).toInteger()
+    def firstSeen  = data?.firstSeenDate ?: data?.lastDate ?: now()
+    def ageDays    = (now() - (firstSeen as Long)) / (1000 * 60 * 60 * 24)
+    if (ageDays < minAgeDays) {
+        if (debugMode) log.debug "${device.displayName}: replacement gate — device only ${ageDays.toInteger()}d old (min ${minAgeDays}d), skipping"
+        return
+    }
 
-    if (detected) {
+    // ── Gate 3: cooldown — prevent back-to-back detections ──────────────────
+    //   Suppresses detection for N hours after any replacement is logged.
+    def cooldownHours  = (settings?.detectionCooldownHours ?: 12).toInteger()
+    def lastLogged     = data?.lastReplacementLogged
+    if (lastLogged) {
+        def hoursSinceLast = (now() - (lastLogged as Long)) / (1000 * 60 * 60)
+        if (hoursSinceLast < cooldownHours) {
+            if (debugMode) log.debug "${device.displayName}: replacement gate — last replacement ${hoursSinceLast.toInteger()}h ago (cooldown ${cooldownHours}h), skipping"
+            return
+        }
+    }
+
+    // ── Configurable thresholds ──────────────────────────────────────────────
+    def oldThresh = (settings?.detectionOldThreshold ?: 40).toInteger()
+    def newThresh = (settings?.detectionNewThreshold ?: 90).toInteger()
+    def minJump   = (settings?.detectionMinJump      ?: 15).toInteger()
+    def largeJump = newLevel - oldLevel
+
+    // ── Primary detection condition ──────────────────────────────────────────
+    def qualifies = (oldLevel <= oldThresh && newLevel >= newThresh && largeJump >= minJump)
+    if (!qualifies) {
+        if (state.pendingReplacement?.containsKey(device.id)) {
+            if (debugMode) log.debug "${device.displayName}: pending replacement cleared — reading no longer qualifies (${oldLevel}% → ${newLevel}%)"
+            state.pendingReplacement.remove(device.id)
+            state.pendingReplacement = state.pendingReplacement
+        }
+        return
+    }
+
+    // ── Gate 4: two-reading confirmation ────────────────────────────────────
+    //   First qualifying read stages a pending entry.
+    //   Second qualifying read within the window confirms and logs.
+    //   If disabled, logs immediately.
+    def requireConfirm   = (settings?.detectionRequireConfirm != false)
+    def confirmWindowHrs = (settings?.detectionConfirmWindowHours ?: 48).toInteger()
+
+    if (!requireConfirm) {
         data.zeroCount = 0
         logReplacement(device, newLevel, false)
+        if (debugMode) log.debug "${device.displayName}: replacement detected (confirmation disabled) — ${oldLevel}% → ${newLevel}%"
+        return
+    }
+
+    if (!state.pendingReplacement) state.pendingReplacement = [:]
+
+    def pending = state.pendingReplacement[device.id]
+
+    if (!pending) {
+        state.pendingReplacement[device.id] = [
+            stagedAt: now(),
+            oldLevel: oldLevel,
+            newLevel: newLevel,
+            jumpSize: largeJump
+        ]
+        state.pendingReplacement = state.pendingReplacement
+        if (debugMode) log.debug "${device.displayName}: replacement staged (awaiting confirmation) — ${oldLevel}% → ${newLevel}%, jump=${largeJump}%"
+        return
+    }
+
+    def windowMs   = confirmWindowHrs * 60 * 60 * 1000
+    def pendingAge = now() - (pending.stagedAt as Long)
+
+    if (pendingAge > windowMs) {
+        if (debugMode) log.debug "${device.displayName}: pending replacement expired (${(pendingAge / 3600000).toInteger()}h > ${confirmWindowHrs}h window) — re-staging"
+        state.pendingReplacement[device.id] = [
+            stagedAt: now(),
+            oldLevel: oldLevel,
+            newLevel: newLevel,
+            jumpSize: largeJump
+        ]
+        state.pendingReplacement = state.pendingReplacement
+        return
+    }
+
+    // ── Gate 5: sustained level check ───────────────────────────────────────
+    //   Level must still be ≥ newThresh on the confirming read.
+    //   If it dropped back down the original read was likely spurious.
+    if (newLevel < newThresh) {
+        if (debugMode) log.debug "${device.displayName}: pending replacement cancelled — level dropped back to ${newLevel}% (threshold ${newThresh}%)"
+        state.pendingReplacement.remove(device.id)
+        state.pendingReplacement = state.pendingReplacement
+        return
+    }
+
+    // All gates passed — confirmed
+    state.pendingReplacement.remove(device.id)
+    state.pendingReplacement = state.pendingReplacement
+    data.zeroCount = 0
+    logReplacement(device, newLevel, false)
+    if (debugMode) log.debug "${device.displayName}: replacement CONFIRMED — ${pending.oldLevel}% → ${newLevel}%, staged ${(pendingAge / 60000).toInteger()}m ago"
+}
+
+// ============================================================
+// ===================== CONFIRM PENDING REPLACEMENTS ========
+// ============================================================
+def confirmPendingReplacements() {
+    if (!state.pendingReplacement || state.pendingReplacement.isEmpty()) return
+
+    def confirmWindowHrs = (settings?.detectionConfirmWindowHours ?: 48).toInteger()
+    def newThresh        = (settings?.detectionNewThreshold        ?: 90).toInteger()
+    def windowMs         = confirmWindowHrs * 60 * 60 * 1000
+    def toRemove         = []
+
+    state.pendingReplacement.each { deviceId, pending ->
+        def device = autoDevices?.find { it.id == deviceId }
+        if (!device) { toRemove << deviceId; return }
+
+        def currentLevel = device.currentValue("battery")?.toInteger()
+        if (currentLevel == null) return
+
+        def pendingAge = now() - (pending.stagedAt as Long)
+
+        if (pendingAge > windowMs) {
+            if (debugMode) log.debug "${device.displayName}: pending replacement EXPIRED during scan (${(pendingAge / 3600000).toInteger()}h old)"
+            toRemove << deviceId
+            return
+        }
+
+        if (currentLevel >= newThresh) {
+            def histData = state.history[device.id]
+            if (histData) histData.zeroCount = 0
+            logReplacement(device, currentLevel, false)
+            toRemove << deviceId
+            if (debugMode) log.debug "${device.displayName}: replacement CONFIRMED by scan — level ${currentLevel}% still ≥ ${newThresh}%"
+        } else {
+            if (debugMode) log.debug "${device.displayName}: pending replacement DISCARDED by scan — level dropped to ${currentLevel}% (below ${newThresh}%)"
+            toRemove << deviceId
+        }
+    }
+
+    if (toRemove) {
+        toRemove.each { state.pendingReplacement.remove(it) }
+        state.pendingReplacement = state.pendingReplacement
     }
 }
 
@@ -1168,7 +1322,7 @@ tr:hover td{background:#1a1a1a}
         }
 
         html.append("</tbody></table>")
-        html.append("<p style='text-align:center;font-size:10px;color:#444;margin-top:20px;'>Battery Monitor v2.5.26 &nbsp;·&nbsp; jdthomas24</p>")
+        html.append("<p style='text-align:center;font-size:10px;color:#444;margin-top:20px;'>Battery Monitor v2.5.27 &nbsp;·&nbsp; jdthomas24</p>")
         html.append("</div></body></html>")
 
         return render(contentType: "text/html", data: html.toString(), status: 200)
@@ -1370,6 +1524,78 @@ def deviceManagePage(Map params = [:]) {
                  description: "Log replacements or reset drain history across multiple devices at once. Useful when swapping batteries in several devices at the same time.")
         }
 
+        section("<b>🔍 Auto-Detection Settings</b>", hideable: true, hidden: true) {
+            paragraph "Configure the thresholds and safeguards used when Battery Monitor " +
+                      "automatically detects a battery replacement.<br><br>" +
+                      "<b>Thresholds</b> define what qualifies as a replacement event. " +
+                      "<b>Safeguards</b> prevent false positives from spurious readings, " +
+                      "newly-added devices, or back-to-back detections."
+
+            paragraph "<b>── Thresholds ──</b>"
+
+            input "detectionOldThreshold", "number",
+                  title: "Old level must be at or below (%):",
+                  description: "Battery must have been this low before the jump. Default: 40",
+                  defaultValue: 40,
+                  range: "10..60",
+                  required: false
+
+            input "detectionNewThreshold", "number",
+                  title: "New level must be at or above (%):",
+                  description: "Battery must jump to at least this level. Default: 90",
+                  defaultValue: 90,
+                  range: "70..100",
+                  required: false
+
+            input "detectionMinJump", "number",
+                  title: "Minimum jump size (%):",
+                  description: "The jump from old to new must be at least this large. Default: 15",
+                  defaultValue: 15,
+                  range: "5..60",
+                  required: false
+
+            paragraph "<b>── Safeguards ──</b>"
+
+            input "detectionRequireConfirm", "bool",
+                  title: "✅ Require two-reading confirmation before logging",
+                  description: "First qualifying read stages a pending entry. Only confirmed after a second qualifying read within the window below. Recommended ON.",
+                  defaultValue: true,
+                  submitOnChange: true
+
+            if (settings?.detectionRequireConfirm != false) {
+                input "detectionConfirmWindowHours", "number",
+                      title: "Confirmation window (hours):",
+                      description: "How long to wait for a confirming read before expiring the pending entry. Default: 48",
+                      defaultValue: 48,
+                      range: "1..168",
+                      required: false
+            }
+
+            input "detectionCooldownHours", "number",
+                  title: "Cooldown after last replacement (hours):",
+                  description: "Suppresses auto-detection for this long after any replacement (auto or manual) is logged. Default: 12",
+                  defaultValue: 12,
+                  range: "1..72",
+                  required: false
+
+            input "detectionMinSamples", "number",
+                  title: "Minimum prior samples required:",
+                  description: "Device must have at least this many drain samples before detection fires. Prevents false positives on newly-added devices. Default: 3",
+                  defaultValue: 3,
+                  range: "2..10",
+                  required: false
+
+            input "detectionMinAgeDays", "number",
+                  title: "Minimum device age (days):",
+                  description: "Device must have been monitored at least this many days before detection fires. Default: 3",
+                  defaultValue: 3,
+                  range: "1..14",
+                  required: false
+
+            paragraph "<span style='color:#94a3b8; font-size:12px;'>ℹ️ Pending detections waiting for confirmation are visible in debug logs. " +
+                      "Each scan pass resolves or expires them automatically.</span>"
+        }
+
         def ignoredSectionTitle = ignoredCount > 0
             ? "<b>🚫 Ignored Devices</b> — <span style='color:blue;'>${ignoredCount} ignored</span>"
             : "<b>🚫 Ignored Devices</b>"
@@ -1429,7 +1655,6 @@ def deviceManagePage(Map params = [:]) {
 def ignoredDevicesPage() {
     def devList = (autoDevices ?: []).sort { a, b -> a.displayName.trim() <=> b.displayName.trim() }
 
-    // Detect and process restores directly here — same pattern as bulk actions
     def previouslyIgnored = state.ignoredDeviceIds ?: []
     def currentIgnored    = (settings?.ignoredDevices?.collect { it as String }) ?: []
     def restoredIds       = previouslyIgnored.findAll { !currentIgnored.contains(it) }
@@ -1469,7 +1694,6 @@ def ignoredDevicesPage() {
         }
     }
 
-    // Always sync ignoredDeviceIds to current selection on every page render
     state.ignoredDeviceIds = currentIgnored
 
     dynamicPage(name: "ignoredDevicesPage", title: "🚫 Ignored Devices", install: false) {
@@ -2165,14 +2389,9 @@ def infoPage(Map params = [:]) {
 
         section("<b>🌐 Web Portal</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "The <b>Battery Web Portal</b> is a browser-accessible dashboard available from any device — phone, tablet, or desktop.<br><br>" +
-                      "<b>How to access:</b> The Cloud and Local URLs are displayed at the top of the main page once OAuth is enabled in the App Code screen. " +
-                      "The Cloud URL works anywhere. The Local URL works only on your home network but is faster.<br><br>" +
-                      "<b>What it shows:</b> All devices sorted by battery level, health rating, drain rate, estimated days remaining, last activity, and battery type. " +
-                      "Summary cards at the top show at-a-glance counts for low battery, stale, high drain, and dead devices.<br><br>" +
-                      "<b>Force Scan button:</b> Triggers an immediate battery scan from the portal — no need to open the Hubitat app.<br><br>" +
-                      "<b>Auto-refresh:</b> The portal refreshes automatically every 2 minutes. Zero hub load between refreshes.<br><br>" +
-                      "<b>Adding to a Hubitat Dashboard:</b> Add a Link tile to your dashboard, paste in your Cloud or Local URL from the main page, and set a label like 🔋 Battery Portal. Tapping the tile opens the portal — use the back button to return to your dashboard.</div>"
+                      "Enable OAuth in App Code to unlock the web portal — Cloud and Local URLs appear on the main page once active. " +
+                      "The portal shows all devices sorted by battery level with health, drain, est days, last activity, and battery type. Auto-refreshes every 2 minutes.<br><br>" +
+                      "Add a Link tile to your Hubitat dashboard and paste in your Cloud or Local URL to access it directly.</div>"
         }
 
         section("<b>🔑 Battery Level Ranges</b>") {
@@ -2206,20 +2425,17 @@ def infoPage(Map params = [:]) {
         }
 
         section("<b>⏳ Pending Health & Samples</b>") {
-            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>The app withholds a health verdict and shows <b>⏳ Pending</b> until enough data is collected.<br><br>" +
-                      "Pending devices show inline progress — for example: <b>⏳ 3/5 samples · 3/5 days</b><br><br>" +
-                      "<b>Standard gate</b> — both must be met:<br>" +
-                      "• At least <b>5 samples</b> collected (7 for locks, smoke, and CO detectors)<br>" +
-                      "• At least <b>5 days</b> since the battery was replaced or first seen<br><br>" +
-                      "<b>Slow reporter gate:</b> After <b>14 days</b> with at least <b>2 samples</b>, Pending clears automatically.<br><br>" +
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "Health shows ⏳ Pending until enough data is collected. Progress shows inline — for example: <b>⏳ 3/5 samples · 3/5 days</b><br><br>" +
+                      "Requires <b>5 samples</b> and <b>5 days</b> minimum (7 samples for locks, smoke, and CO detectors). " +
+                      "Devices that report infrequently clear Pending automatically after <b>14 days</b> with 2+ samples.<br><br>" +
                       "<b>Confidence weighting:</b> Early readings carry less weight — by 10 samples the full measured drain is used.</div>"
         }
 
         section("<b>🔍 Drain, Estimated Days & Last Battery</b>") {
-            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>Drain shows how fast a device uses battery (% per day), " +
-                      "calculated using EWMA across the last 10 readings.<br><br>" +
-                      "<b>Estimated days remaining</b> = current level ÷ average daily drain. Capped at 365 days.<br><br>" +
-                      "<b>Last Battery</b> shows when the app last received a battery reading. Independent of Last Activity.</div>"
+            paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "Drain = %/day based on the last 10 readings. Est Days = current level ÷ drain, capped at 365.<br><br>" +
+                      "<b>Last Battery</b> shows when the app last received a battery reading — independent of Last Activity.</div>"
         }
 
         section("<b>😴 Notification Snooze</b>") {
@@ -2231,36 +2447,29 @@ def infoPage(Map params = [:]) {
 
         section("<b>🔋 Device Battery Management</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "Open from the main Reports menu. Select a device to:<br>" +
-                      "• Assign or change battery type and count<br>" +
-                      "• Log a manual battery replacement<br>" +
-                      "• Reset drain history without logging a replacement<br>" +
-                      "• View all replacement history entries for that device<br><br>" +
-                      "<b>Bulk Actions:</b> Log replacements or reset drain history across multiple devices at once — " +
-                      "useful when swapping batteries in several devices at the same time. Includes a 60-second cooldown to prevent accidental back-to-back runs.<br><br>" +
-                      "<b>Ignored Devices:</b> Add devices to the ignore list to exclude them completely from all reports, notifications, stale checks, health scoring, and the web portal. " +
-                      "Devices remain in your monitored list and any Hubitat rules. When a device is removed from the ignore list, its history resets and a <b>Restored (R)</b> entry is logged in Battery Replacement History. " +
-                      "The device will also show <b>Recently Replaced</b> in the Battery Summary for up to 24 hours — this is expected and clears automatically.</div>"
+                      "Assign battery types, log replacements, reset drain history, and view per-device history from the Reports menu.<br><br>" +
+                      "<b>Bulk Actions:</b> Log replacements or reset drain history across multiple devices at once. 60-second cooldown prevents accidental back-to-back runs.<br><br>" +
+                      "<b>Ignored Devices:</b> Excludes a device completely from all reports, notifications, stale checks, health scoring, and the portal. " +
+                      "Removing from the list resets history, logs a <b>Restored (R)</b> entry, and shows <b>Recently Replaced</b> for up to 24 hours.</div>"
         }
 
-        section("<b>🔄 Force Scan & 🔁 Replacement Detection</b>") {
+        section("<b>🔄 Force Scan & Replacement Detection</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "<b>Force Scan</b> reads all battery levels immediately. A new drain sample only records if the level has changed since the last reading.<br><br>" +
-                      "<b>Replacement detection</b> fires automatically when a device jumps from ≤40% up to ≥90–95%. Requires at least 2 prior drain samples.</div>"
+                      "Replacement detection fires automatically when a device jumps from ≤40% up to ≥90% with a minimum jump of 15% — requires 3+ prior drain samples and 3+ days of history.<br><br>" +
+                      "By default, a <b>two-reading confirmation</b> is required: the first qualifying read stages a pending entry, and a second qualifying read within 48 hours confirms it. " +
+                      "A single spurious spike will not log a replacement. All thresholds and safeguards are configurable under <b>🔋 Device Battery Management → Auto-Detection Settings</b>.<br><br>" +
+                      "<b>Force Scan</b> reads all battery levels immediately. A new drain sample only records if the level has changed since the last reading.</div>"
         }
 
         section("<b>💡 Tips for Best Results</b>") {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
-                      "• Let new batteries run for at least a week before trusting health ratings<br>" +
-                      "• Assign battery types in 🔋 Device Battery Management — used in the portal and notifications<br>" +
-                      "• Set Scan Interval to Hourly to build health ratings faster<br>" +
-                      "• After replacing a battery, log it in 🔋 Device Battery Management<br>" +
-                      "• Use Bulk Actions when replacing batteries in multiple devices at once<br>" +
+                      "• Let new batteries run at least a week before trusting health ratings<br>" +
+                      "• Assign battery types in 🔋 Device Battery Management — used in notifications and the portal<br>" +
+                      "• After replacing a battery, log it in 🔋 Device Battery Management or use Bulk Actions for multiple devices<br>" +
+                      "• If a replacement isn't auto-detected, log it manually — auto-detection requires a jump from ≤40% to ≥90% with 3+ prior samples<br>" +
                       "• Use Ignored Devices for spare or storage devices you don't want to monitor<br>" +
-                      "• Use Reset Drain History on locks and sensors if they show Heavy Drain after first install<br>" +
-                      "• Use Notification Snooze when traveling<br>" +
-                      "• After updating the app, switch to Hourly scan temporarily to rebuild sample data faster<br>" +
-                      "• Enable OAuth in App Code to unlock the Web Portal</div>"
+                      "• Use Reset Drain History if a device shows incorrect Heavy Drain after first install<br>" +
+                      "• Use Notification Snooze when traveling</div>"
         }
     }
 }
