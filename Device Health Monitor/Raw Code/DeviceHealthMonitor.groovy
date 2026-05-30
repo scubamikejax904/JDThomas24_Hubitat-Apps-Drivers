@@ -2098,11 +2098,14 @@ def getHealthEmoji(h) {
 // ============================================================
 def safeTime(ts) {
     if (ts == null) return null
-    if (ts instanceof Number) return ts
+    if (ts instanceof Number) return ts.toLong()
     try {
         def t = ts?.time
-        if (t instanceof Number) return t
-        if (t?.toString()?.isNumber()) return t.toString().toLong()
+        if (t instanceof Number) return t.toLong()
+        def s = t?.toString() ?: ts?.toString()
+        if (!s) return null
+        // Handle scientific notation (e.g. "72E3" from some device firmware values)
+        if (s.isNumber()) return new BigDecimal(s).toLong()
         return null
     } catch (e) {
         return null
