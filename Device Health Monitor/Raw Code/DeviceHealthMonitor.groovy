@@ -320,7 +320,7 @@ def findKonnectedPanel(device) {
         def parts    = dni.split("-")
         def parentId = parts[0]
         def suffix   = parts.size() > 1 ? parts[1] : ""
-        if (suffix.isNumber() && suffix.toLong() > 1000) {
+        if (suffix.isNumber() && new BigDecimal(suffix).toLong() > 1000) {
             def panel = monitoredPanels.find { d -> d.id == parentId }
             if (panel) return panel
         }
