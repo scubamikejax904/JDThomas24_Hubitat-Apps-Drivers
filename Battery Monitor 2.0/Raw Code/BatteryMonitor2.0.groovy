@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.5.29",
+    version: "2.5.30",
     doNotFocus: true,
     oauth: true
 )
@@ -379,7 +379,7 @@ def mainPage() {
 
         section("<b>Diagnostics</b>") {
             input "debugMode", "bool", title: "Debug Logging (auto-disables after 30 min)", defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Battery Monitor v2.5.29</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Battery Monitor v2.5.30</span>"
         }
     }
 }
@@ -680,9 +680,7 @@ def updateBattery(device, level) {
     detectReplacement(device, level, data.lastLevel)
 
     def replacedAt = data.replacedTime ?: now()
-    if (data.justReplaced && level < 95) {
-        data.justReplaced = false
-    } else if (data.justReplaced && (now() - safeTime(replacedAt)) > 1000 * 60 * 60 * 24) {
+    if (data.justReplaced && (now() - safeTime(replacedAt)) > 1000 * 60 * 60 * 24) {
         data.justReplaced = false
     }
 
@@ -786,7 +784,7 @@ def detectReplacement(device, newLevel, oldLevel) {
         }
     }
 
-    // v2.5.29: Simplified detection — any upward jump of minJump% or more qualifies.
+    // v2.5.29→v2.5.30: Simplified detection — any upward jump of minJump% or more qualifies.
     // Batteries only drain naturally; any significant upward jump means a new battery was installed.
     def minJump   = (settings?.detectionMinJump ?: 30).toInteger()
     def largeJump = newLevel - oldLevel
@@ -1321,7 +1319,7 @@ tr:hover td{background:#1a1a1a}
         }
 
         html.append("</tbody></table>")
-        html.append("<p style='text-align:center;font-size:10px;color:#444;margin-top:20px;'>Battery Monitor v2.5.29 &nbsp;·&nbsp; jdthomas24</p>")
+        html.append("<p style='text-align:center;font-size:10px;color:#444;margin-top:20px;'>Battery Monitor v2.5.30 &nbsp;·&nbsp; jdthomas24</p>")
         html.append("</div></body></html>")
 
         return render(contentType: "text/html", data: html.toString(), status: 200)
@@ -1612,7 +1610,7 @@ def batteryTypesPage() {
     typeOptions["_sep3"] = "──────── Other ────────"
     typeOptions["Other"] = "Other"
 
-    // v2.5.29: Split into two sections — unassigned first, assigned collapsed
+    // v2.5.29→v2.5.30: Split into two sections — unassigned first, assigned collapsed
     // Fix: "Other" without custom text entered counts as unassigned
     def unassigned = devList.findAll { dev ->
         def t = settings["battType_${dev.id}"] ?: ""
