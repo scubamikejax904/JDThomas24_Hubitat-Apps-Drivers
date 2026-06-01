@@ -1,12 +1,12 @@
 {
   "packageName": "Battery Monitor 2.0",
   "author": "Jdthomas24",
-  "version": "2.4.29",
+  "version": "2.4.30",
   "category": "Convenience",
   "description": "Advanced Hubitat battery monitoring with analytics, trends and replacement tracking. Recurring scan schedule, confidence-weighted health, EWMA smoothing.",
   "dateReleased": "4/8/26",
   "minimumHEVersion": "2.3.0",
-  "releaseNotes": "v2.4.29:UI overhaul, simplified auto-detection, and new device management improvements.",
+  "releaseNotes": "v2.5.30 — Bug fix for Recently Replaced badge not displaying after auto-detection.",
   "apps": [
     {
       "name": "Battery Monitor 2.0",
