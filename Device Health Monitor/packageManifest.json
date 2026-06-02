@@ -6,7 +6,7 @@
   "description": "Monitor device check-in health across Zigbee, Z-Wave, Matter, Hub Mesh, LAN, Virtual and Hub Variable — learns each device's normal pattern and alerts you when something goes quiet.",
   "dateReleased": "4/28/26",
   "minimumHEVersion": "2.3.0",
-  "releaseNotes": "v1.5.3 False positive reduction: loosened thresholds (Poor now requires 6× baseline), protocol-aware baseline floors (LAN/Hub Mesh min 8h), pingable devices held at Fair for one scan before reaching Poor, slower baseline learning, state-change verification window extended to full offline threshold.\n1.5.4 Bug fix: hub reboot mid-scan no longer leaves isScanning stuck permanently — scan state is now unconditionally reset on initialize.",
+  "releaseNotes": "v1.5.5 — Verified devices can no longer be rated Poor or Offline..",
   "apps": [
     {
       "id": "a045ac2b-5fe0-4159-830b-8550899d9553",
