@@ -1,6 +1,6 @@
 /**
  * Device Health Monitor
- * Version: 1.5.4
+ * Version: 1.5.5
  *
  * Author: jdthomas24
  */
@@ -14,7 +14,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "",
     iconX2Url: "",
-    version: "1.5.4",
+    version: "1.5.5",
     doNotFocus: true,
     oauth: true
 )
@@ -1234,7 +1234,7 @@ def mainPage() {
             input "debugMode", "bool",
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.5.4</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.5.5</span>"
         }
     }
 }
@@ -1886,6 +1886,19 @@ def updateHealth(device) {
         // Device recovered — clear fairHold so next drop gets a fresh hold cycle
         def fh = state.fairHold ?: [:]
         if (fh.containsKey(id as String)) { fh.remove(id as String); state.fairHold = fh }
+    }
+
+    // v1.5.5: Verified devices cannot be Poor or Offline
+    // If a device responded to a refresh/ping it is provably reachable — cap at Fair.
+    // This prevents false Poor/Offline ratings for devices whose getLastActivity()
+    // does not update in response to command-triggered state reports (common in Z-Wave).
+    if (currentHealth in ["Poor", "Offline"]) {
+        def capChk = state.deviceCapabilities?.get(id as String) ?: [:]
+        if (capChk.pingWorks == true) {
+            state.health[id] = "Fair"
+            currentHealth    = "Fair"
+            if (debugEnabled()) log.debug "${device.displayName}: capped at Fair — device is verified reachable via ping/refresh"
+        }
     }
 
     def prevHealth = state.prevHealth?.get(id as String)
