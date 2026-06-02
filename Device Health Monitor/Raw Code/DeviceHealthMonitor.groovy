@@ -1,6 +1,6 @@
 /**
  * Device Health Monitor
- * Version: 1.5.5
+ * Version: 1.5.6
  *
  * Author: jdthomas24
  */
@@ -14,7 +14,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "",
     iconX2Url: "",
-    version: "1.5.5",
+    version: "1.5.6",
     doNotFocus: true,
     oauth: true
 )
@@ -1224,17 +1224,27 @@ def mainPage() {
             href(name: "toInfoPage", page: "infoPage",
                  title: "📖 App Guide & Reference",
                  description: "Health scoring, state tracking, portal setup, and troubleshooting explained")
-            href url: "https://community.hubitat.com/t/release-device-health-monitor/163229",
-                 style: "external",
-                 title: "💬 Hubitat Community Thread",
-                 description: "Questions, feedback, and release notes"
+            paragraph rawHtml: true, """
+<div style='padding:4px 0;'>
+  <a href='https://community.hubitat.com/t/release-device-health-monitor/163229' target='_blank'
+     style='display:block; background:#f8f8f8; border:1px solid #ddd; border-radius:6px; padding:10px 14px; text-decoration:none; color:#333; margin-bottom:6px;'>
+    <span style='font-size:14px;'>💬 <b>Hubitat Community Thread</b></span><br>
+    <span style='font-size:12px; color:#888;'>Questions, feedback, and release notes</span>
+  </a>
+  <a href='https://paypal.me/jdthomas24?locale.x=en_US&country.x=US' target='_blank'
+     style='display:block; background:#f8f8f8; border:1px solid #ddd; border-radius:6px; padding:10px 14px; text-decoration:none; color:#333;'>
+    <span style='font-size:14px;'>☕ <b>Buy Me a Coffee</b></span><br>
+    <span style='font-size:12px; color:#888;'>Enjoying the app? Any amount is appreciated — thank you!</span>
+  </a>
+</div>
+"""
         }
 
         section("<b>Diagnostics</b>") {
             input "debugMode", "bool",
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.5.5</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.5.6</span>"
         }
     }
 }
@@ -1673,10 +1683,27 @@ def processScanChunk() {
 
             def lastActivity = device.getLastActivity()
             def lastSeen     = (lastActivity ? safeTime(lastActivity) : null) ?: now()
+            // v1.5.6: Also consider lastKnownStateDate from previous scans
+            def capMapPre  = state.deviceCapabilities ?: [:]
+            def prevKnown  = capMapPre[id as String]?.lastKnownStateDate as Long ?: 0
+            if (prevKnown > lastSeen) lastSeen = prevKnown
 
             try {
                 def stateDate = device.currentStates?.collect { safeTime(it.date) }?.findAll { it }?.max()
                 if (stateDate && stateDate > lastSeen) lastSeen = stateDate
+                // v1.5.6: Store lastKnownStateDate separately so verified refresh responses
+                // advance lastSeen even when getLastActivity() does not update (common in Z-Wave).
+                def capMapLS  = state.deviceCapabilities ?: [:]
+                def capKeyLS  = id as String
+                def capDataLS = capMapLS[capKeyLS] ?: [:]
+                def prevStateDate = capDataLS.lastKnownStateDate as Long ?: 0
+                if (stateDate && stateDate > prevStateDate) {
+                    capDataLS.lastKnownStateDate = stateDate
+                    capMapLS[capKeyLS] = capDataLS
+                    state.deviceCapabilities = capMapLS
+                    // If this is newer than what getLastActivity returned, use it as lastSeen
+                    if (stateDate > lastSeen) lastSeen = stateDate
+                }
             } catch (e) {
                 if (debugEnabled()) log.debug "currentStates date check error for ${device.displayName}: ${e.message}"
             }
@@ -2090,7 +2117,12 @@ def getHealthDisplay(device) {
             def extStateTag = getExtendedStateTag(device)
             def lowSuffix   = (lowActivity && !extStateTag) ? " <span style='color:#94a3b8;font-size:10px;'>ℹ️ Low Activity Device</span>" : ""
             def healthEmoji = h == "Fair" ? "🟠" : "🟢"
-            return "${healthEmoji} ${h}${extStateTag}${lowSuffix}"
+            // v1.5.6: Verified + Fair devices display as "Quiet" — reachable but idle
+            def capChk      = state.deviceCapabilities?.get(device.id as String) ?: [:]
+            def isVerified  = capChk.pingWorks == true
+            def displayLabel = (h == "Fair" && isVerified) ? "Quiet" : h
+            def quietSuffix  = (h == "Fair" && isVerified) ? " <span style='color:#94a3b8;font-size:10px;'>verified reachable</span>" : ""
+            return "${healthEmoji} ${displayLabel}${extStateTag}${lowSuffix}${quietSuffix}"
         default: return "${h}"
     }
 }
