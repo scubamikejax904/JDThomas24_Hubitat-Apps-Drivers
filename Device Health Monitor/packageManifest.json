@@ -1,12 +1,12 @@
 {
   "packageName": "Device Health Monitor",
   "author": "Jdthomas24",
-  "version": "1.5.6",
+  "version": "1.5.7",
   "category": "Monitoring",
   "description": "Monitor device check-in health across Zigbee, Z-Wave, Matter, Hub Mesh, LAN, Virtual and Hub Variable — learns each device's normal pattern and alerts you when something goes quiet.",
   "dateReleased": "4/28/26",
   "minimumHEVersion": "2.3.0",
-  "releaseNotes": "v1.5.6 — Quiet label for verified idle devices, lastSeen accuracy fix, and external link fix.",
+  "releaseNotes": "v1.5.7 — Stale ping verification now expires after offlineThresholdHours — prevents dead battery devices from being permanently masked as Quiet verified reachable.",
   "apps": [
     {
       "id": "a045ac2b-5fe0-4159-830b-8550899d9553",
