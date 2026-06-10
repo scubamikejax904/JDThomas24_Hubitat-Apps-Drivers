@@ -1120,16 +1120,19 @@ def mainPage() {
             "Mode: <span style='color:${modeOn ? "blue" : "red"};'>${modeOn ? modeLabel : "off"}</span>${scanningLabel}"
 
         section(monitoringTitle, hideable: true, hidden: true) {
+            paragraph "<hr style='background-color:#eee; height:1px; border:0; margin:4px 0 10px 0;'/>"
             paragraph "<b>Scan Interval</b> — how often device activity is checked and health ratings are updated."
             input "scanInterval", "enum",
                   title: "Scan Frequency:",
                   options: ["0.5": "Every 30 Minutes", "1": "Hourly", "3": "Every 3 Hours", "6": "Every 6 Hours"],
                   defaultValue: "3", submitOnChange: true
 
-            paragraph "<b>Offline after inactivity (hours)</b> — devices with no activity beyond this threshold are marked Offline."
+            paragraph "<hr style='background-color:#eee; height:1px; border:0; margin:10px 0;'/>"
+            paragraph "<b>Offline after inactivity (hours)</b> — devices with no activity beyond this threshold are marked Offline. Also controls how long a verified ping is trusted before re-verification is required."
             input "offlineThresholdHours", "number", title: "Offline after inactivity (hours):",
                   defaultValue: 168, required: true, submitOnChange: true
 
+            paragraph "<hr style='background-color:#eee; height:1px; border:0; margin:10px 0;'/>"
             paragraph "<b>Snooze</b> — enable or disable snooze globally."
             input "enableSnooze", "bool", title: "Enable snooze", defaultValue: false, submitOnChange: true
             if (snoozeEnabled()) {
@@ -1143,7 +1146,7 @@ def mainPage() {
             def deepEnabled   = settings?.enableDeepScan == true
             def deepTitle     = "<b>Deep Verification Scan</b> — <span style='color:${deepEnabled ? "blue" : "#94a3b8"};'>${deepEnabled ? "Scheduled" : "Off"}</span>"
 
-            paragraph "<hr style='background-color:#eee; height:1px; border:0; margin:8px 0;'/>"
+            paragraph "<hr style='background-color:#eee; height:1px; border:0; margin:10px 0;'/>"
             paragraph deepTitle
             paragraph "<b>Last run:</b> ${deepResultStr}"
             input "enableDeepScan", "bool", title: "Schedule — runs once then auto-disables:", defaultValue: false, submitOnChange: true
@@ -1151,8 +1154,8 @@ def mainPage() {
                 input "deepScanTime", "time", title: "Run at:", required: true
             }
             input "btnRunDeepScan", "button", title: "▶ Run Now"
-            paragraph "<hr style='background-color:#eee; height:1px; border:0; margin:8px 0;'/>"
 
+            paragraph "<hr style='background-color:#eee; height:1px; border:0; margin:10px 0;'/>"
             paragraph "<b>Mode Restriction</b> — optionally restrict notifications to specific hub modes."
             input "enableModeRestriction", "bool", title: "Enable mode restriction for notifications",
                   defaultValue: false, submitOnChange: true
