@@ -407,6 +407,10 @@ void localExecute(String command, String args = null) {
     def param = args ? convertNumbers((new JsonSlurper().parseText(args))) : []
     logInfo "localExecute: command=${command} param=${param}"
 
+    // Purge stale pending commands older than 60s to prevent state bloat
+    if (!state.pendingCmds) state.pendingCmds = [:]
+    state.pendingCmds = state.pendingCmds.findAll { k, v -> (now() - (v?.ts ?: 0)) < 60000 }
+
     Integer id = (Integer) (state.sequence++ & 0xFFFFFFFF)
     String deviceId = getDeviceId()
     if (!deviceId) { logWarn "no device ID — run syncFromCloud first"; return }
@@ -417,23 +421,23 @@ void localExecute(String command, String args = null) {
     Map inner = [id: id, method: command, params: param]
     String payload = JsonOutput.toJson([t: timestamp, dps: ["$protocol": JsonOutput.toJson(inner)]])
 
-    byte[] message = buildLocalMessage(deviceId, protocol, timestamp, payload.getBytes("UTF-8"))
+    // Try WITHOUT 4-byte length prefix first (standard Roborock local protocol)
+    byte[] message = buildLocalMessage(deviceId, protocol, timestamp, payload.getBytes("UTF-8"), false)
 
-    // Track pending command for response matching
-    if (!state.pendingCmds) state.pendingCmds = [:]
     state.pendingCmds[id.toString()] = [command: command, param: param, ts: now()]
 
     try {
         interfaces.rawSocket.sendMessage(message.encodeHex().toString())
-        logDebug "sent local command id=${id} command=${command}"
+        logDebug "sent local command id=${id} command=${command} bytes=${message.length}"
     } catch (Exception e) {
         logWarn "local send failed: ${e.message} — reconnecting"
         state.localConnected = false
+        state.pendingCmds.remove(id.toString())
         scheduleReconnect()
     }
 }
 
-byte[] buildLocalMessage(String deviceId, Integer protocol, Integer timestamp, byte[] payload) {
+byte[] buildLocalMessage(String deviceId, Integer protocol, Integer timestamp, byte[] payload, Boolean withLengthPrefix = false) {
     String localKey = getLocalKey(deviceId)
     if (!localKey) { logWarn "no localKey for device ${deviceId}"; return new byte[0] }
 
@@ -443,15 +447,15 @@ byte[] buildLocalMessage(String deviceId, Integer protocol, Integer timestamp, b
     Random random = new Random()
     Integer randomInt = random.nextInt(900000) + 100000
 
-    // Local protocol: 4-byte length prefix + standard header + payload
-    // Header: version(3) + sequence(4) + random(4) + timestamp(4) + protocol(2) + payloadLen(2)
+    // Standard Roborock binary frame:
+    // version(3) + sequence(4) + random(4) + timestamp(4) + protocol(2) + payloadLen(2) + payload(N) + CRC32(4)
     int headerLen = 19
     int totalMsgLen = headerLen + encrypted.length + 4  // +4 for CRC32
     byte[] msg = new byte[totalMsgLen]
 
     // version "1.0"
     msg[0] = 49; msg[1] = 46; msg[2] = 48
-    writeInt32BE(msg, (Integer) (state.sequence & 0xFFFFFFFF), 3)
+    writeInt32BE(msg, (Integer) (id & 0xFFFFFFFF), 3)       // use message id as sequence
     writeInt32BE(msg, (Integer) (randomInt & 0xFFFFFFFF), 7)
     writeInt32BE(msg, timestamp, 11)
     writeInt16BE(msg, protocol, 15)
@@ -460,14 +464,15 @@ byte[] buildLocalMessage(String deviceId, Integer protocol, Integer timestamp, b
     Integer crc32 = CRC32(msg, msg.length - 4)
     writeInt32BE(msg, crc32, msg.length - 4)
 
-    // Local TCP wraps with 4-byte big-endian length prefix
-    int frameLen = totalMsgLen
-    byte[] frame = new byte[4 + frameLen]
-    frame[0] = (byte) ((frameLen >> 24) & 0xFF)
-    frame[1] = (byte) ((frameLen >> 16) & 0xFF)
-    frame[2] = (byte) ((frameLen >> 8) & 0xFF)
-    frame[3] = (byte) (frameLen & 0xFF)
-    for (Integer i = 0; i < frameLen; i++) { frame[4 + i] = msg[i] }
+    if (!withLengthPrefix) return msg
+
+    // Optional 4-byte big-endian length prefix (some firmware variants require this)
+    byte[] frame = new byte[4 + totalMsgLen]
+    frame[0] = (byte) ((totalMsgLen >> 24) & 0xFF)
+    frame[1] = (byte) ((totalMsgLen >> 16) & 0xFF)
+    frame[2] = (byte) ((totalMsgLen >> 8) & 0xFF)
+    frame[3] = (byte) (totalMsgLen & 0xFF)
+    for (Integer i = 0; i < totalMsgLen; i++) { frame[4 + i] = msg[i] }
     return frame
 }
 
@@ -484,29 +489,44 @@ def parse(String hexMessage) {
 }
 
 void parseLocalMessage(byte[] raw) {
-    // Strip 4-byte length prefix if present
+    // Always log first 32 bytes in debug so we can see what the vacuum is actually sending
+    logDebug "parseLocalMessage raw[${raw.length}]: ${raw.take(Math.min(32, raw.length)).encodeHex()}"
+
+    // Auto-detect framing: try with and without 4-byte length prefix
     byte[] message = raw
     if (raw.length > 4) {
         Integer declaredLen = readInt32BE(raw, 0)
         if (declaredLen == raw.length - 4) {
+            logDebug "detected 4-byte length prefix, stripping"
             message = raw[4..(raw.length - 1)] as byte[]
         }
     }
 
-    if (message.length < 23) { logWarn "message too short: ${message.length}"; return }
+    if (message.length < 23) {
+        logWarn "message too short (${message.length} bytes) — raw: ${raw.take(Math.min(16, raw.length)).encodeHex()}"
+        return
+    }
 
     String version = bytesToString(message, 0, 3)
-    if (version != "1.0") { logWarn "unexpected version: ${version}"; return }
+    if (version != "1.0") {
+        logWarn "unexpected version: ${version} — first bytes: ${message.take(8).encodeHex()}"
+        return
+    }
 
     Integer crc32 = CRC32(message, message.length - 4)
     Integer expectedCrc = readInt32BE(message, message.length - 4)
-    if (crc32 != expectedCrc) { logWarn "CRC mismatch"; return }
+    if (crc32 != expectedCrc) {
+        logWarn "CRC mismatch got=${Integer.toHexString(crc32 & 0xFFFFFFFFL)} expected=${Integer.toHexString(expectedCrc & 0xFFFFFFFFL)}"
+        return
+    }
 
     Integer timestamp  = readInt32BE(message, 11)
     Integer protocol   = readInt16BE(message, 15)
     Integer payloadLen = readInt16BE(message, 17)
 
-    if (protocol != 102) { logDebug "ignoring protocol ${protocol}"; return }
+    logDebug "frame ok: version=${version} protocol=${protocol} payloadLen=${payloadLen}"
+
+    if (protocol != 102) { logDebug "ignoring non-102 protocol ${protocol}"; return }
 
     byte[] payload = message[19..(19 + payloadLen - 1)]
     String deviceId = getDeviceId()
@@ -520,7 +540,8 @@ void parseLocalMessage(byte[] raw) {
     try {
         jsonObject = new JsonSlurper().parseText(new String(decrypted, "UTF-8"))
     } catch (Exception e) {
-        logWarn "response not JSON: ${e.message}"; return
+        logWarn "response not JSON: ${e.message} decrypted[${decrypted.length}]: ${decrypted.take(Math.min(32,decrypted.length)).encodeHex()}"
+        return
     }
 
     if (!jsonObject) return
