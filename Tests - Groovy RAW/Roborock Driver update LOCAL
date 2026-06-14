@@ -740,14 +740,14 @@ String getVacuumIP() {
 }
 
 String getBaseURL() {
-    String uri = settings.regionUri
+    String uri = settings.regionUri?.toString()
     String response = null
     try {
         httpPostJson(uri: uri, path: "/api/v1/getUrlByEmail",
-                     queryString: "email=${URLEncoder.encode(settings.username, 'UTF-8')}") { resp ->
+                     queryString: ("email=" + URLEncoder.encode(settings.username?.toString(), 'UTF-8')).toString()) { resp ->
             if (resp.status == 200) {
-                response = resp.data?.data?.url
-                if (response && response != settings.regionUri) state.base = response
+                response = resp.data?.data?.url?.toString()
+                if (response && response != settings.regionUri?.toString()) state.base = response
             }
         }
     } catch (Exception e) { logWarn "getBaseURL error: ${e.message}" }
@@ -755,12 +755,15 @@ String getBaseURL() {
 }
 
 Map login() {
-    String uri = getBaseURL() ?: settings.regionUri
+    String uri = (getBaseURL() ?: settings.regionUri?.toString()).toString()
     Map response = [:]
     try {
+        String queryString = ("username=" + URLEncoder.encode(settings.username?.toString(), 'UTF-8') +
+                              "&password=" + URLEncoder.encode(settings.password?.toString(), 'UTF-8') +
+                              "&needtwostepauth=false").toString()
         httpPostJson(uri: uri, path: "/api/v1/login",
-                     queryString: "username=${URLEncoder.encode(settings.username, 'UTF-8')}&password=${URLEncoder.encode(settings.password, 'UTF-8')}&needtwostepauth=false",
-                     headers: ['header_clientid': generateHash(settings.username)]) { resp ->
+                     queryString: queryString,
+                     headers: ['header_clientid': generateHash(settings.username?.toString())]) { resp ->
             if (resp.status == 200) {
                 response = resp.data
                 if (resp.data?.msg == "success") storeJsonState("login", datetimestring(), resp.data)
@@ -773,12 +776,13 @@ Map login() {
 }
 
 Map sendEmailCode() {
-    String uri = getBaseURL() ?: settings.regionUri
+    String uri = (getBaseURL() ?: settings.regionUri?.toString()).toString()
     Map response = [:]
     try {
+        String queryString = ("username=" + URLEncoder.encode(settings.username?.toString(), 'UTF-8') + "&type=auth").toString()
         httpPostJson(uri: uri, path: "/api/v1/sendEmailCode",
-                     queryString: "username=${URLEncoder.encode(settings.username, 'UTF-8')}&type=auth",
-                     headers: ['header_clientid': generateHash(settings.username)]) { resp ->
+                     queryString: queryString,
+                     headers: ['header_clientid': generateHash(settings.username?.toString())]) { resp ->
             if (resp.status == 200) response = resp.data
         }
     } catch (Exception e) { logWarn "sendEmailCode error: ${e.message}" }
@@ -786,12 +790,15 @@ Map sendEmailCode() {
 }
 
 Map loginWithCode(String verifyCode) {
-    String uri = getBaseURL() ?: settings.regionUri
+    String uri = (getBaseURL() ?: settings.regionUri?.toString()).toString()
     Map response = [:]
     try {
+        String queryString = ("username=" + URLEncoder.encode(settings.username?.toString(), 'UTF-8') +
+                              "&verifycode=" + URLEncoder.encode(verifyCode?.toString(), 'UTF-8') +
+                              "&verifycodetype=AUTH_EMAIL_CODE").toString()
         httpPostJson(uri: uri, path: "/api/v1/loginWithCode",
-                     queryString: "username=${URLEncoder.encode(settings.username, 'UTF-8')}&verifycode=${URLEncoder.encode(verifyCode, 'UTF-8')}&verifycodetype=AUTH_EMAIL_CODE",
-                     headers: ['header_clientid': generateHash(settings.username)]) { resp ->
+                     queryString: queryString,
+                     headers: ['header_clientid': generateHash(settings.username?.toString())]) { resp ->
             response = resp.data
             if (resp.data?.msg == "success") storeJsonState("login", datetimestring(), resp.data)
         }
@@ -803,9 +810,10 @@ Map loginWithCode(String verifyCode) {
 
 void getHomeDetail() {
     Map params = [
-        uri: state?.base ?: settings.regionUri, path: "/api/v1/getHomeDetail",
-        headers: ['header_clientid': (md5hex(settings.username).bytes.encodeBase64().toString()),
-                  'Authorization': (getLoginData()?.token)]
+        uri: (state?.base ?: settings.regionUri?.toString()).toString(),
+        path: "/api/v1/getHomeDetail",
+        headers: ['header_clientid': (md5hex(settings.username?.toString()).bytes.encodeBase64().toString()),
+                  'Authorization': (getLoginData()?.token?.toString())]
     ]
     try { asynchttpGet("asyncHttpCallback", params, [method: "getHomeDetail", store: "homeDetail", params: params]) }
     catch (Exception e) { logWarn "getHomeDetail error: ${e}" }
@@ -977,9 +985,11 @@ String getHawkAuthentication(String id, String secret, String key, String path) 
 }
 
 String generateHash(String username) {
+    String u = username?.toString() ?: ""
+    String dni = device.deviceNetworkId?.toString() ?: ""
     MessageDigest md = MessageDigest.getInstance("MD5")
-    md.update(username.bytes)
-    md.update(device.deviceNetworkId.bytes)
+    md.update(u.getBytes("UTF-8"))
+    md.update(dni.getBytes("UTF-8"))
     return md.digest().encodeBase64().toString()
 }
 
