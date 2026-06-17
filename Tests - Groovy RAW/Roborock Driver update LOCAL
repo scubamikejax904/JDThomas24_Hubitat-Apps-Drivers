@@ -18,15 +18,26 @@
  *    - No real-time push events; status updates on 30-second poll cycle
  *    - Room mapping and scenes require manual syncFromCloud after changes
  *    - Map data not supported (always cloud-only per Roborock)
- *    - Some newer firmware variants may behave differently locally
  *
- *  IMPORTANT: Give your vacuum a static/reserved IP in your router before using.
+ *  ── SHELVED: Waiting on Hubitat platform update ──────────────────────────────
+ *  STATUS: interfaces.rawSocket parse() does NOT fire on binary TCP responses
+ *          from the vacuum. Commands send successfully but responses are silently
+ *          dropped by Hubitat — confirmed via packet capture (data reaches hub).
  *
- *  Protocol reference:
- *    https://github.com/KonradIT/roborock-remote
- *    https://python-roborock.github.io/local_roborock_server/technical_writeup/
+ *  WHAT NEEDS TO CHANGE WHEN HE ADDS SUPPORT:
+ *    - Replace interfaces.rawSocket.sendMessage() in localExecute() with the
+ *      new synchronous sendAndReceive() call (or equivalent)
+ *    - Move response handling directly into localExecute() inline
+ *    - Remove parse() and parseLocalMessage() — no longer needed
+ *    - Remove localConnect()/localDisconnect()/socketStatus()/scheduleReconnect()
+ *      — persistent connection management not needed for synchronous calls
+ *
+ *  Feature request submitted to Hubitat developers: June 2026
+ *  Request: synchronous blocking method on interfaces.rawSocket —
+ *           send bytes and return response in same call (like httpPost pattern)
+ *  ─────────────────────────────────────────────────────────────────────────────
  */
-public static String version() { return "0.1.0-local-poc" }
+public static String version() { return "0.1.0-local-poc-shelved" }
 
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
@@ -65,90 +76,90 @@ metadata {
         capability "Switch"
         capability "PushableButton"
 
-        // ── Cloud login (one-time setup) ──────────────────────────────
-        command "zRequestEmailCode"
-        command "zAuthorizeEmailCode", [[type: "STRING", description: "REQUIRED: Enter CODE provided by Roborock"]]
+        // ── Primary vacuum controls ───────────────────────────────────
+        command "vacuumStart"
+        command "vacuumDock"
+        command "vacuumPause"
+        command "vacuumResume"
 
-        // ── Vacuum commands (sent over local TCP) ─────────────────────
-        command "appClean"
-        command "appDock"
-        command "appPause"
-        command "appRoomResume"
-        command "appRoomClean", [
+        // ── Room/Scene ────────────────────────────────────────────────
+        command "vacuumRooms", [
             [name: "Room IDs*",  type: "STRING", description: "Comma or space delimited Room IDs"],
             [name: "MopWater",   type: "ENUM",   description: "Mop water mode. Optional.", constraints: mopWaterModeCodes.values().collect { it.toUpperCase() }]
         ]
-        command "appScene",  [[name: "Scene ID*", type: "STRING", description: "Single Scene ID"]]
-        command "execute",   [[name: "command*",  type: "STRING", description: "Raw command to send locally"],
-                              [name: "params",    type: "JSON_OBJECT", description: "Command parameters"]]
-        command "selectDevice"
+        command "vacuumScene",  [[name: "Scene ID*", type: "STRING", description: "Single Scene ID"]]
 
-        // ── Cloud sync (on-demand only) ───────────────────────────────
-        command "syncFromCloud", [[name: "Description", type: "STRING",
-            description: "Re-fetches rooms, scenes and home data from Roborock cloud. Run after adding/renaming rooms or scenes."]]
+        // ── Maintenance ───────────────────────────────────────────────
+        command "syncFromCloud"
+
+        // ── Setup only ────────────────────────────────────────────────
+        command "zLogin"
+        command "zEmailCode", [[name: "PIN*", type: "STRING", description: "Enter PIN from Roborock email"]]
+
+        // ── DIAGNOSTIC — remove after parse() confirmed working ───────
+        command "testLocalRaw"
 
         // ── Attributes ────────────────────────────────────────────────
-        attribute "dustCollection",                "enum",   ["off", "on"]
-        attribute "dockError",                     "enum",   dockErrorCodes.values().collect { it.toLowerCase() }
-        attribute "name",                          "string"
-        attribute "state",                         "enum",   stateCodes.values().collect { it.toLowerCase() }
-        attribute "error",                         "enum",   errorCodes.values().collect { it.toLowerCase() }
-        attribute "fanPower",                      "enum",   fanPowerCodes.values().collect { it.toLowerCase() }
-        attribute "cleanTime (min)",               "number"
-        attribute "cleanArea (sq ft)",             "number"
-        attribute "cleanPercent (%)",              "number"
-        attribute "remainingFilter (%)",           "number"
-        attribute "remainingMainBrush (%)",        "number"
-        attribute "remainingSensors (%)",          "number"
-        attribute "remainingSideBrush (%)",        "number"
+        attribute "dustCollection",                   "enum",   ["off", "on"]
+        attribute "dockError",                        "enum",   dockErrorCodes.values().collect { it.toLowerCase() }
+        attribute "name",                             "string"
+        attribute "state",                            "enum",   stateCodes.values().collect { it.toLowerCase() }
+        attribute "error",                            "enum",   errorCodes.values().collect { it.toLowerCase() }
+        attribute "fanPower",                         "enum",   fanPowerCodes.values().collect { it.toLowerCase() }
+        attribute "cleanTime (min)",                  "number"
+        attribute "cleanArea (sq ft)",                "number"
+        attribute "cleanPercent (%)",                 "number"
+        attribute "remainingFilter (%)",              "number"
+        attribute "remainingMainBrush (%)",           "number"
+        attribute "remainingSensors (%)",             "number"
+        attribute "remainingSideBrush (%)",           "number"
         attribute "remainingHighSpeedMaintBrush (%)", "number"
-        attribute "locating",                      "enum",   ["true", "false"]
-        attribute "mopMode",                       "enum",   mopModeCodes.values().collect { it.toLowerCase() }
-        attribute "mopWaterMode",                  "enum",   mopWaterModeCodes.values().collect { it.toLowerCase() }
-        attribute "healthStatus",                  "enum",   ["offline", "online"]
-        attribute "roomsList",                     "string"
-        attribute "scenesList",                    "string"
-        attribute "localIP",                       "string"
-        attribute "connectionMode",                "enum",   ["local", "cloud", "offline"]
-        attribute "html",                          "string"
-        attribute "xxTile",                        "string"
+        attribute "locating",                         "enum",   ["true", "false"]
+        attribute "mopMode",                          "enum",   mopModeCodes.values().collect { it.toLowerCase() }
+        attribute "mopWaterMode",                     "enum",   mopWaterModeCodes.values().collect { it.toLowerCase() }
+        attribute "healthStatus",                     "enum",   ["offline", "online"]
+        attribute "roomsList",                        "string"
+        attribute "scenesList",                       "string"
+        attribute "localIP",                          "string"
+        attribute "connectionMode",                   "enum",   ["local", "cloud", "offline"]
+        attribute "html",                             "string"
+        attribute "xxTile",                           "string"
     }
 }
 
 preferences {
-    input(name: "username",      type: "string",   title: "<b>Roborock Username:</b>",       required: true,  width: 4)
-    input(name: "password",      type: "password", title: "<b>Roborock Password:</b>",       required: true,  width: 4)
-    input(name: "regionUri",     type: "enum",     title: "<b>Account Region:</b>",
+    input(name: "username",    type: "string",   title: "<b>Roborock Username:</b>",     required: true,  width: 4)
+    input(name: "password",    type: "password", title: "<b>Roborock Password:</b>",     required: true,  width: 4)
+    input(name: "regionUri",   type: "enum",     title: "<b>Account Region:</b>",
           options: ["https://usiot.roborock.com": "US", "https://euiot.roborock.com": "EU",
                     "https://cniot.roborock.com": "CN", "https://ruiot.roborock.com": "RU"],
           defaultValue: "https://usiot.roborock.com", required: true, width: 4)
-    input(name: "deviceIP",      type: "string",   title: "<b>Vacuum Local IP Address:</b>",
-          description: "<i>Set a static/reserved IP on your router first.</i>", required: false, width: 4)
-    input(name: "allowLogin",    type: "bool",     title: "<b>Authorize Account User Login:</b>",
-          defaultValue: true, width: 4,
-          description: "<i>Enable to re/attempt initial cloud login. Disable after successful login.</i>")
-    input(name: "pollInterval",  type: "enum",     title: "<b>Local Poll Interval:</b>",
-          options: ["15": "15 Seconds", "30": "30 Seconds", "60": "1 Minute", "120": "2 Minutes"],
+    input(name: "deviceIP",    type: "string",   title: "<b>Vacuum Local IP Address:</b>",
+          description: "<i>Assign a static/reserved IP in your router first.</i>", required: false, width: 4)
+    input(name: "allowLogin",  type: "bool",     title: "<b>Authorize Account Login:</b>",
+          description: "<i>Enable to re/attempt cloud login. Auto-disables after success.</i>",
+          defaultValue: true, width: 4)
+    input(name: "pollInterval", type: "enum",    title: "<b>Local Poll Interval:</b>",
+          options: ["30": "30 Seconds", "60": "1 Minute", "120": "2 Minutes"],
           defaultValue: "30", required: true, width: 4)
-    input(name: "areaUnit",      type: "enum",     title: "<b>Device Area Unit:</b>",
+    input(name: "areaUnit",    type: "enum",     title: "<b>Area Unit:</b>",
           options: ["0": "Square Foot (ft²)", "1": "Square Meter (m²)"],
           defaultValue: "0", required: true, width: 4)
-    input(name: "numberOfButtons", type: "number", title: "<b>Set Number of Buttons:</b>",
-          range: "1...", defaultValue: 1, required: true, width: 4)
+    input(name: "tileEnable",  type: "bool",     title: "<b>Enable HTML Tile</b> (html attribute):",    defaultValue: false, width: 4)
+    input(name: "xxTileEnable", type: "bool",    title: "<b>Enable Dashboard Tile</b> (xxTile attribute):", defaultValue: false, width: 4)
     input(name: "cleanAttributeDisable", type: "bool",
-          title: "<b>Reduce cleaning progress events:</b>",
-          description: "When ON: cleanPercent, cleanArea and cleanTime only update at cycle end.",
+          title: "<b>Reduce Cleaning Progress Events:</b>",
+          description: "ON: cleanPercent/Area/Time only update at cycle end.",
           defaultValue: true, width: 4)
     input(name: "offlineThreshold", type: "number",
           title: "<b>Offline Threshold (seconds):</b>",
-          description: "<i>How many seconds of failed polls before marking offline. Prevents false offline events.</i>",
+          description: "<i>Seconds of failed polls before marking offline.</i>",
           defaultValue: 90, range: "30..300", width: 4)
-    input(name: "tileEnable",    type: "bool",     title: "<b>Enable full HTML tile</b> (html attribute):",   defaultValue: false, width: 4)
-    input(name: "xxTileEnable",  type: "bool",     title: "<b>Enable dashboard tile</b> (xxTile attribute):", defaultValue: false, width: 4)
-    input(name: "deviceLogging", type: "enum",     title: "<b>Logging:</b>",
-          options: ["off": "Off (errors/warnings only)", "info30": "Info — auto-off after 30 min",
-                    "info60": "Info — auto-off after 60 min", "debug30": "Debug — auto-off after 30 min",
-                    "debug60": "Debug — auto-off after 60 min"],
+    input(name: "numberOfButtons", type: "number", title: "<b>Number of Buttons:</b>",
+          range: "1...", defaultValue: 1, required: true, width: 4)
+    input(name: "deviceLogging", type: "enum",   title: "<b>Logging:</b>",
+          options: ["off": "Off (errors/warnings only)", "info30": "Info 30 min",
+                    "info60": "Info 60 min", "debug30": "Debug 30 min", "debug60": "Debug 60 min"],
           defaultValue: "off", width: 4)
 }
 
@@ -205,12 +216,20 @@ def initialize() {
             processEvent("state", 500)
         }
     } else if (state?.login) {
-        // Already have credentials — skip cloud, go straight to local
         runIn(2, "startLocalMode")
     }
 }
 
-// ── Cloud login flow (one-time) ───────────────────────────────────────────────
+// ── Command aliases ───────────────────────────────────────────────────────────
+def vacuumStart()              { appClean() }
+def vacuumDock()               { appDock() }
+def vacuumPause()              { appPause() }
+def vacuumResume()             { appRoomResume() }
+def vacuumRooms(String rooms, String mopWater = mopWaterModeCodes[0]) { appRoomClean(rooms, mopWater) }
+def vacuumScene(String sceneId) { appScene(sceneId) }
+def zLogin()                   { zRequestEmailCode() }
+def zEmailCode(String pin)     { zAuthorizeEmailCode(pin) }
+
 def zRequestEmailCode() {
     if (state.sendEmailCodeTimestamp) {
         Long remaining = (state.sendEmailCodeTimestamp as Long) + 60000 - now()
@@ -238,6 +257,37 @@ def zAuthorizeEmailCode(String pin) {
     }
 }
 
+// ── DIAGNOSTIC: testLocalRaw ──────────────────────────────────────────────────
+// Call this command from the device page to verify parse() fires on local TCP.
+// Watch the Hubitat logs immediately after pressing the button.
+// SUCCESS: you will see "parse() CALLED" and raw hex bytes in the log.
+// FAILURE: only "testLocalRaw: command sent" appears and nothing more.
+def testLocalRaw() {
+    log.warn "${device.displayName} testLocalRaw: closing any existing socket"
+    try { interfaces.rawSocket.close() } catch (Exception e) { /* ignore */ }
+    pauseExecution(500)
+
+    String ip = getVacuumIP()
+    if (!ip) {
+        log.error "${device.displayName} testLocalRaw: no IP — set 'Vacuum Local IP Address' in preferences first"
+        return
+    }
+
+    log.warn "${device.displayName} testLocalRaw: connecting to ${ip}:${ROBOROCK_LOCAL_PORT} with readDelay:500"
+    try {
+        // readDelay:500 — waits 500ms between reads, known to help parse() fire on binary responses
+        interfaces.rawSocket.connect(ip, ROBOROCK_LOCAL_PORT, byteInterface: true, readDelay: 500)
+        state.localConnected = true
+        log.warn "${device.displayName} testLocalRaw: connected — pausing 1s then sending get_status"
+        pauseExecution(1000)
+        localExecute("get_prop", """["get_status"]""")
+        log.warn "${device.displayName} testLocalRaw: command sent — if parse() fires you will see it below within 3s"
+    } catch (Exception e) {
+        log.error "${device.displayName} testLocalRaw: connect/send failed: ${e.message}"
+        state.localConnected = false
+    }
+}
+
 // ── Local TCP mode ────────────────────────────────────────────────────────────
 void startLocalMode() {
     logInfo "starting local TCP mode"
@@ -252,6 +302,7 @@ void startLocalMode() {
     sendEvent(name: "connectionMode", value: "local")
     localConnect()
     schedulePoll()
+    runIn(6, "forceTileUpdate")
 }
 
 void localConnect() {
@@ -259,10 +310,13 @@ void localConnect() {
     if (!ip) return
     logInfo "connecting local TCP to ${ip}:${ROBOROCK_LOCAL_PORT}"
     try {
-        interfaces.rawSocket.connect(ip, ROBOROCK_LOCAL_PORT, byteInterface: true, readDelay: 150)
+        // readDelay:500 — critical for parse() to fire on binary TCP responses in Hubitat
+        interfaces.rawSocket.connect(ip, ROBOROCK_LOCAL_PORT, byteInterface: true, readDelay: 500)
         state.localConnected = true
         state.lastLocalSuccess = now()
-        logInfo "local TCP connected"
+        logInfo "local TCP connected — marking online, sending initial probe"
+        runIn(1, "setOnlineFromConnect")
+        runIn(2, "doPollCommands")
     } catch (Exception e) {
         logWarn "local TCP connect failed: ${e.message}"
         state.localConnected = false
@@ -306,13 +360,10 @@ void checkOfflineThreshold() {
 void schedulePoll() {
     Integer interval = (settings?.pollInterval ?: "30").toInteger()
     logDebug "scheduling poll every ${interval}s"
-    // Unschedule any existing poll jobs then re-schedule
     unschedule('pollStatus')
-    if (interval == 15)  runEvery15Seconds('pollStatus')  // not standard — use runIn loop
-    else if (interval == 30) schedule("0/${interval} * * * * ?", "pollStatus")
-    else if (interval == 60) runEvery1Minute('pollStatus')
+    if (interval == 30)  schedule("0/${interval} * * * * ?", "pollStatus")
+    else if (interval == 60)  runEvery1Minute('pollStatus')
     else if (interval == 120) runEvery2Minutes('pollStatus')
-    // kick off first poll immediately
     runIn(2, "pollStatus")
 }
 
@@ -324,11 +375,16 @@ void pollStatus() {
     } else {
         doPollCommands()
     }
+    runIn(4, "forceTileUpdate")
+}
+
+void forceTileUpdate() {
+    if (settings?.tileEnable)   updateTile()
+    if (settings?.xxTileEnable) updateXxTile()
 }
 
 void doPollCommands() {
     localExecute("get_prop", """["get_status"]""")
-    // Stagger consumable poll — only every 5th cycle to reduce traffic
     state.pollCount = ((state?.pollCount ?: 0).toInteger() + 1)
     if (state.pollCount % 5 == 0) {
         runIn(2, "pollConsumables")
@@ -369,7 +425,6 @@ def refresh(Map data = [type: 1]) {
     logDebug "executing 'refresh()'"
     pollStatus()
     if (data?.type == 1) {
-        // Full refresh — also re-check home data every 2 min
         Long last = state?.lastHomeDataRefresh ?: 0
         if ((now() - last) > 120000) {
             state.lastHomeDataRefresh = now()
@@ -389,27 +444,24 @@ def selectDevice() {
     }
 }
 
-// ── Cloud sync command (on-demand) ────────────────────────────────────────────
 def syncFromCloud(String ignored = null) {
     logInfo "syncFromCloud — fetching rooms, scenes, home data from cloud"
     sendEvent(name: "connectionMode", value: "cloud")
     runIn(1, "getHomeDetail")
 }
 
-// Lightweight local room sync — just re-runs get_room_mapping over local TCP
 void syncRoomsLocal() {
     logDebug "syncing room mapping locally"
     localExecute("get_room_mapping")
 }
 
-// ── Local TCP send/receive ─────────────────────────────────────────────────────
+// ── Local TCP send ─────────────────────────────────────────────────────────────
 void localExecute(String command, String args = null) {
     def param = args ? convertNumbers((new JsonSlurper().parseText(args))) : []
     logInfo "localExecute: command=${command} param=${param}"
 
-    // Purge stale pending commands older than 60s to prevent state bloat
     if (!state.pendingCmds) state.pendingCmds = [:]
-    state.pendingCmds = state.pendingCmds.findAll { k, v -> (now() - (v?.ts ?: 0)) < 60000 }
+    state.pendingCmds = state.pendingCmds.findAll { k, v -> v != null && ((now() - ((v?.ts ?: 0L) as Long)) < 60000L) }
 
     Integer id = (Integer) (state.sequence++ & 0xFFFFFFFF)
     String deviceId = getDeviceId()
@@ -421,9 +473,7 @@ void localExecute(String command, String args = null) {
     Map inner = [id: id, method: command, params: param]
     String payload = JsonOutput.toJson([t: timestamp, dps: ["$protocol": JsonOutput.toJson(inner)]])
 
-    // Try WITHOUT 4-byte length prefix first (standard Roborock local protocol)
-    byte[] message = buildLocalMessage(deviceId, protocol, timestamp, payload.getBytes("UTF-8"), false)
-
+    byte[] message = buildLocalMessage(deviceId, id, protocol, timestamp, payload.getBytes("UTF-8"), false)
     state.pendingCmds[id.toString()] = [command: command, param: param, ts: now()]
 
     try {
@@ -437,7 +487,7 @@ void localExecute(String command, String args = null) {
     }
 }
 
-byte[] buildLocalMessage(String deviceId, Integer protocol, Integer timestamp, byte[] payload, Boolean withLengthPrefix = false) {
+byte[] buildLocalMessage(String deviceId, Integer msgId, Integer protocol, Integer timestamp, byte[] payload, Boolean withLengthPrefix = false) {
     String localKey = getLocalKey(deviceId)
     if (!localKey) { logWarn "no localKey for device ${deviceId}"; return new byte[0] }
 
@@ -447,15 +497,12 @@ byte[] buildLocalMessage(String deviceId, Integer protocol, Integer timestamp, b
     Random random = new Random()
     Integer randomInt = random.nextInt(900000) + 100000
 
-    // Standard Roborock binary frame:
-    // version(3) + sequence(4) + random(4) + timestamp(4) + protocol(2) + payloadLen(2) + payload(N) + CRC32(4)
     int headerLen = 19
-    int totalMsgLen = headerLen + encrypted.length + 4  // +4 for CRC32
+    int totalMsgLen = headerLen + encrypted.length + 4
     byte[] msg = new byte[totalMsgLen]
 
-    // version "1.0"
     msg[0] = 49; msg[1] = 46; msg[2] = 48
-    writeInt32BE(msg, (Integer) (id & 0xFFFFFFFF), 3)       // use message id as sequence
+    writeInt32BE(msg, (Integer) (msgId & 0xFFFFFFFF), 3)
     writeInt32BE(msg, (Integer) (randomInt & 0xFFFFFFFF), 7)
     writeInt32BE(msg, timestamp, 11)
     writeInt16BE(msg, protocol, 15)
@@ -466,7 +513,6 @@ byte[] buildLocalMessage(String deviceId, Integer protocol, Integer timestamp, b
 
     if (!withLengthPrefix) return msg
 
-    // Optional 4-byte big-endian length prefix (some firmware variants require this)
     byte[] frame = new byte[4 + totalMsgLen]
     frame[0] = (byte) ((totalMsgLen >> 24) & 0xFF)
     frame[1] = (byte) ((totalMsgLen >> 16) & 0xFF)
@@ -477,22 +523,37 @@ byte[] buildLocalMessage(String deviceId, Integer protocol, Integer timestamp, b
 }
 
 // ── Parse incoming local TCP messages ────────────────────────────────────────
-// Hubitat calls parse(String hex) for rawSocket byteInterface
 def parse(String hexMessage) {
-    logDebug "parse() received ${hexMessage?.length()} hex chars"
+    // Hardcoded warn so this shows even without debug logging enabled
+    log.warn "${device.displayName} parse() CALLED — ${hexMessage?.length()} hex chars received"
     try {
+        if (!hexMessage || hexMessage.length() < 2) {
+            logWarn "parse() got empty/short message"
+            return
+        }
         byte[] raw = hexMessage.decodeHex()
         parseLocalMessage(raw)
     } catch (Exception e) {
-        logWarn "parse() error: ${e.message}"
+        logWarn "parse() error: ${e.message} input: ${hexMessage?.take(40)}"
+    }
+}
+
+def parse(Map message) {
+    log.warn "${device.displayName} parse(Map) CALLED — ${message}"
+    if (message?.payload) {
+        try {
+            byte[] raw = message.payload instanceof String ?
+                message.payload.decodeHex() : (byte[])message.payload
+            parseLocalMessage(raw)
+        } catch (Exception e) {
+            logWarn "parse(Map) error: ${e.message}"
+        }
     }
 }
 
 void parseLocalMessage(byte[] raw) {
-    // Always log first 32 bytes in debug so we can see what the vacuum is actually sending
     logDebug "parseLocalMessage raw[${raw.length}]: ${raw.take(Math.min(32, raw.length)).encodeHex()}"
 
-    // Auto-detect framing: try with and without 4-byte length prefix
     byte[] message = raw
     if (raw.length > 4) {
         Integer declaredLen = readInt32BE(raw, 0)
@@ -503,7 +564,7 @@ void parseLocalMessage(byte[] raw) {
     }
 
     if (message.length < 23) {
-        logWarn "message too short (${message.length} bytes) — raw: ${raw.take(Math.min(16, raw.length)).encodeHex()}"
+        logWarn "message too short (${message.length} bytes)"
         return
     }
 
@@ -540,14 +601,13 @@ void parseLocalMessage(byte[] raw) {
     try {
         jsonObject = new JsonSlurper().parseText(new String(decrypted, "UTF-8"))
     } catch (Exception e) {
-        logWarn "response not JSON: ${e.message} decrypted[${decrypted.length}]: ${decrypted.take(Math.min(32,decrypted.length)).encodeHex()}"
+        logWarn "response not JSON: ${e.message}"
         return
     }
 
     if (!jsonObject) return
     logDebug "parsed local response: ${jsonObject}"
 
-    // Mark as online since we got a valid response
     state.lastLocalSuccess = now()
     state.localConnected = true
     setHealthStatusOnline()
@@ -556,20 +616,28 @@ void parseLocalMessage(byte[] raw) {
 }
 
 void processLocalResponse(Map resp) {
-    // Response format: { id: N, result: [...] } or { dps: {...} }
-    if (resp?.result != null) {
-        Integer id = resp?.id?.toInteger()
-        Map pending = state?.pendingCmds?.get(id?.toString())
+    logDebug "processLocalResponse: ${resp?.keySet()}"
 
-        // Clean up pending
-        if (pending) {
-            state.pendingCmds.remove(id.toString())
-            logDebug "matched response for command: ${pending?.command}"
+    if (resp?.result != null) {
+        Integer msgId = resp?.id?.toInteger()
+        Map pending = (msgId != null) ? state?.pendingCmds?.get(msgId.toString()) : null
+
+        if (pending && msgId != null) {
+            state.pendingCmds.remove(msgId.toString())
+            logDebug "matched response id=${msgId} command=${pending?.command}"
         }
 
         String cmd = pending?.command ?: ""
 
-        if (cmd == "get_prop" || resp?.result?.any { it instanceof Map && it.containsKey("state") }) {
+        boolean isStatus = (cmd == "get_prop") ||
+                           (resp?.result instanceof List && resp.result.any { it instanceof Map && it.containsKey("state") }) ||
+                           (resp?.result instanceof List && resp.result.any { it instanceof Map && it.containsKey("battery") })
+
+        boolean isConsumable = (cmd == "get_consumable") ||
+                               (resp?.result instanceof List && resp.result.any { it instanceof Map && it.containsKey("main_brush_work_time") })
+
+        if (isStatus) {
+            logDebug "processing status response"
             resp?.result?.each { result ->
                 if (result instanceof Map) {
                     result.switch = ((result?.in_cleaning ?: 0).toInteger() != 0 ||
@@ -582,7 +650,8 @@ void processLocalResponse(Map resp) {
             }
             if (settings?.tileEnable)   scheduleTileUpdate()
             if (settings?.xxTileEnable) scheduleXxTileUpdate()
-        } else if (cmd == "get_consumable") {
+        } else if (isConsumable) {
+            logDebug "processing consumable response"
             resp?.result?.each { result ->
                 if (result instanceof Map) result?.each { c, v -> processEvent(c as String, v) }
             }
@@ -595,14 +664,23 @@ void processLocalResponse(Map resp) {
         } else if (resp?.result == ["ok"] || resp?.result == ["OK"]) {
             logInfo "command '${cmd}' accepted"
             runIn(3, "pollStatus")
+        } else if (resp?.result instanceof List && !resp.result.isEmpty()) {
+            logDebug "attempting generic result processing for cmd=${cmd}"
+            resp.result.each { result ->
+                if (result instanceof Map) result?.each { c, v -> processEvent(c as String, v) }
+            }
+            if (settings?.tileEnable)   scheduleTileUpdate()
+            if (settings?.xxTileEnable) scheduleXxTileUpdate()
         } else {
-            logDebug "unhandled response for cmd=${cmd}: ${resp}"
+            logDebug "unhandled response cmd=${cmd} result=${resp?.result}"
         }
     } else if (resp?.dps) {
-        // Unsolicited DPS push from vacuum
+        logDebug "processing DPS push: ${resp.dps?.keySet()}"
         resp.dps.each { key, value -> processEvent(key as String, value) }
         if (settings?.tileEnable)   scheduleTileUpdate()
         if (settings?.xxTileEnable) scheduleXxTileUpdate()
+    } else {
+        logDebug "processLocalResponse: no result or dps found in ${resp}"
     }
 }
 
@@ -611,7 +689,17 @@ void setHealthStatusOnline() {
     if (current != "online") {
         processEvent("healthStatus", "online")
         sendEvent(name: "connectionMode", value: "local")
+        if (settings?.tileEnable)   scheduleTileUpdate()
+        if (settings?.xxTileEnable) scheduleXxTileUpdate()
     }
+}
+
+void setOnlineFromConnect() {
+    logInfo "TCP connected — marking online"
+    processEvent("healthStatus", "online")
+    sendEvent(name: "connectionMode", value: "local")
+    if (settings?.tileEnable)   runIn(2, "updateTile")
+    if (settings?.xxTileEnable) runIn(3, "updateXxTile")
 }
 
 // ── Cloud home data (one-time / on-demand) ────────────────────────────────────
@@ -623,7 +711,6 @@ void getHomeDataCallback() {
         processEvent("state", 256)
     }
 
-    // Save device IP from home data if not already set by user preference
     if (!settings?.deviceIP) {
         String ip = getHomeDataResult()?.devices?.find { it.duid?.toString() == getDeviceId() }?.ip
         if (ip) {
@@ -635,21 +722,13 @@ void getHomeDataCallback() {
     String name = getHomeDataResult()?.devices?.find { it.duid?.toString() == getDeviceId() }?.name ?: "unknown"
     processEvent("name", name)
 
-    // Pull rooms and scenes from cloud, then switch to local
-    localExecute_afterCloudSync()
-    runIn(5, "startLocalMode")
-}
-
-void localExecute_afterCloudSync() {
-    // We still have cloud MQTT available right after cloud sync — use HTTP instead
-    // Room mapping is stored in home data already; process it now
     setRoomsValueFromHomeData()
     getDeviceScenes()
+    runIn(5, "startLocalMode")
 }
 
 void setRoomsValueFromHomeData() {
     Map homeData = getHomeDataResult()
-    // Try to build room map from home data rooms list
     Map roomsMap = homeData?.rooms?.collectEntries { [(it.id.toString()): it.name] }
     if (roomsMap) {
         processEvent("rooms", roomsMap?.sort())
@@ -657,7 +736,7 @@ void setRoomsValueFromHomeData() {
     }
 }
 
-// ── processEvent — identical to original driver ───────────────────────────────
+// ── processEvent ──────────────────────────────────────────────────────────────
 void processEvent(String name, def value) {
     logTrace "processEvent($name, $value)"
     switch (name) {
@@ -755,7 +834,7 @@ void sendEventX(Map x) {
     }
 }
 
-// ── Cloud API calls (login + home data — one-time) ────────────────────────────
+// ── Cloud API calls ───────────────────────────────────────────────────────────
 String getVacuumIP() {
     return settings?.deviceIP ?: state?.discoveredIP
 }
@@ -923,7 +1002,7 @@ void setRoomsValue(Map get_room_mapping) {
     }
 }
 
-// ── Crypto & binary helpers (identical to original) ──────────────────────────
+// ── Crypto & binary helpers ───────────────────────────────────────────────────
 byte[] decrypt(byte[] payload, String key) {
     byte[] aesKeyBytes = md5bin(key)
     Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding")
@@ -1025,7 +1104,7 @@ def convertNumbers(element) {
     return element
 }
 
-// ── State storage helpers (identical to original) ─────────────────────────────
+// ── State storage helpers ─────────────────────────────────────────────────────
 void storeJsonState(String name, String visible, Map hidden) {
     String encoded64 = JsonOutput.toJson(hidden).getBytes("UTF-8").encodeBase64().toString()
     state[name] = """<root><span class="visible-data">[ date: ${visible}, size: ${encoded64.size()} ]</span><span class="hidden-data" style="display:none;" data-hidden="${encoded64}">${name} placeholder</span></root>"""
@@ -1090,177 +1169,78 @@ void cleanStaleAttributes() {
           ?.each { n -> if (stale.contains(n)) { device.deleteCurrentState(n); logInfo "removed stale: $n" } }
 }
 
-// ── Tile helpers (identical to original) ──────────────────────────────────────
+// ── Tile helpers ──────────────────────────────────────────────────────────────
 @Field volatile static Map<Long, Long> g_mLastTileTime   = [:]
 @Field volatile static Map<Long, Long> g_mLastXxTileTime = [:]
 
 void scheduleTileUpdate() {
     Long last = g_mLastTileTime[device.getIdAsLong()] ?: 0
-    if ((now() - last) > 60000) { g_mLastTileTime[device.getIdAsLong()] = now(); runIn(2, "updateTile") }
-    else runIn(65, "updateTile")
+    if ((now() - last) > 30000) { g_mLastTileTime[device.getIdAsLong()] = now(); runIn(2, "updateTile") }
+    else runIn(35, "updateTile")
 }
 
 void scheduleXxTileUpdate() {
     Long last = g_mLastXxTileTime[device.getIdAsLong()] ?: 0
-    if ((now() - last) > 60000) { g_mLastXxTileTime[device.getIdAsLong()] = now(); runIn(3, "updateXxTile") }
-    else runIn(66, "updateXxTile")
+    if ((now() - last) > 30000) { g_mLastXxTileTime[device.getIdAsLong()] = now(); runIn(3, "updateXxTile") }
+    else runIn(36, "updateXxTile")
 }
 
 void updateTile() {
     if (!settings?.tileEnable) return
-
-    Closure a = { String n ->
-        def v = device.currentValue(n)
-        if (v == null) return null
-        def s = v.toString().trim()
-        (s == "" || s == "null") ? null : s
-    }
-    Closure aNum = { String n ->
-        def v = a(n); if (v == null) return null
-        try { return v.toDouble() } catch(e) { return null }
-    }
-
-    String  nameVal   = a("name")                        ?: device.displayName
-    String  stateVal  = a("state")
-    String  healthVal = a("healthStatus")
-    String  errorVal  = a("error")
-    Double  battVal   = aNum("battery")
-    Double  cleanTime = aNum("cleanTime (min)")
-    Double  cleanArea = aNum("cleanArea (sq ft)")
-    Double  cleanPct  = aNum("cleanPercent (%)")
-    Double  filterPct = aNum("remainingFilter (%)")
-    Double  mainPct   = aNum("remainingMainBrush (%)")
-    Double  sidePct   = aNum("remainingSideBrush (%)")
-    String  dustVal   = a("dustCollection")
-    String  roomsVal  = a("roomsList")
-
-    String stateDisp   = stateVal ? stateVal.capitalize() : "Unknown"
-    boolean online     = (healthVal == "online")
-    boolean hasError   = errorVal && errorVal != "no error"
-    boolean isCleaning = stateVal in ["cleaning","spot cleaning","room clean","zone clean","go to","mapping"]
-    boolean isDocked   = stateVal in ["charged","charging","docking","returning dock","emptying dust bin","washing the mop"]
-
-    String dotBg    = online ? "#1a4731" : "#4a1515"
-    String dotColor = online ? "#4ade80" : "#f87171"
-    String dotLabel = online ? "Online"  : "Offline"
-    String stateBg  = isCleaning ? "#0d3060" : isDocked ? "#0d2a1a" : "#162032"
-    String stateColor = isCleaning ? "#60a5fa" : isDocked ? "#4ade80" : "#94a3b8"
-    String battLine = battVal != null ? " &nbsp;&#183;&nbsp; ${battVal.toInteger()}%" : ""
-
-    String dustHtml = ""
-    if (dustVal != null) {
-        String dustBg    = dustVal == "on" ? "#1a3a6e" : "#1a2535"
-        String dustColor = dustVal == "on" ? "#60a5fa" : "#475569"
-        dustHtml = "<span style='font-size:10px;background:${dustBg};color:${dustColor};padding:2px 8px;border-radius:8px;margin-left:6px;'>Dust: ${dustVal}</span>"
-    }
-
-    String errorHtml = ""
-    if (hasError) {
-        errorHtml = """<tr><td colspan='2' style='padding:0 12px 6px 12px;'>
-  <div style='background:#4a1515;color:#fca5a5;border-radius:6px;padding:5px 9px;font-size:11px;'>&#9888; ${errorVal.capitalize()}</div>
-</td></tr>"""
-    }
-
-    String progressHtml = ""
-    if (isCleaning && cleanPct != null) {
-        int cp = Math.max(0, Math.min(100, cleanPct.toInteger()))
-        progressHtml = """<tr><td colspan='2' style='padding:6px 12px 0 12px;'>
-  <table style='width:100%;border-collapse:collapse;'>
-  <tr>
-    <td style='font-size:10px;color:#64748b;width:1%;white-space:nowrap;padding-right:8px;'>Progress</td>
-    <td style='padding:0;'><div style='background:#1e3a5f;border-radius:3px;height:6px;'><div style='background:#3b82f6;border-radius:3px;height:6px;width:${cp}%;'></div></div></td>
-    <td style='font-size:11px;color:#60a5fa;font-weight:bold;width:1%;white-space:nowrap;padding-left:8px;'>${cp}%</td>
-  </tr></table>
-</td></tr>"""
-    }
-
-    String statsHtml = ""
-    if (cleanTime != null || cleanArea != null) {
-        String cleaningLabel = isCleaning ? "Current" : "Last"
-        List parts = []
-        if (cleanTime != null) parts << "${cleanTime.toInteger()} min"
-        if (cleanArea != null) parts << "${cleanArea.toInteger()} sq ft"
-        statsHtml = "<div style='font-size:11px;color:#64748b;margin-top:3px;'>${cleaningLabel}: ${parts.join(' &nbsp;&#183;&nbsp; ')}</div>"
-    }
-
-    Closure bar = { Double pct, String label ->
-        int p = Math.max(0, Math.min(100, pct.toInteger()))
-        String bc    = p >= 50 ? "#16a34a" : p >= 25 ? "#d97706" : "#dc2626"
-        String track = p >= 50 ? "#0d2a1a" : p >= 25 ? "#2a1a05" : "#2a0a0a"
-        String pc2   = p >= 50 ? "#4ade80" : p >= 25 ? "#fbbf24" : "#f87171"
-        String bold  = p < 25 ? "font-weight:bold;" : ""
-        "<tr><td style='font-size:11px;color:#64748b;padding:3px 8px 3px 0;white-space:nowrap;width:1%;'>${label}</td><td style='padding:3px 0;'><div style='background:${track};border-radius:3px;height:5px;'><div style='background:${bc};border-radius:3px;height:5px;width:${p}%;'></div></div></td><td style='font-size:11px;color:${pc2};padding:3px 0 3px 8px;white-space:nowrap;width:1%;text-align:right;${bold}'>${p}%</td></tr>"
-    }
-
-    boolean hasBars = (filterPct != null || mainPct != null || sidePct != null)
-    String barsHtml = ""
-    if (hasBars) {
-        String rows = ""
-        if (filterPct != null) rows += bar(filterPct, "Filter")
-        if (mainPct   != null) rows += bar(mainPct,   "Main brush")
-        if (sidePct   != null) rows += bar(sidePct,   "Side brush")
-        barsHtml = "<tr><td colspan='2' style='padding:8px 12px 0 12px;border-top:1px solid #1e3a5f;'><table style='width:100%;border-collapse:collapse;'>${rows}</table></td></tr>"
-    }
-
-    String roomsHtml = ""
-    if (roomsVal) {
-        List allRooms = roomsVal.split("\\|").collect { it.trim() }
-        int extra     = allRooms.size() - 5
-        List shown    = allRooms.take(5)
-        String suffix = extra > 0 ? " <span style='color:#334d6e;'>+${extra} more</span>" : ""
-        roomsHtml = "<tr><td colspan='2' style='padding:6px 12px 0 12px;border-top:1px solid #1e3a5f;'><div style='font-size:10px;color:#64748b;line-height:1.6;'>${shown.join(' &nbsp;&#183;&nbsp; ')}${suffix}</div></td></tr>"
-    }
-
-    String ts = new Date().format("MM/dd HH:mm", location.timeZone)
-    String html = "<table style='width:100%;border-collapse:collapse;font-family:sans-serif;background:#0a1628;border-radius:10px;'>${errorHtml}<tr><td colspan='2' style='padding:10px 12px 6px 12px;'><table style='width:100%;border-collapse:collapse;'><tr><td style='font-size:13px;font-weight:bold;color:#e2e8f0;'>${nameVal}${dustHtml}</td><td style='text-align:right;'><span style='font-size:10px;background:${dotBg};color:${dotColor};padding:2px 9px;border-radius:10px;font-weight:bold;'>${dotLabel}</span></td></tr></table></td></tr><tr><td colspan='2' style='padding:0 12px 6px 12px;'><div style='background:${stateBg};border-radius:7px;padding:8px 10px;border-left:3px solid ${stateColor};'><div style='font-size:15px;font-weight:bold;color:#f1f5f9;'>${stateDisp}${battLine}</div>${statsHtml}</div></td></tr>${progressHtml}${barsHtml}${roomsHtml}<tr><td colspan='2' style='padding:6px 12px 8px 12px;text-align:right;font-size:10px;color:#1e3a5f;'>${ts}</td></tr></table>"
-
-    logDebug "html tile chars: ${html.length()}"
+    Closure a = { String n -> def v=device.currentValue(n); if(v==null)return null; def s=v.toString().trim(); (s==""||s=="null")?null:s }
+    Closure aNum = { String n -> def v=a(n); if(v==null)return null; try{return v.toDouble()}catch(e){return null} }
+    String nameVal=a("name")?:device.displayName; String stateVal=a("state"); String healthVal=a("healthStatus"); String errorVal=a("error")
+    Double battVal=aNum("battery"); Double cleanTime=aNum("cleanTime (min)"); Double cleanArea=aNum("cleanArea (sq ft)"); Double cleanPct=aNum("cleanPercent (%)")
+    Double filterPct=aNum("remainingFilter (%)"); Double mainPct=aNum("remainingMainBrush (%)"); Double sidePct=aNum("remainingSideBrush (%)")
+    String dustVal=a("dustCollection"); String roomsVal=a("roomsList")
+    String stateDisp=stateVal?stateVal.capitalize():"Unknown"
+    boolean online=(healthVal=="online"); boolean hasError=errorVal&&errorVal!="no error"
+    boolean isCleaning=stateVal in ["cleaning","spot cleaning","room clean","zone clean","go to","mapping"]
+    boolean isDocked=stateVal in ["charged","charging","docking","returning dock","emptying dust bin","washing the mop"]
+    String dotBg=online?"#1a4731":"#4a1515"; String dotColor=online?"#4ade80":"#f87171"; String dotLabel=online?"Online":"Offline"
+    String stateBg=isCleaning?"#0d3060":isDocked?"#0d2a1a":"#162032"; String stateColor=isCleaning?"#60a5fa":isDocked?"#4ade80":"#94a3b8"
+    String battLine=battVal!=null?" &nbsp;&#183;&nbsp; ${battVal.toInteger()}%":""
+    String dustHtml=dustVal!=null?"<span style='font-size:10px;background:${dustVal=='on'?'#1a3a6e':'#1a2535'};color:${dustVal=='on'?'#60a5fa':'#475569'};padding:2px 8px;border-radius:8px;margin-left:6px;'>Dust: ${dustVal}</span>":""
+    String errorHtml=hasError?"<tr><td colspan='2' style='padding:0 12px 6px 12px;'><div style='background:#4a1515;color:#fca5a5;border-radius:6px;padding:5px 9px;font-size:11px;'>&#9888; ${errorVal.capitalize()}</div></td></tr>":""
+    String progressHtml=""
+    if(isCleaning&&cleanPct!=null){int cp=Math.max(0,Math.min(100,cleanPct.toInteger()));progressHtml="<tr><td colspan='2' style='padding:6px 12px 0 12px;'><table style='width:100%;border-collapse:collapse;'><tr><td style='font-size:10px;color:#64748b;width:1%;white-space:nowrap;padding-right:8px;'>Progress</td><td style='padding:0;'><div style='background:#1e3a5f;border-radius:3px;height:6px;'><div style='background:#3b82f6;border-radius:3px;height:6px;width:${cp}%;'></div></div></td><td style='font-size:11px;color:#60a5fa;font-weight:bold;width:1%;white-space:nowrap;padding-left:8px;'>${cp}%</td></tr></table></td></tr>"}
+    String statsHtml=""
+    if(cleanTime!=null||cleanArea!=null){String cl=isCleaning?"Current":"Last";List pts=[];if(cleanTime!=null)pts<<"${cleanTime.toInteger()} min";if(cleanArea!=null)pts<<"${cleanArea.toInteger()} sq ft";statsHtml="<div style='font-size:11px;color:#64748b;margin-top:3px;'>${cl}: ${pts.join(' &nbsp;&#183;&nbsp; ')}</div>"}
+    Closure bar={Double pct,String label->int p=Math.max(0,Math.min(100,pct.toInteger()));String bc=p>=50?"#16a34a":p>=25?"#d97706":"#dc2626";String track=p>=50?"#0d2a1a":p>=25?"#2a1a05":"#2a0a0a";String pc2=p>=50?"#4ade80":p>=25?"#fbbf24":"#f87171";String bold=p<25?"font-weight:bold;":"";return "<tr><td style='font-size:11px;color:#64748b;padding:3px 8px 3px 0;white-space:nowrap;width:1%;'>${label}</td><td style='padding:3px 0;'><div style='background:${track};border-radius:3px;height:5px;'><div style='background:${bc};border-radius:3px;height:5px;width:${p}%;'></div></div></td><td style='font-size:11px;color:${pc2};padding:3px 0 3px 8px;white-space:nowrap;width:1%;text-align:right;${bold}'>${p}%</td></tr>"}
+    boolean hasBars=(filterPct!=null||mainPct!=null||sidePct!=null); String barsHtml=""
+    if(hasBars){String rows="";if(filterPct!=null)rows+=bar(filterPct,"Filter");if(mainPct!=null)rows+=bar(mainPct,"Main brush");if(sidePct!=null)rows+=bar(sidePct,"Side brush");barsHtml="<tr><td colspan='2' style='padding:8px 12px 0 12px;border-top:1px solid #1e3a5f;'><table style='width:100%;border-collapse:collapse;'>${rows}</table></td></tr>"}
+    String roomsHtml=""
+    if(roomsVal){List allR=roomsVal.split("\\|").collect{it.trim()};int extra=allR.size()-5;List shown=allR.take(5);String suf=extra>0?" <span style='color:#334d6e;'>+${extra} more</span>":"";roomsHtml="<tr><td colspan='2' style='padding:6px 12px 0 12px;border-top:1px solid #1e3a5f;'><div style='font-size:10px;color:#64748b;line-height:1.6;'>${shown.join(' &nbsp;&#183;&nbsp; ')}${suf}</div></td></tr>"}
+    String ts=new Date().format("MM/dd HH:mm",location.timeZone)
+    String html="<table style='width:100%;border-collapse:collapse;font-family:sans-serif;background:#0a1628;border-radius:10px;'>${errorHtml}<tr><td colspan='2' style='padding:10px 12px 6px 12px;'><table style='width:100%;border-collapse:collapse;'><tr><td style='font-size:13px;font-weight:bold;color:#e2e8f0;'>${nameVal}${dustHtml}</td><td style='text-align:right;'><span style='font-size:10px;background:${dotBg};color:${dotColor};padding:2px 9px;border-radius:10px;font-weight:bold;'>${dotLabel}</span></td></tr></table></td></tr><tr><td colspan='2' style='padding:0 12px 6px 12px;'><div style='background:${stateBg};border-radius:7px;padding:8px 10px;border-left:3px solid ${stateColor};'><div style='font-size:15px;font-weight:bold;color:#f1f5f9;'>${stateDisp}${battLine}</div>${statsHtml}</div></td></tr>${progressHtml}${barsHtml}${roomsHtml}<tr><td colspan='2' style='padding:6px 12px 8px 12px;text-align:right;font-size:10px;color:#1e3a5f;'>${ts}</td></tr></table>"
     g_mLastTileTime[device.getIdAsLong()] = now()
     sendEvent(name: "html", value: html, isStateChange: true)
 }
 
 void updateXxTile() {
     if (!settings?.xxTileEnable) return
-    Closure a    = { String n -> def v=device.currentValue(n); if(v==null)return null; def s=v.toString().trim(); (s==""||s=="null")?null:s }
-    Closure aNum = { String n -> def v=a(n); if(v==null)return null; try{return v.toDouble()}catch(e){return null} }
-    String nm=a("name")?:device.displayName
-    String st=a("state"); String hs=a("healthStatus"); String err=a("error")
+    Closure a={String n->def v=device.currentValue(n);if(v==null)return null;def s=v.toString().trim();(s==""||s=="null")?null:s}
+    Closure aNum={String n->def v=a(n);if(v==null)return null;try{return v.toDouble()}catch(e){return null}}
+    String nm=a("name")?:device.displayName; String st=a("state"); String hs=a("healthStatus"); String err=a("error")
     Double bat=aNum("battery"); Double ct=aNum("cleanTime (min)"); Double ca=aNum("cleanArea (sq ft)")
     Double fp=aNum("remainingFilter (%)"); Double mp=aNum("remainingMainBrush (%)"); Double sp=aNum("remainingSideBrush (%)")
-    Double cp=aNum("cleanPercent (%)")
-    String du=a("dustCollection")
-    boolean on=hs=="online"
-    boolean act=st in ["cleaning","spot cleaning","room clean","zone clean","go to","mapping"]
-    boolean dok=st in ["charged","charging","docking","returning dock","emptying dust bin","washing the mop"]
-    boolean er=err&&err!="no error"
-    String sbc=act?"#0d3060":dok?"#0d2a1a":"#162032"
-    String slc=act?"#60a5fa":dok?"#4ade80":"#94a3b8"
-    String sd=st?st.capitalize():"Unknown"
-    String bl=bat!=null?" · ${bat.toInteger()}%":""
-    Closure pc={ Double p -> p>=50?"#4ade80":p>=25?"#fbbf24":"#f87171" }
+    Double cp=aNum("cleanPercent (%)"); String du=a("dustCollection")
+    boolean on=hs=="online"; boolean act=st in ["cleaning","spot cleaning","room clean","zone clean","go to","mapping"]
+    boolean dok=st in ["charged","charging","docking","returning dock","emptying dust bin","washing the mop"]; boolean er=err&&err!="no error"
+    String sbc=act?"#0d3060":dok?"#0d2a1a":"#162032"; String slc=act?"#60a5fa":dok?"#4ade80":"#94a3b8"
+    String sd=st?st.capitalize():"Unknown"; String bl=bat!=null?" · ${bat.toInteger()}%":""
+    Closure pc={Double p->p>=50?"#4ade80":p>=25?"#fbbf24":"#f87171"}
     List pts=[]; if(ct!=null)pts<<"${ct.toInteger()}m"; if(ca!=null)pts<<"${ca.toInteger()}sf"
     String stats=pts?"<div style='font-size:13px;color:#64748b;margin-top:6px'>${act?'Now':'Last'}: ${pts.join(' · ')}</div>":""
     String duH=du?"<span style='font-size:11px;background:${du=='on'?'#1a3a6e':'#1a2535'};color:${du=='on'?'#60a5fa':'#475569'};padding:2px 7px;border-radius:6px;margin-left:4px'>D:${du}</span>":""
     String erH=er?"<div style='background:#4a1515;color:#fca5a5;border-radius:4px;padding:3px 7px;font-size:11px;margin-bottom:4px'>&#9888; ${err.capitalize()}</div>":""
     String bottom=""
-    if(!er) {
-        if(act && cp!=null) {
-            int cpv=Math.max(0,Math.min(100,cp.toInteger()))
-            bottom="<div style='margin-top:7px;font-size:11px;color:#64748b'>Progress <b style='color:#60a5fa'>${cpv}%</b><div style='background:#1e3a5f;border-radius:3px;height:6px;margin-top:3px'><div style='background:#3b82f6;height:6px;width:${cpv}%'></div></div></div>"
-        } else if(fp!=null||mp!=null||sp!=null) {
-            bottom="<div style='font-size:13px;margin-top:12px;display:flex;gap:14px'>"
-            if(fp!=null)bottom+="<span style='color:#64748b'>Flt:<b style='color:${pc(fp)}'>${fp.toInteger()}%</b></span>"
-            if(mp!=null)bottom+="<span style='color:#64748b'>Main:<b style='color:${pc(mp)}'>${mp.toInteger()}%</b></span>"
-            if(sp!=null)bottom+="<span style='color:#64748b'>Side:<b style='color:${pc(sp)}'>${sp.toInteger()}%</b></span>"
-            bottom+="</div>"
-        }
-    }
+    if(!er){if(act&&cp!=null){int cpv=Math.max(0,Math.min(100,cp.toInteger()));bottom="<div style='margin-top:7px;font-size:11px;color:#64748b'>Progress <b style='color:#60a5fa'>${cpv}%</b><div style='background:#1e3a5f;border-radius:3px;height:6px;margin-top:3px'><div style='background:#3b82f6;height:6px;width:${cpv}%'></div></div></div>"}else if(fp!=null||mp!=null||sp!=null){bottom="<div style='font-size:13px;margin-top:12px;display:flex;gap:14px'>";if(fp!=null)bottom+="<span style='color:#64748b'>Flt:<b style='color:${pc(fp)}'>${fp.toInteger()}%</b></span>";if(mp!=null)bottom+="<span style='color:#64748b'>Main:<b style='color:${pc(mp)}'>${mp.toInteger()}%</b></span>";if(sp!=null)bottom+="<span style='color:#64748b'>Side:<b style='color:${pc(sp)}'>${sp.toInteger()}%</b></span>";bottom+="</div>"}}
     String html="${erH}<div style='background:#0a1628;border-radius:10px;padding:16px;font-family:sans-serif'><div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px'><b style='color:#e2e8f0;font-size:14px'>${nm}${duH}</b><span style='font-size:11px;background:${on?'#1a4731':'#4a1515'};color:${on?'#4ade80':'#f87171'};padding:2px 9px;border-radius:8px'>${on?'Online':'Offline'}</span></div><div style='background:${sbc};border-radius:8px;padding:12px 14px;border-left:3px solid ${slc};'><b style='color:#f1f5f9;font-size:16px'>${sd}${bl}</b>${stats}</div>${bottom}</div>"
-    logDebug "xxTile chars: ${html.length()}"
     sendEvent(name:"xxTile", value:html, isStateChange:true)
 }
 
-// ── Code maps (identical to original) ────────────────────────────────────────
+// ── Code maps ─────────────────────────────────────────────────────────────────
 @Field static final Map errorCodes = [
     0: "No error", 1: "Laser sensor fault", 2: "Collision sensor fault", 3: "Wheel floating",
     4: "Cliff sensor fault", 5: "Main brush blocked", 6: "Side brush blocked", 7: "Wheel blocked",
