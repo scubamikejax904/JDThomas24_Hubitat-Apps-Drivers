@@ -6,7 +6,7 @@
   "description": "Monitor device check-in health across Zigbee, Z-Wave, Matter, Hub Mesh, LAN, Virtual and Hub Variable — learns each device's normal pattern and alerts you when something goes quiet.",
   "dateReleased": "4/28/26",
   "minimumHEVersion": "2.3.0",
-  "releaseNotes": "v1.5.7 — Stale ping verification now expires after offlineThresholdHours — prevents dead battery devices from being permanently masked as Quiet verified reachable.",
+  "releaseNotes": "v1.5.8 — Hue Bridge/Konnected Panel verification now confirms reachability immediately and resolves in one Force Scan instead of 2-3.",
   "apps": [
     {
       "id": "a045ac2b-5fe0-4159-830b-8550899d9553",
