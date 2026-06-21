@@ -2,7 +2,7 @@
  * Leviton LDATA / LWHEM Smart Panel - Parent Driver
  * Ported from: https://github.com/rwoldberg/ldata-ha
  * Hubitat port: jthomas24
- * Version: 1.2.0
+ * Version: 1.2.1
  */
 
 import groovy.json.JsonSlurper
@@ -15,7 +15,7 @@ metadata {
         namespace: "jdthomas24",
         author: "Community Port from rwoldberg/ldata-ha",
         description: "Leviton Smart Panel (LDATA/LWHEM) integration with breaker monitoring and control",
-        version: "1.2.0"
+        version: "1.2.1"
     ) {
         capability "Initialize"
         capability "Refresh"
@@ -636,7 +636,7 @@ private Map buildWsAuthPayload() {
                     created: new Date().format("yyyy-MM-dd'T'HH:mm:ss.000'Z'"), scopes: null]]
 }
 
-// v1.2.0: Subscriptions are now queued and sent in small batches via runIn,
+// v1.2.1: Subscriptions are now queued and sent in small batches via runIn,
 // instead of all ~70+ messages in one tight synchronous loop. Right after a
 // reconnect the server tends to push an initial snapshot per subscription —
 // sending everything at once meant the replies could all land in the same
@@ -655,7 +655,7 @@ private void sendWsSubscriptions() {
     sendNextSubscriptionBatch()
 }
 
-// v1.2.0: Sends a small batch of queued subscription messages, then
+// v1.2.1: Sends a small batch of queued subscription messages, then
 // reschedules itself one second later for the next batch until the queue is
 // empty. Batch size of 10 keeps each tick lightweight without dragging the
 // overall resubscribe-after-reconnect process out too long.
