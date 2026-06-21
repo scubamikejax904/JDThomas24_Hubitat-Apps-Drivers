@@ -2,7 +2,7 @@
  * Leviton LDATA / LWHEM Smart Panel - Parent Driver
  * Ported from: https://github.com/rwoldberg/ldata-ha
  * Hubitat port: jthomas24
- * Version: 1.2.0
+ * Version: 1.2.1
  */
 
 import groovy.json.JsonSlurper
@@ -15,7 +15,7 @@ metadata {
         namespace: "jdthomas24",
         author: "Community Port from rwoldberg/ldata-ha",
         description: "Leviton Smart Panel (LDATA/LWHEM) integration with breaker monitoring and control",
-        version: "1.2.0"
+        version: "1.2.1"
     ) {
         capability "Initialize"
         capability "Refresh"
