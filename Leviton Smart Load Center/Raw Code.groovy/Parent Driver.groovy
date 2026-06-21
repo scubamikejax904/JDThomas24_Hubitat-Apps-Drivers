@@ -2,7 +2,7 @@
  * Leviton LDATA / LWHEM Smart Panel - Parent Driver
  * Ported from: https://github.com/rwoldberg/ldata-ha
  * Hubitat port: jthomas24
- * Version: 1.2.1
+ * Version: 1.2.0
  */
 
 import groovy.json.JsonSlurper
@@ -15,7 +15,7 @@ metadata {
         namespace: "jdthomas24",
         author: "Community Port from rwoldberg/ldata-ha",
         description: "Leviton Smart Panel (LDATA/LWHEM) integration with breaker monitoring and control",
-        version: "1.2.1"
+        version: "1.2.0"
     ) {
         capability "Initialize"
         capability "Refresh"
@@ -636,16 +636,46 @@ private Map buildWsAuthPayload() {
                     created: new Date().format("yyyy-MM-dd'T'HH:mm:ss.000'Z'"), scopes: null]]
 }
 
+// v1.2.0: Subscriptions are now queued and sent in small batches via runIn,
+// instead of all ~70+ messages in one tight synchronous loop. Right after a
+// reconnect the server tends to push an initial snapshot per subscription —
+// sending everything at once meant the replies could all land in the same
+// burst, which is what was tripping Hubitat's "excessive hub load"
+// protection. Spreading the sends over a few seconds spreads the replies out
+// too, alongside the per-event dedup fix already in the child driver.
 private void sendWsSubscriptions() {
     def subs = []
     state.residenceIds?.each { resId -> subs << [type: "subscribe", subscription: [modelName: "Residence",           modelId: resId.toString()]] }
     state.panels?.each       { panelId, panel -> subs << [type: "subscribe", subscription: [modelName: "IotWhem",    modelId: panelId.toString()]] }
     state.breakers?.each     { bId, bd -> subs << [type: "subscribe", subscription: [modelName: "ResidentialBreaker", modelId: bId.toString()]] }
     state.cts?.each          { ctId, ctd -> subs << [type: "subscribe", subscription: [modelName: "IotCt",           modelId: ctId.toString()]] }
-    logDebug "[LDATA] Sending ${subs.size()} WS subscriptions"
-    subs.each { sub ->
-        try { interfaces.webSocket.sendMessage(JsonOutput.toJson(sub)); logDebug "[LDATA] Subscribed: ${sub.subscription.modelName} ${sub.subscription.modelId}" }
+    logDebug "[LDATA] Queuing ${subs.size()} WS subscriptions for staggered send"
+    state.subQueue = subs.collect { JsonOutput.toJson(it) }
+    state.subQueueTotal = subs.size()
+    sendNextSubscriptionBatch()
+}
+
+// v1.2.0: Sends a small batch of queued subscription messages, then
+// reschedules itself one second later for the next batch until the queue is
+// empty. Batch size of 10 keeps each tick lightweight without dragging the
+// overall resubscribe-after-reconnect process out too long.
+def sendNextSubscriptionBatch() {
+    def queue = state.subQueue ?: []
+    if (queue.isEmpty()) {
+        logDebug "[LDATA] All ${state.subQueueTotal ?: 0} subscriptions sent"
+        return
+    }
+    def batchSize = 10
+    def batch     = queue.take(batchSize)
+    def remaining = queue.drop(batchSize)
+    state.subQueue = remaining
+    batch.each { msg ->
+        try { interfaces.webSocket.sendMessage(msg) }
         catch (Exception e) { logDebug "[LDATA] Subscription send error: ${e.message}" }
+    }
+    logDebug "[LDATA] Sent batch of ${batch.size()} subscriptions (${remaining.size()} remaining)"
+    if (!remaining.isEmpty()) {
+        runIn(1, "sendNextSubscriptionBatch")
     }
 }
 
