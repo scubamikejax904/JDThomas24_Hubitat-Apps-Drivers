@@ -1,6 +1,6 @@
 /**
  * Device Health Monitor
- * Version: 1.5.7
+ * Version: 1.5.8
  *
  * Author: jdthomas24
  */
@@ -14,7 +14,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "",
     iconX2Url: "",
-    version: "1.5.7",
+    version: "1.5.8",
     doNotFocus: true,
     oauth: true
 )
@@ -407,6 +407,17 @@ def getPingStatusDisplay(deviceId) {
         case "declared":     return "<span style='color:#f97316;font-size:10px;'>🔄 Verifiable</span>"
         default:             return ""
     }
+}
+
+// v1.5.8: A device at Fair health whose reachability is actually confirmed
+// (pingWorks == true) is displayed as "Quiet" rather than "Fair" — idle, not
+// a problem. This helper identifies that case so Active Issues can exclude
+// it: a confirmed-reachable device isn't an issue just because it's quiet.
+def isQuietVerified(deviceId) {
+    def h = state.health?.get(deviceId) ?: "Pending"
+    if (h != "Fair") return false
+    def cap = state.deviceCapabilities?.get(deviceId as String) ?: [:]
+    return cap.pingWorks == true
 }
 
 // ============================================================
@@ -1247,7 +1258,7 @@ def mainPage() {
             input "debugMode", "bool",
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.5.7</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.5.8</span>"
         }
     }
 }
@@ -1988,10 +1999,15 @@ def updateHealth(device) {
     }
 
     if (state.verifying == null) state.verifying = [:]
-    if (state.verifying[id]) {
-        state.verifying.remove(id)
-        return
-    }
+
+    // v1.5.8: Removed the every-other-scan verification throttle that used to
+    // live here. It returned early on alternating scans without re-attempting
+    // verification, which caused the "sometimes shows Verifying, sometimes
+    // doesn't" flicker and meant a result could take 2-3 Force Scan taps to
+    // show up. Verification now runs every scan a device is Poor/Offline —
+    // for Hue/Konnected this is one lightweight Bridge/Panel call per scan;
+    // for direct refresh/ping it's a modest increase in command frequency to
+    // devices that are already flagged as a problem.
 
     if (getStateVerified(id as String)) {
         state.verifying[id] = "state_verified"
@@ -2068,10 +2084,29 @@ def updateHealth(device) {
     def capMapH  = state.deviceCapabilities ?: [:]
     def capKeyH  = id as String
     def capDataH = capMapH[capKeyH] ?: [:]
-    if (verifyMethod in ["refresh", "ping", "hue_bridge"]) {
+    if (verifyMethod in ["hue_bridge", "konnected_panel"]) {
+        // v1.5.8: Bridge/Panel proxy verification confirms immediately.
+        // bridge.refresh() / panel.refresh() returns this device's full current
+        // state regardless of whether the value changed — but Hubitat's
+        // CoCoHue/Konnected drivers only emit a fresh event when the value
+        // *does* change. A bulb/sensor that's been idle for weeks would
+        // otherwise never advance lastSeen and stay stuck at Offline/Verifiable
+        // forever, even though the Bridge/Panel call is succeeding every time.
+        // A clean call is itself sufficient proof of reachability for this device.
+        capDataH.lastPingAttempt    = now()
+        capDataH.pingAttempted      = false
+        capDataH.pingWorks          = true
+        capDataH.pingFailed         = 0
+        // Apply the Quiet cap immediately within this same scan instead of
+        // waiting for the next one to notice pingWorks=true — this is what
+        // lets a single Force Scan fully clear it instead of needing 2-3 taps.
+        state.health[id] = "Fair"
+        if (debugEnabled()) log.debug "${device.displayName}: ${verifyMethod} succeeded — confirmed reachable immediately (Bridge/Panel proxy verification)"
+    } else if (verifyMethod in ["refresh", "ping"]) {
         capDataH.lastPingAttempt = now()
         capDataH.pingAttempted   = true
-    } else if (verifyMethod in ["none", "virtual", "hue_no_bridge", "hue_bridge_failed", "failed"]) {
+    } else if (verifyMethod in ["none", "virtual", "hue_no_bridge", "hue_bridge_failed",
+                                 "konnected_no_panel", "konnected_panel_failed", "failed"]) {
         capDataH.pingWorks  = false
         capDataH.pingFailed = (capDataH.pingFailed ?: 0) + 1
     }
@@ -2517,10 +2552,11 @@ function card(dev) {
 function render() {
     if (!db) return;
     let estate   = db.estate || [];
+    let isQuiet  = d => d.health === 'Fair' && d.pingStatus === 'verified';
     let offline  = estate.filter(d => d.health === 'Offline' && !d.snoozed).length;
     let poor     = estate.filter(d => d.health === 'Poor'    && !d.snoozed).length;
-    let fair     = estate.filter(d => d.health === 'Fair'    && !d.snoozed).length;
-    let healthy  = estate.filter(d => ['Good','Excellent'].includes(d.health) && !d.snoozed).length;
+    let fair     = estate.filter(d => d.health === 'Fair'    && !d.snoozed && !isQuiet(d)).length;
+    let healthy  = estate.filter(d => (['Good','Excellent'].includes(d.health) || isQuiet(d)) && !d.snoozed).length;
     let total    = estate.length;
     let scanning = db.isScanning ? "<span class='scanning-badge'>🔄 Scanning</span>" : "";
 
@@ -2544,7 +2580,7 @@ function render() {
     html += "</select>";
     html += "</div>";
 
-    let issues = estate.filter(d => ['Offline','Poor','Fair'].includes(d.health) && !d.snoozed);
+    let issues = estate.filter(d => ['Offline','Poor','Fair'].includes(d.health) && !isQuiet(d) && !d.snoozed);
     if (issues.length) {
         html += "<details open><summary style='border-left-color:#ef4444;'>⚠️ Active Issues <span class='cat-count'>" + issues.length + " devices</span></summary><div style='padding-top:10px;'>";
         issues.forEach(d => html += card(d));
@@ -2558,7 +2594,7 @@ function render() {
         html += "</div></details>";
     }
 
-    let healthy_devs = estate.filter(d => !['Offline','Poor','Fair'].includes(d.health) && !d.snoozed);
+    let healthy_devs = estate.filter(d => (!['Offline','Poor','Fair'].includes(d.health) || isQuiet(d)) && !d.snoozed);
     let groups = {};
     healthy_devs.forEach(d => {
         let keys = [];
@@ -2864,7 +2900,9 @@ def problemDevicesPage() {
 
         def problems = allDevs.findAll { device ->
             def h = state.health?.get(device.id) ?: "Pending"
-            h in ["Offline", "Poor", "Fair"] && !isDeviceSnoozed(device.id as String)
+            h in ["Offline", "Poor", "Fair"] &&
+                !isQuietVerified(device.id as String) &&
+                !isDeviceSnoozed(device.id as String)
         }.sort { a, b ->
             def pri = ["Offline": 1, "Poor": 2, "Fair": 3]
             def pA  = pri[state.health?.get(a.id)] ?: 4
@@ -3411,8 +3449,8 @@ def infoPage(Map params = [:]) {
                       "<b>Quiet (verified reachable):</b> Fair-health devices that have confirmed they respond to ping or refresh are shown as 🟠 Quiet instead of Fair — idle but reachable. Used for Z-Wave and LAN devices whose <code>getLastActivity()</code> does not update reliably after command-triggered state reports.<br><br>" +
                       "<b>Verification trust expiry (v1.5.7):</b> Quiet/verified status expires after your configured Offline Threshold (default 7 days). If a device goes quiet and the last successful ping is older than this window, trust is cleared and the app re-verifies from scratch — preventing dead battery devices from being permanently masked as Quiet.<br><br>" +
                       "<b>Auto-reset on recovery:</b> When a device recovers from Poor or Offline back to Good or Excellent, its verification status is automatically reset so it always gets a fresh attempt next time it drops.<br><br>" +
-                      "<b>Hue devices:</b> Add your Hue Bridge to monitored devices — the app refreshes the Bridge when any Hue device goes Poor or Offline.<br><br>" +
-                      "<b>Konnected devices:</b> Add your Konnected Alarm Panel to monitored devices — child sensors are verified by refreshing the panel.</div>"
+                      "<b>Hue devices (v1.5.8):</b> Add your Hue Bridge to monitored devices — the app refreshes the Bridge when any Hue device goes Poor or Offline. Because a Bridge poll returns each bulb's full current state regardless of whether it changed, a successful Bridge refresh now confirms the bulb as reachable immediately, instead of waiting for a Hubitat event that may never fire when the value is unchanged.<br><br>" +
+                      "<b>Konnected devices (v1.5.8):</b> Add your Konnected Alarm Panel to monitored devices — child sensors are verified by refreshing the panel, with the same immediate confirmation as Hue above.</div>"
         }
 
         section("<b>💡 Tips for Best Results</b>") {
@@ -3423,12 +3461,14 @@ def infoPage(Map params = [:]) {
                       "• Quiet/verified trust expires after the offline threshold — dead battery devices will escalate correctly once trust expires<br>" +
                       "• Low activity devices that cannot be verified will show Poor instead of Offline — this is intentional<br>" +
                       "• Assign locations in the 🏷️ Location Assignment page — enables room grouping in the portal<br>" +
-                      "• Add your Hue Bridge or CoCoHue Bridge to monitored devices for Hue verification support<br>" +
+                      "• Add your Hue Bridge or CoCoHue Bridge to monitored devices for Hue verification support — bulbs that sit untouched for weeks will now confirm as Quiet/Verified from the Bridge poll alone<br>" +
                       "• After updating the app, run Force Scan to immediately update all health scores</div>"
         }
 
         section("<b>📋 Version History</b>", hideable: true, hidden: true) {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "<b>v1.5.8</b> — Bug fix: Hue/Konnected bulbs and sensors that sit unused for weeks stuck at Offline/Verifiable<br>" +
+                      "<span style='color:#475569;font-size:12px;'>Hue and Konnected verification works by refreshing the Bridge/Panel, not the device itself. A Bridge poll returns the full current state of every bulb whether or not it changed — but Hubitat's CoCoHue integration only emits a new event when a value actually changes. A bulb that's been off and untouched for weeks therefore never produced a fresh timestamp, so <code>pingWorks</code> never flipped to <code>true</code> even though the Bridge refresh itself was succeeding every time. A successful Bridge/Panel refresh is now treated as immediate proof of reachability — it stamps <code>pingWorks=true</code> directly instead of waiting for an event that may never come. <code>lastSeen</code> and learned baseline intervals are deliberately left untouched so this doesn't get recorded as a real check-in sample. The display now also updates within the same scan rather than the next one, and the old every-other-scan verification throttle was removed — so a single Force Scan fully resolves a Hue/Konnected device to ✅ Verified / 🟠 Quiet instead of needing 2-3 taps. Devices on the plain refresh/ping path still depend on the device itself responding, so those are unaffected by this change.</span><br><br>" +
                       "<b>v1.5.7</b> — Bug fix: Stale ping verification masking dead battery devices<br>" +
                       "<span style='color:#475569;font-size:12px;'>In v1.5.6 the \"Quiet verified reachable\" label was introduced but <code>pingWorks=true</code> had no expiry. A device with a dead battery (e.g. a button or sensor) could be permanently held at Quiet and never escalate to Poor or Offline. Verification trust now expires after your configured Offline Threshold. When trust expires the app clears <code>pingWorks</code> and the fairHold gate gets a fresh re-verification attempt before escalating to Poor then Offline. No action needed — updates automatically on next scan.</span><br><br>" +
                       "<b>v1.5.6</b> — Added \"Quiet verified reachable\" display for Fair+verified devices. Added <code>lastKnownStateDate</code> tracking so verified refresh responses advance <code>lastSeen</code> even when <code>getLastActivity()</code> does not update (common in Z-Wave).<br><br>" +
@@ -3441,3 +3481,4 @@ def infoPage(Map params = [:]) {
         }
     }
 }
+
