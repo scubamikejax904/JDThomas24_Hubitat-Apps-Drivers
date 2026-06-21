@@ -26,7 +26,15 @@
  * Do NOT create this driver manually — it is managed by the parent.
  *
  * Changelog:
- *   - No changes in this release (patches are in Parent driver only)
+ *   - 1.2.0: Only send an event when the value actually changed from the
+ *     device's current attribute value. A single WS panel snapshot (e.g.
+ *     right after a reconnect) can carry every breaker/CT at once; resending
+ *     all ~15 attributes per breaker unconditionally on every update was
+ *     generating thousands of sendEvent() calls in one parse() pass, which is
+ *     what tripped Hubitat's "excessive hub load" protection and caused that
+ *     update to be dropped entirely. Most fields (model, position, leg,
+ *     poles, ampRating, IDs) essentially never change after the first set, so
+ *     this should cut event volume dramatically with no change in behavior.
  */
 
 metadata {
@@ -143,85 +151,99 @@ def parse(List<Map> events) {
 
             switch (name) {
                 // ── Core power attributes ──────────────────────────────────
-                case "power":
-                    sendEvent(name: "power", value: roundSafe(value, 1), unit: "W")
+                case "power": {
+                    def v = roundSafe(value, 1)
+                    if (changed("power", v)) sendEvent(name: "power", value: v, unit: "W")
                     break
+                }
 
-                case "current":
-                    sendEvent(name: "amperage", value: roundSafe(value, 3), unit: "A")
+                case "current": {
+                    def v = roundSafe(value, 3)
+                    if (changed("amperage", v)) sendEvent(name: "amperage", value: v, unit: "A")
                     break
+                }
 
-                case "voltage":
-                    sendEvent(name: "voltage", value: roundSafe(value, 1), unit: "V")
+                case "voltage": {
+                    def v = roundSafe(value, 1)
+                    if (changed("voltage", v)) sendEvent(name: "voltage", value: v, unit: "V")
                     break
+                }
 
-                case "frequency":
-                    sendEvent(name: "frequency", value: roundSafe(value, 2), unit: "Hz")
+                case "frequency": {
+                    def v = roundSafe(value, 2)
+                    if (changed("frequency", v)) sendEvent(name: "frequency", value: v, unit: "Hz")
                     break
+                }
 
                 // ── Energy ────────────────────────────────────────────────
-                case "energyConsumption":
+                case "energyConsumption": {
+                    def v = roundSafe(value, 3)
                     // Map to both the standard capability attribute and our custom one
-                    sendEvent(name: "energy",            value: roundSafe(value, 3), unit: "kWh")
-                    sendEvent(name: "energyConsumption", value: roundSafe(value, 3), unit: "kWh")
+                    if (changed("energy", v))            sendEvent(name: "energy",            value: v, unit: "kWh")
+                    if (changed("energyConsumption", v)) sendEvent(name: "energyConsumption", value: v, unit: "kWh")
                     break
+                }
 
-                case "energyImport":
-                    sendEvent(name: "energyImport", value: roundSafe(value, 3), unit: "kWh")
+                case "energyImport": {
+                    def v = roundSafe(value, 3)
+                    if (changed("energyImport", v)) sendEvent(name: "energyImport", value: v, unit: "kWh")
                     break
+                }
 
                 // ── Switch / state ────────────────────────────────────────
                 case "switch":
-                    sendEvent(name: "switch", value: value)
+                    if (changed("switch", value)) sendEvent(name: "switch", value: value)
                     break
 
                 case "breakerState":
-                    sendEvent(name: "breakerState", value: value)
+                    if (changed("breakerState", value)) sendEvent(name: "breakerState", value: value)
                     break
 
                 case "remoteState":
-                    sendEvent(name: "remoteState", value: value)
+                    if (changed("remoteState", value)) sendEvent(name: "remoteState", value: value)
                     break
 
                 // ── Metadata (non-polling attributes) ─────────────────────
                 case "ampRating":
-                    sendEvent(name: "ampRating", value: value, unit: "A")
+                    if (changed("ampRating", value)) sendEvent(name: "ampRating", value: value, unit: "A")
                     break
 
                 case "position":
-                    sendEvent(name: "position", value: value)
+                    if (changed("position", value)) sendEvent(name: "position", value: value)
                     break
 
                 case "leg":
-                    sendEvent(name: "leg", value: value)
+                    if (changed("leg", value)) sendEvent(name: "leg", value: value)
                     break
 
                 case "poles":
-                    sendEvent(name: "poles", value: value)
+                    if (changed("poles", value)) sendEvent(name: "poles", value: value)
                     break
 
-                case "canRemoteOn":
-                    sendEvent(name: "canRemoteOn", value: value?.toString())
+                case "canRemoteOn": {
+                    def v = value?.toString()
+                    if (changed("canRemoteOn", v)) sendEvent(name: "canRemoteOn", value: v)
                     break
+                }
 
                 case "breakerModel":
-                    sendEvent(name: "breakerModel", value: value)
+                    if (changed("breakerModel", value)) sendEvent(name: "breakerModel", value: value)
                     break
 
                 case "deviceType":
-                    sendEvent(name: "deviceType", value: value)
+                    if (changed("deviceType", value)) sendEvent(name: "deviceType", value: value)
                     break
 
                 case "breakerId":
-                    sendEvent(name: "breakerId", value: value)
+                    if (changed("breakerId", value)) sendEvent(name: "breakerId", value: value)
                     break
 
                 case "channel":
-                    sendEvent(name: "channel", value: value)
+                    if (changed("channel", value)) sendEvent(name: "channel", value: value)
                     break
 
                 case "ctId":
-                    sendEvent(name: "ctId", value: value)
+                    if (changed("ctId", value)) sendEvent(name: "ctId", value: value)
                     break
 
                 default:
@@ -236,6 +258,14 @@ def parse(List<Map> events) {
 // ─────────────────────────────────────────────────────────────────────────────
 //  UTILITY
 // ─────────────────────────────────────────────────────────────────────────────
+
+// v1.2.0: Skip sending an event if the new value matches what's already
+// stored — string comparison avoids Float/BigDecimal/String type mismatches
+// between what currentValue() returns and what we're about to send.
+private boolean changed(String attr, def newVal) {
+    def cur = device.currentValue(attr)
+    return cur?.toString() != newVal?.toString()
+}
 
 private def roundSafe(def value, int decimals) {
     try {
