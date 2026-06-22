@@ -7,7 +7,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
     iconUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Tests%20-%20Groovy%20RAW/Battery%20Monitor%202.0%20BETA%20Tests",
     iconX2Url: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Battery%20Monitor%202.0/Raw%20Code/BatteryMonitor2.0.groovy",
-    version: "2.5.31",
+    version: "2.5.32",
     doNotFocus: true,
     oauth: true
 )
@@ -379,7 +379,7 @@ def mainPage() {
 
         section("<b>Diagnostics</b>") {
             input "debugMode", "bool", title: "Debug Logging (auto-disables after 30 min)", defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Battery Monitor v2.5.31</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Battery Monitor v2.5.32</span>"
         }
     }
 }
@@ -390,6 +390,7 @@ def mainPage() {
 def scheduleReportFrequency() {
     unschedule("reportScheduler")
     if (!summaryTime) return
+    if (settings?.enablePush == false) return
     schedule(summaryTime, reportScheduler)
 }
 
@@ -470,6 +471,14 @@ def shouldRunWeekly() {
 }
 
 def scheduledSummary() {
+    // v2.5.31→v2.5.32: Fix — enablePush previously only gated sendPush(); notifyDevices and
+    // pushoverDevices kept firing even with the toggle off (and stayed hidden/uneditable in the
+    // UI once off, with no way to clear them). This makes the master switch authoritative.
+    if (settings?.enablePush == false) {
+        if (debugMode) log.debug "Notifications disabled (enablePush off) — skipping summary"
+        return
+    }
+
     if (state.notifSnoozedUntil && state.notifSnoozedUntil >= now()) {
         if (debugMode) log.debug "Notifications snoozed until ${new Date(state.notifSnoozedUntil)} — skipping summary"
         return
@@ -1321,7 +1330,7 @@ tr:hover td{background:#1a1a1a}
         }
 
         html.append("</tbody></table>")
-        html.append("<p style='text-align:center;font-size:10px;color:#444;margin-top:20px;'>Battery Monitor v2.5.31 &nbsp;·&nbsp; jdthomas24</p>")
+        html.append("<p style='text-align:center;font-size:10px;color:#444;margin-top:20px;'>Battery Monitor v2.5.32 &nbsp;·&nbsp; jdthomas24</p>")
         html.append("</div></body></html>")
 
         return render(contentType: "text/html", data: html.toString(), status: 200)
