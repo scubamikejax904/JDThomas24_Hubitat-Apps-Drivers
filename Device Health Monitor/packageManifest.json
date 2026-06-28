@@ -1,12 +1,12 @@
 {
   "packageName": "Device Health Monitor",
   "author": "Jdthomas24",
-  "version": "1.5.9",
+  "version": "1.5.10",
   "category": "Monitoring",
   "description": "Monitor device check-in health across Zigbee, Z-Wave, Matter, Hub Mesh, LAN, Virtual and Hub Variable — learns each device's normal pattern and alerts you when something goes quiet.",
   "dateReleased": "4/28/26",
   "minimumHEVersion": "2.3.0",
-  "releaseNotes": "v1.5.9 — Generic Zigbee/Z-Wave refresh/ping success now grants the same immediate Quiet status Hue/Konnected already had, tagged as provisional ('weak') trust since a successful command isn't real delivery confirmation — capped at 2x the Offline Threshold, after which the device is forced to show a real Poor/Offline for a full Offline Threshold window before weak trust can be granted again, so a device that never genuinely checks in can't be masked forever. Adds a confirmed-vs-provisional badge to the app pages and web portal, fixes the portal not showing 'Quiet' in the per-device label text, and fixes the recovery-reset block not always clearing trust tracking on a genuine recovery.",
+  "releaseNotes": "v1.5.10 — Bug fix: scan pipeline could stall silently with no error logged on installs with many devices and weeks of scan history. Groovy's BigDecimal math doesn't auto-round, and since each check-in sample is smoothed from the previous sample recursively, decimal precision compounded every single scan with nothing ever resetting it — after weeks of scans this bloated state.history to several KB per device, large enough on bigger installs to stall the scan pipeline at the state-persistence layer before it could even start, with nothing caught or logged as an error. Elapsed and smoothed check-in values are now rounded to 2 decimal places at the point of computation so this can't recur, and a one-time migration on update rounds all existing stored samples back down automatically — logged only when there's actually something found to clean up. No action needed beyond opening the app and tapping Done once after updating; Force Scan should complete normally afterward.",
   "apps": [
     {
       "id": "a045ac2b-5fe0-4159-830b-8550899d9553",
