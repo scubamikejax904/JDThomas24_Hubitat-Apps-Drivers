@@ -1,6 +1,6 @@
 /**
  * Device Health Monitor
- * Version: 1.5.9
+ * Version: 1.5.10
  *
  * Author: jdthomas24
  */
@@ -14,7 +14,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "",
     iconX2Url: "",
-    version: "1.5.9",
+    version: "1.5.10",
     doNotFocus: true,
     oauth: true
 )
@@ -101,6 +101,32 @@ def initialize() {
         state.deviceCapabilities  = [:]
         state.capabilitiesResetDone = true
         if (debugEnabled()) log.debug "Device Health Monitor: reset deviceCapabilities — will rebuild on next scan"
+    }
+
+    // v1.5.10: One-time migration — collapse unbounded BigDecimal precision that had
+    // accumulated in state.history samples/avgInterval over weeks of scans. Groovy's
+    // BigDecimal math doesn't auto-round, and each smoothed sample is computed from
+    // the PREVIOUS smoothed sample recursively, so decimal scale compounded every
+    // single scan with nothing ever resetting it — some samples had grown to 40+
+    // digits after a few weeks. Left unchecked this bloated state.history to several
+    // KB per device (671KB total observed across 142 devices, 94% of it in history
+    // alone), which risked stalling the scan pipeline before it could even start.
+    // Existing samples are rounded to 2 decimal places in place here; new samples
+    // are rounded at the point of computation going forward (see processScanChunk)
+    // so this can't recur.
+    if (!state.samplesRoundedDone) {
+        def roundedAny = false
+        state.history?.each { id, data ->
+            if (data?.samples) {
+                data.samples = data.samples.collect { (it as BigDecimal).setScale(2, BigDecimal.ROUND_HALF_UP) }
+                roundedAny = true
+            }
+            if (data?.avgInterval != null) {
+                data.avgInterval = (data.avgInterval as BigDecimal).setScale(2, BigDecimal.ROUND_HALF_UP)
+            }
+        }
+        state.samplesRoundedDone = true
+        if (roundedAny) log.info "Device Health Monitor: one-time cleanup — rounded bloated sample precision in state.history"
     }
     if (state.deviceLocations == null) state.deviceLocations = [:]
 
@@ -1279,7 +1305,7 @@ def mainPage() {
             input "debugMode", "bool",
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.5.9</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.5.10</span>"
         }
     }
 }
@@ -1807,7 +1833,7 @@ def processScanChunk() {
                         state.deviceCapabilities = capMapRec
                         if (debugEnabled()) log.debug "${device.displayName}: ping confirmed working — device responded after verification attempt"
                     }
-                    def elapsed = (lastSeen - prevLastSeen) / (1000 * 60)
+                    def elapsed = ((lastSeen - prevLastSeen) / (1000 * 60)).toBigDecimal().setScale(2, BigDecimal.ROUND_HALF_UP)
                     data.lastSeen = lastSeen
                     if (elapsed >= minGate) {
                         def recordSample = true
@@ -1815,13 +1841,19 @@ def processScanChunk() {
                             recordSample = elapsed <= (intervalMinutes * 1.5)
                         }
                         if (recordSample) {
+                            // v1.5.10: Round both elapsed (above) and smoothed (below) to 2
+                            // decimal places at the point of computation. Without this,
+                            // Groovy's BigDecimal division/multiplication preserves full
+                            // precision and compounds it every scan, since smoothed is
+                            // computed recursively from the previous smoothed value — see
+                            // the migration note in initialize() for what this fixed.
                             def alpha      = 0.15
                             def prevSmooth = (data.samples && data.samples.size() > 0) ? data.samples[-1] : elapsed
-                            def smoothed   = alpha * elapsed + (1 - alpha) * prevSmooth
+                            def smoothed   = (alpha * elapsed + (1 - alpha) * prevSmooth).setScale(2, BigDecimal.ROUND_HALF_UP)
                             data.samples << smoothed
                             if (data.samples.size() > 20) data.samples.remove(0)
                             if (data.samples.size() >= 3) {
-                                data.avgInterval = data.samples.sum() / data.samples.size()
+                                data.avgInterval = (data.samples.sum() / data.samples.size()).toBigDecimal().setScale(2, BigDecimal.ROUND_HALF_UP)
                             }
                         }
                     }
@@ -2092,7 +2124,7 @@ def updateHealth(device) {
         if (data?.samples?.size() > 0) {
             data.samples.remove(data.samples.size() - 1)
             if (data.samples.size() >= 3) {
-                data.avgInterval = data.samples.sum() / data.samples.size()
+                data.avgInterval = (data.samples.sum() / data.samples.size()).toBigDecimal().setScale(2, BigDecimal.ROUND_HALF_UP)
             }
             state.history[id] = data
         }
@@ -2547,7 +2579,6 @@ summary:hover{background:#252525}
 .dev-name{font-size:14px;font-weight:bold;color:#fff}
 .dev-meta{font-size:11px;color:#888;margin-top:3px}
 .dev-state{display:inline-block;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:700;margin-top:4px}
-.dev-health{font-size:12px;margin-top:4px;color:#ccc}
 .proto-tag{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:6px;vertical-align:middle}
 .modal-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.75);z-index:1000;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
 .modal{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:22px;width:100%;max-width:500px;max-height:90vh;overflow-y:auto;position:relative}
@@ -3599,6 +3630,8 @@ def infoPage(Map params = [:]) {
 
         section("<b>📋 Version History</b>", hideable: true, hidden: true) {
             paragraph rawHtml: true, "<div style='background-color:#f8f8f8; border:1px solid #dddddd; border-radius:6px; padding:10px; margin-bottom:4px;'>" +
+                      "<b>v1.5.10</b> — Bug fix: scan pipeline stalling silently with no error logged, on installs with many devices and weeks of history<br>" +
+                      "<span style='color:#475569;font-size:12px;'>Groovy's BigDecimal division and multiplication don't auto-round — and since each check-in sample is smoothed from the previous sample recursively (<code>smoothed = alpha * elapsed + (1-alpha) * prevSmooth</code>), decimal precision compounded every single scan with nothing ever resetting it. After weeks of scans this bloated <code>state.history</code> samples from a few characters each to 40+ digit BigDecimals, ballooning total app state size (671KB observed across 142 devices, 94% of it in <code>history</code> alone) to the point where the scan pipeline could stall before <code>processScanChunk()</code> ever ran — with no error logged, since the failure occurred at the state-persistence layer rather than as a caught exception. Elapsed and smoothed values are now rounded to 2 decimal places at the point of computation, and a one-time migration on update rounds all existing stored samples and <code>avgInterval</code> values back down. No action needed beyond opening the app and tapping Done once after updating — the cleanup runs automatically on initialize, and Force Scan should complete normally afterward.</span><br><br>" +
                       "<b>v1.5.9</b> — Bug fix: quiet-but-fine Z-Wave/Zigbee devices stuck cycling Poor/Offline forever, with no bounded way to confirm a real outage<br>" +
                       "<span style='color:#475569;font-size:12px;'>Generic <code>device.refresh()</code>/<code>device.ping()</code> only proves the mesh accepted the command — Hubitat does not wait for or expose any delivery acknowledgment from the device, unlike a Hue Bridge or Konnected Panel refresh, which is a real network round-trip. Previously this meant a quiet-but-reachable Z-Wave/Zigbee switch (one that rarely changes state, so <code>getLastActivity()</code> never advances after a refresh) had no path to Quiet status at all — it would cycle Poor → Offline forever even though refresh kept succeeding every scan. Generic refresh/ping success now gets the same immediate Fair-cap (\"Quiet\") treatment Hue/Konnected already had, but tagged as <i>provisional (\"weak\")</i> trust rather than full confirmation, since a clean refresh call still isn't proof of actual delivery. Weak trust is capped at 2× your Offline Threshold (default 14 days) of continuous unconfirmed riding; once exceeded, trust is force-cleared and the device is guaranteed to show a real Poor/Offline for at least one full Offline Threshold (default 7 days) before weak trust can be granted again — so a device that never once genuinely checks in can't be hidden from you forever, while devices that are simply idle still get the same breathing room as before. Any genuine confirmation (a real check-in, a real state-change event, or a Hue/Konnected bridge round-trip) immediately upgrades a device to full (\"confirmed\") trust, which has no ceiling — it's already covered by the existing v1.5.7 periodic re-verification. The app page, Activity Summary, Problem Devices page, and web portal all now show a distinct badge/label for provisional (\"🔄 Verified (auto)\" / \"responded to refresh — unconfirmed\") vs. confirmed (\"✅ Verified\" / \"verified reachable\") status, so it's clear at a glance which devices have actually proven themselves. Also fixed: the web portal's per-device label never showed \"Quiet\" for Fair+verified devices — it only used that distinction for the summary counts and Active Issues filtering — so the portal card text now matches the Hubitat app page. Also fixed: the auto-reset-on-recovery block only wrote capability data back when clearing a failed ping status, silently leaving stale weak-trust timestamps in place on every other recovery.</span><br><br>" +
                       "<b>v1.5.8</b> — Bug fix: Hue/Konnected bulbs and sensors that sit unused for weeks stuck at Offline/Verifiable<br>" +
