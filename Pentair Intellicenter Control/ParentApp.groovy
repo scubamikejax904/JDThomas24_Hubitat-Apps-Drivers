@@ -5,6 +5,7 @@ definition(
     description: "Pentair IntelliCenter local integration for Hubitat",
     version: "1.6.2",
     category: "Convenience",
+    menu: "Integrations",
     iconUrl: "",
     iconX2Url: ""
 )
@@ -257,6 +258,3 @@ def childOff(String dni) {
     def bridge = getChildDevice("intellicenter-bridge-${app.id}")
     bridge?.circuitOff(dni)
 }
-
-
-
