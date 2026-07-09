@@ -281,7 +281,7 @@ def testLocalRaw() {
         log.warn "${device.displayName} testLocalRaw: connected — pausing 1s then sending get_status"
         pauseExecution(1000)
         localExecute("get_prop", """["get_status"]""")
-        log.warn "${device.displayName} testLocalRaw: command sent — if parse() fires you will see it below within 3s"
+        log.warn "${device.displayName} testLocalRaw: command sent — if parse() fires you will see it above within 3s"
     } catch (Exception e) {
         log.error "${device.displayName} testLocalRaw: connect/send failed: ${e.message}"
         state.localConnected = false
