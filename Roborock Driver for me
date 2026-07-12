@@ -6,20 +6,26 @@
  *
  *      http://www.apache.org/licenses/LICENSE-2.0
  *
- *  Roborock Robot Vacuum
+ *  Roborock Robot Vacuum JD
  *
  *  Thanks to: 'copystring' and the https://www.npmjs.com/package/iobroker.roborock project
  *             'revo89' https://gist.github.com/rovo89/dff47ed19fca0dfdda77503e66c2b7c7#file-test-js-L166
  *             https://www.home-assistant.io/integrations/roborock/
  *
- *  Author: bloodtick
+ *  Author: jdthomas24 fork
  *  Date: 2024-04-18
  *
  *  PATCH: debounce offline events — healthStatus only fires offline after
  *         sustained disconnect, not on brief MQTT reconnects.
  *         Added offlineThreshold preference (default 120s).
+ *
+ *  PATCH: immediate status poll on reconnect — subscribe() now requests
+ *         get_status right away instead of waiting on the 5s scheduleRefresh
+ *         delay, so dock error / current state is caught as soon as the
+ *         connection is back, even if the live push that triggered the
+ *         disconnect was missed.
  */
-public static String version() {return "1.1.13"}
+public static String version() {return "1.1.14"}
 
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
@@ -38,7 +44,7 @@ import java.text.SimpleDateFormat
 @Field static final Map life = [ main:300, side:200, filter:150, sensor:30, highSpeed:300]
 
 metadata {
-	definition (name: "Roborock Robot Vacuum", namespace: "bloodtick", author: "Hubitat", importUrl:"https://raw.githubusercontent.com/bloodtick/Hubitat/main/roborockRobotVacuum/roborockRobotVacuum.groovy")
+	definition (name: "Roborock Robot Vacuum JD", namespace: "jdthomas24", author: "Hubitat", importUrl:"https://raw.githubusercontent.com/bloodtick/Hubitat/main/roborockRobotVacuum/roborockRobotVacuum.groovy")
 	{
         capability "Actuator"
         capability "Battery"
@@ -424,6 +430,10 @@ void subscribe() {
     logInfo "subscribe topic:$topic"
     interfaces.mqtt.subscribe(topic)
     runEvery30Minutes(refresh)
+    // ── RECONNECT POLL: ask for current status immediately, don't wait on
+    //    scheduleRefresh's delay. Catches dock error / state that changed
+    //    while we were disconnected, even if the live push was missed.
+    execute("get_prop", """["get_status"]""")
     scheduleRefresh()
     updateHomeData()
     executeQueue()
