@@ -1,6 +1,6 @@
 /**
  * Device Health Monitor
- * Version: 1.5.10
+ * Version: 1.5.11
  *
  * Author: jdthomas24
  */
@@ -14,7 +14,7 @@ definition(
     importUrl: "https://raw.githubusercontent.com/jdthomas24/Hubitat-Apps-Drivers/refs/heads/main/Device%20Health%20Monitor/Raw%20Code/DeviceHealthMonitor.groovy",
     iconUrl: "",
     iconX2Url: "",
-    version: "1.5.10",
+    version: "1.5.11",
     doNotFocus: true,
     oauth: true
 )
@@ -1305,7 +1305,7 @@ def mainPage() {
             input "debugMode", "bool",
                   title: "Debug Logging (auto-disables after 30 min)",
                   defaultValue: false, submitOnChange: true
-            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.5.10</span>"
+            paragraph "<span style='color:#94a3b8; font-size:11px;'>Device Health Monitor v1.5.11</span>"
         }
     }
 }
