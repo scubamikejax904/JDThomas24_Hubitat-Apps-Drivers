@@ -2026,13 +2026,13 @@ def updateHealth(device) {
                 capData.weakTrustCooldownUntil = now() + maxPingAgeMs
                 capMap[id as String] = capData
                 state.deviceCapabilities = capMap
-                if (debugEnabled()) log.debug "${device.displayName}: weak trust ceiling reached (${(weakCeilingMs/3600000).round(0)}h) with no genuine confirmation — forcing real ${currentHealth} for at least ${(maxPingAgeMs/3600000).round(0)}h"
+               if (debugEnabled()) log.debug "${device.displayName}: weak trust ceiling reached (${(weakCeilingMs/3600000).setScale(0, BigDecimal.ROUND_HALF_UP)}h) with no genuine confirmation — forcing real ${currentHealth} for at least ${(maxPingAgeMs/3600000).setScale(0, BigDecimal.ROUND_HALF_UP)}h"
                 // currentHealth stays Poor/Offline this cycle — fairHold was already evaluated above
             } else if (pingAge < maxPingAgeMs) {
                 // Trust still valid — cap at Fair, display as Quiet
                 state.health[id] = "Fair"
                 currentHealth    = "Fair"
-                if (debugEnabled()) log.debug "${device.displayName}: capped at Fair — verified reachable (ping age ${(pingAge/3600000).round(1)}h, trust=${capChk.pingTrustSource ?: 'confirmed'})"
+                if (debugEnabled()) log.debug "${device.displayName}: capped at Fair — verified reachable (ping age ${(pingAge/3600000).setScale(1, BigDecimal.ROUND_HALF_UP)}h, trust=${capChk.pingTrustSource ?: 'confirmed'})"
             } else {
                 // Trust expired — null out pingWorks so fairHold gets a fresh attempt.
                 // weakTrustFirstGranted is deliberately preserved here (not cleared) so
