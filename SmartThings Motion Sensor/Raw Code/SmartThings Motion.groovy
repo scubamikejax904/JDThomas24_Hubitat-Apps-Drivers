@@ -1,7 +1,7 @@
 /*
 SmartThings Motion Sensor Enhanced
 
-Version: 1.7.8
+Version: 1.7.9
 Author: jdthomas24
 Namespace: jdthomas24
 
@@ -56,7 +56,7 @@ Changes in 1.7.6:
 import hubitat.zigbee.clusters.iaszone.ZoneStatus
 import hubitat.zigbee.zcl.DataType
 
-def driverVersion() { return "1.7.8" }
+def driverVersion() { return "1.7.9" }
 
 metadata {
     definition(
@@ -91,8 +91,8 @@ metadata {
         input name: "batteryReportMinutes", type: "enum",
               title: "Battery Reporting Interval (minutes)",
               description: "How often the device reports battery. Converted to seconds for Zigbee reporting.",
-              options: ["30","60","120","240","360"],
-              defaultValue: "240"
+              options: ["30m","60m","120m","240m","360m"],
+              defaultValue: "240m"
         input name: "infoLogging",  type: "bool", title: "Enable Info Logging",                              defaultValue: true
         input name: "debugLogging", type: "bool", title: "Enable Debug Logging (auto-disables after 30 min)", defaultValue: false
     }
@@ -169,7 +169,7 @@ def updated() {
 }
 
 def configure() {
-    def battInterval = (batteryReportMinutes ?: "240").toInteger() * 60
+    def battInterval = ((batteryReportMinutes ?: "240m") - "m").toInteger() * 60
 
     def cmds = []
     cmds += zigbee.batteryConfig()
